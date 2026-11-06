@@ -111,11 +111,12 @@ final class ShellModel: ObservableObject {
         workspaceName = name
         pages = session.pages
         saveStatus = .saved
-        section = .home
+        // Файл, открытый из Finder при запуске, важнее восстановления последней страницы.
+        if section != .files { section = .home }
         UserDefaults.standard.set(store.layout.root.path, forKey: lastWorkspaceKey)
         try await reloadBackups()
         // После перезапуска пользователь возвращается к той же странице.
-        if let raw = UserDefaults.standard.string(forKey: lastPageKey), let id = UUID(uuidString: raw), pages.contains(where: { $0.id == id }) {
+        if section != .files, let raw = UserDefaults.standard.string(forKey: lastPageKey), let id = UUID(uuidString: raw), pages.contains(where: { $0.id == id }) {
             try await show(id)
         }
     }

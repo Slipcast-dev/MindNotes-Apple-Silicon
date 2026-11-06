@@ -57,6 +57,26 @@ struct RootView: View {
 struct WindowChrome: NSViewRepresentable {
     let notes: Bool
 
+    /// Скрытый файловый режим оставляет в заголовке кнопку своей боковой панели; вне «Файлов» она не нужна.
+    final class Coordinator {
+        private var removed: NSToolbarItem.Identifier?
+
+        func syncSidebarToggle(window: NSWindow, visible: Bool) {
+            guard let toolbar = window.toolbar else { return }
+            if visible {
+                if let id = removed {
+                    toolbar.insertItem(withItemIdentifier: id, at: 0)
+                    removed = nil
+                }
+            } else if let index = toolbar.items.firstIndex(where: { $0.itemIdentifier.rawValue.lowercased().contains("togglesidebar") }) {
+                removed = toolbar.items[index].itemIdentifier
+                toolbar.removeItem(at: index)
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> NSView { NSView() }
 
     func updateNSView(_ view: NSView, context: Context) {
@@ -64,6 +84,7 @@ struct WindowChrome: NSViewRepresentable {
             guard let window = view.window else { return }
             window.titleVisibility = notes ? .hidden : .visible
             window.titlebarAppearsTransparent = notes
+            context.coordinator.syncSidebarToggle(window: window, visible: !notes)
             if notes {
                 window.isOpaque = true
                 window.backgroundColor = Tokens.paperNS
