@@ -16,7 +16,8 @@ Sources/Grizzly/
   BlockEditor/UI/            # Interim/ в M2, нативный редактор в M3
   Backup/                    # TarWriter/Reader, Manifest, BackupService, RestoreService
   Shell/                     # RootView, ShellModel, NotesSidebar, Screens/, DesignTokens
-  Search/ Databases/ ImportExport/   # M4–M7
+  ImportExport/              # чтение файлов, импорт Markdown
+  Search/ Databases/         # M4–M6
 ```
 
 | Слой | Импорт | Может использовать |
@@ -33,7 +34,6 @@ Sources/Grizzly/
 
 Тесты новых слоёв: `tests/swift-notes/` и `scripts/test-notes.sh`, `-Onone`, файлы через `find`. Аварии имитируются самоперезапуском с `--crash-at=<точка>` и `_exit`; заполненный диск — `PRAGMA max_page_count`; отсутствие прав — `chmod 0500`; время — порт `SaveScheduler`.
 
-Занятые имена в модуле: файлы `Search.swift`, `Document.swift`, `Settings.swift`; типы `SidebarSection`, `EditorView`. Новые: `ShellSection`, `BlockEditorView`.
 
 ## 2. Схема v1
 
@@ -79,26 +79,21 @@ UUID — TEXT в нижнем регистре, время — INTEGER (мс UTC
 
 ## 5. Изоляция
 
-Единая точка: `Core/AppEdition.swift` (`bundleID = local.personal.GrizzlyNotes`, `displayName`, `supportDirectoryName`, `updatesEnabled = false`).
-
-- `LibraryStore`: имя каталога из `AppEdition`, перенос `MDReader` выключен.
-- `build-app.sh`, `make-dmg.sh`: новый id и `Grizzly Notes.app`; `LSHandlerRank` `Alternate`. `UserDefaults` разделяются автоматически.
-- `QuickLook/Info.plist`: `<id>.QuickLook`.
-- `UpdateManager.check/install`: `guard AppEdition.updatesEnabled`; блок обновлений в настройках скрыт.
-- Не трогать: `electron/`, `tests/*.cjs` (кроме нового `edition.test.cjs`), `AppPatch`, `Core/Updater.swift`.
+Единая точка: `Core/AppEdition.swift`. Отдельные идентификатор и каталог данных; `UserDefaults` разделяются автоматически; сборка не заявляет себя обработчиком по умолчанию. `electron/` не входит в личную сборку.
 
 ## 6. Оболочка
 
-- Корень окна — `RootView`. Общие модификаторы `ContentView` остаются в нём; toolbar файлов — `FilesToolbar` при `section == .files`.
-- Левая колонка — `NotesSidebar` по макету. В разделе «Файлы» она заменяется на «← Пространство» и существующий `SidebarView` (сознательное отступление от макета: библиотеке нужна боковая панель).
-- Детальная область: `DetailView` монтируется при первом входе и держится скрытым, потому что undo и прокрутка живут во view.
-- `ShellModel` принадлежит `AppDelegate`, новых singleton нет.
-- Открытие файла переключает на «Файлы» без импорта. Файловые команды меню отключены вне этого раздела.
+- Корень окна — `RootView`, раскладка `NotesLayout`: боковая панель 240, хлебные крошки 54, содержимое.
+- Заголовок окна: название и переключатель темы, больше ничего.
+- `ShellModel` принадлежит `AppDelegate`, новых singleton нет. Навигация последовательна (`enqueue`).
 - `Shell/DesignTokens.swift`: динамические `NSColor` со значениями из CSS макета.
+- Экран «Файлы»: просмотр и импорт файла как страницы (ADR-0006).
 
 ## 7. Редактор
 
 Единый `NSTextView` на страницу, TextKit 1: см. `adr/0005-block-editor.md`.
+
+Пункты меню, панель и «/» строятся из единого списка `EditorAction`.
 
 Команды — чистая функция `apply(EditCommand, BlockDocument, BlockSelection, IDGenerator) -> EditResult`: `changes` идут в `SaveCoordinator`, `inverse` в `UndoStack`.
 
@@ -106,7 +101,6 @@ UUID — TEXT в нижнем регистре, время — INTEGER (мс UTC
 
 ## 8. Правила
 
-- `AppState` и `Preferences` не расширять и не вызывать из новых слоёв, кроме Shell.
 - SwiftUI/AppKit запрещены в Domain, Services, Commands, Persistence, Backup; `sqlite3_*` только в Persistence.
 - Запись только через `WriteQueue`, одна транзакция на пакет; соединение не покидает свою очередь.
 - «Сохранено» выводится только из подтверждённого `committedSeq`.

@@ -4,6 +4,10 @@ import Foundation
 func handleExtraChild() async -> Bool {
     let args = CommandLine.arguments
     if args.contains("--bench") { try? await benchCommit(); exit(0) }
+    if let i = args.firstIndex(of: "--seed-types"), args.count > i + 1 {
+        do { try await seedTypes(dir: URL(fileURLWithPath: args[i + 1])); exit(0) }
+        catch { print("seed error \(error)"); exit(7) }
+    }
     if args.contains("--bench-editor") { try? await benchEditor(); exit(0) }
     if let i = args.firstIndex(of: "--seed-demo"), args.count > i + 1 {
         do { try await seedDemo(dir: URL(fileURLWithPath: args[i + 1])); _exit(0) }
@@ -66,4 +70,44 @@ func benchCommit() async throws {
         print(String(format: "commit ms: p50=%.1f p95=%.1f max=%.1f", times[100], times[190], times[199]))
         ws.close()
     }
+}
+
+/// Страница со всеми типами блоков для проверки вида.
+@MainActor
+func seedTypes(dir: URL) async throws {
+    let ws = try SQLiteWorkspace.create(at: dir, name: "Моё пространство")
+    let session = WorkspaceSession(store: ws, name: "Моё пространство")
+    let page = try await session.createPage(parent: nil, title: "Все блоки")
+    let e = try await session.open(page.id)
+    let md = """
+    Обычный абзац с **жирным**, *курсивом*, ~~зачёркнутым~~ и `кодом`.
+    # Заголовок 1
+    ## Заголовок 2
+    ### Заголовок 3
+    - Маркированный пункт
+    - Ещё пункт
+    1. Первый
+    2. Второй
+    - [ ] Задача
+    - [x] Сделанная задача
+    > Цитата: перед переносом заметок сделайте пробное восстановление.
+    ---
+    ```
+    let значение = 42
+    print(значение)
+    ```
+    """
+    try e.perform(.replaceRange(BlockSelection(block: e.document.blocks[0].id, offset: 0), MarkdownImport.fragments(from: md)))
+    let last = e.document.blocks.last!.id
+    let c = try e.perform(.insertBlock(after: last, type: .callout))
+    try e.perform(.setPlainText(block: c.selection!.anchor.blockID, text: "Выноска с важной мыслью."))
+    let t = try e.perform(.insertBlock(after: c.selection!.anchor.blockID, type: .toggle))
+    try e.perform(.setPlainText(block: t.selection!.anchor.blockID, text: "Сворачиваемый блок"))
+    let inner = try e.perform(.insertBlock(after: t.selection!.anchor.blockID, type: .paragraph))
+    try e.perform(.setPlainText(block: inner.selection!.anchor.blockID, text: "Вложенный текст"))
+    try e.perform(.indent(inner.selection!.anchor.blockID))
+    let b = e.document.blocks[4].id
+    try e.perform(.indent(e.document.blocks[5].id))
+    _ = b
+    try await session.close()
 }
