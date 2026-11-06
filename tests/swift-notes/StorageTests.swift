@@ -421,3 +421,190 @@ func runAssetDeleteTests() async {
         }
     }
 }
+
+func runSearchTests() async {
+    func para(_ page: UUID, _ key: String, _ text: String, marks: [String] = []) -> Block {
+        Block(id: UUID(), pageID: page, sortKey: key, content: BlockContent(runs: [TextRun(text, marks: marks)]), createdAt: 1)
+    }
+    func commit(_ ws: SQLiteWorkspace, _ blocks: [Block], deletes: [UUID] = [], titles: [UUID: String] = [:]) async throws {
+        var b = SaveBatch()
+        for x in blocks { b.upserts[x.id] = x }
+        b.deletes = Set(deletes)
+        b.titles = titles
+        try await ws.commit(b)
+    }
+
+    await test("Поиск: заголовки и текст, префиксы, регистр, ё/е, й≠и, спецсимволы") {
+        try await withTempDir { dir in
+            let ws = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "A")
+            let a = try await ws.createPage(parent: nil, title: "Ёлочные игрушки", id: UUID(), now: 1)
+            let b = try await ws.createPage(parent: nil, title: "Заметки", id: UUID(), now: 1)
+            let block = para(b.id, "a0", "Купить ёлку и МАЙСКИЙ мёд 🍯 для дома")
+            try await commit(ws, [block])
+            func ids(_ q: String) async throws -> [UUID] { try await ws.search(q).map(\.pageID) }
+            var r = try await ids("елоч")
+            checkEqual(r, [a.id], "префикс заголовка, ё как е")
+            r = try await ids("ЁЛОЧНЫЕ")
+            checkEqual(r, [a.id], "регистр")
+            r = try await ids("елку")
+            checkEqual(r, [b.id], "текст блока")
+            r = try await ids("майский мед")
+            checkEqual(r, [b.id], "несколько слов")
+            r = try await ids("маиский")
+            checkEqual(r, [], "й и и различаются")
+            r = try await ids("  ")
+            checkEqual(r, [])
+            r = try await ids("\" OR * NEAR( -")
+            checkEqual(r.count, 0, "спецсимволы не ломают запрос")
+            let hit = try await ws.search("майский").first
+            checkEqual(hit?.blockID, block.id, "переход к блоку")
+            check(hit?.snippet.contains("МАЙСКИЙ") == true, "фрагмент исходного текста: \(hit?.snippet ?? "")")
+            ws.close()
+        }
+    }
+
+    await test("Поиск: правка, переименование, удаление блока, корзина, перестройка индекса") {
+        try await withTempDir { dir in
+            let w = dir.appendingPathComponent("w")
+            var ws = try SQLiteWorkspace.create(at: w, name: "A")
+            let p = try await ws.createPage(parent: nil, title: "Старое", id: UUID(), now: 1)
+            var block = para(p.id, "a0", "первое слово")
+            try await commit(ws, [block])
+            block.setContent(BlockContent(text: "другое значение"))
+            try await commit(ws, [block])
+            var r = try await ws.search("первое")
+            check(r.isEmpty, "старый текст ушёл из индекса")
+            r = try await ws.search("значение")
+            checkEqual(r.count, 1, "новый текст")
+            try await commit(ws, [], titles: [p.id: "Новое имя"])
+            r = try await ws.search("старое")
+            check(r.isEmpty, "старый заголовок")
+            r = try await ws.search("новое")
+            checkEqual(r.first?.title, "Новое имя")
+            let batch = UUID()
+            try await ws.trashPage(p.id, batch: batch, now: 2)
+            r = try await ws.search("значение")
+            check(r.isEmpty, "корзина исключена")
+            _ = try await ws.restoreTrash(batch: batch)
+            r = try await ws.search("значение")
+            checkEqual(r.count, 1, "восстановленная снова находится")
+            try await commit(ws, [], deletes: [block.id])
+            r = try await ws.search("значение")
+            check(r.isEmpty, "удалённый блок")
+            // Индекс производный: разрушенный восстанавливается из данных.
+            let keep = para(p.id, "a1", "сохранённый текст")
+            try await commit(ws, [keep])
+            try ws.maintenanceWrite { try $0.execute("DELETE FROM search_index; DELETE FROM page_links") }
+            r = try await ws.search("сохраненный")
+            check(r.isEmpty, "индекс очищен")
+            try await ws.rebuildSearchIndex()
+            r = try await ws.search("сохраненный")
+            checkEqual(r.count, 1, "перестроен")
+            ws.close()
+            ws = try SQLiteWorkspace.open(at: w)
+            r = try await ws.search("сохраненный")
+            checkEqual(r.count, 1, "после перезапуска")
+            ws.close()
+        }
+    }
+
+    await test("Миграция v3: старые страницы и блоки попадают в индекс и ссылки") {
+        try await withTempDir { dir in
+            let w = dir.appendingPathComponent("w")
+            try FileManager.default.createDirectory(at: w, withIntermediateDirectories: true)
+            let c = try SQLiteConnection(path: WorkspaceLayout(root: w).database.path, create: true)
+            try c.execute("PRAGMA application_id=\(Migrations.applicationID)")
+            try c.execute(try String(contentsOfFile: "tests/fixtures/notes/schema_v1.sql"))
+            try c.execute("PRAGMA user_version=1")
+            let page = UUID(), other = UUID(), block = UUID()
+            let json = #"{"runs":[{"t":"см. страницу","m":["\#(PageLink.mark(other))"]}]}"#
+            try c.run("INSERT INTO workspace_meta(key, value) VALUES('workspace_id', ?), ('name', 'С')", [SQLValue(UUID())])
+            try c.run("INSERT INTO pages(id, sort_key, title, created_at, updated_at) VALUES(?, 'a0', 'Давняя страница', 1, 1), (?, 'a1', 'Цель', 1, 1)", [SQLValue(page), SQLValue(other)])
+            try c.run("INSERT INTO blocks(id, page_id, sort_key, type, content_v, content_json, plain_text, created_at, updated_at) VALUES(?,?,'a0','paragraph',1,?,'см. страницу',1,1)", [SQLValue(block), SQLValue(page), .text(json)])
+            c.close()
+            let ws = try SQLiteWorkspace.open(at: w)
+            let titles = try await ws.search("давняя")
+            checkEqual(titles.first?.pageID, page, "заголовок в индексе")
+            let texts = try await ws.search("страницу")
+            checkEqual(texts.first?.blockID, block)
+            let links = try await ws.backlinks(to: other)
+            checkEqual(links.map(\.blockID), [block], "ссылки собраны")
+            ws.close()
+        }
+    }
+
+    await test("Обратные ссылки: появление, снятие, корзина источника, цель в корзине") {
+        try await withTempDir { dir in
+            let ws = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "A")
+            let target = try await ws.createPage(parent: nil, title: "Цель", id: UUID(), now: 1)
+            let source = try await ws.createPage(parent: nil, title: "Источник", id: UUID(), now: 1)
+            var block = para(source.id, "a0", "ссылка", marks: [PageLink.mark(target.id)])
+            try await commit(ws, [block])
+            var links = try await ws.backlinks(to: target.id)
+            checkEqual(links.first?.title, "Источник")
+            checkEqual(links.first?.text, "ссылка")
+            try await commit(ws, [], titles: [target.id: "Переименованная"])
+            links = try await ws.backlinks(to: target.id)
+            checkEqual(links.count, 1, "переименование цели не ломает ссылку")
+            let batch = UUID()
+            try await ws.trashPage(source.id, batch: batch, now: 2)
+            links = try await ws.backlinks(to: target.id)
+            check(links.isEmpty, "ссылка из корзины не показывается")
+            _ = try await ws.restoreTrash(batch: batch)
+            block.setContent(BlockContent(text: "без ссылки"))
+            try await commit(ws, [block])
+            links = try await ws.backlinks(to: target.id)
+            check(links.isEmpty, "ссылка снята")
+            ws.close()
+        }
+    }
+
+    await test("Дублирование: новые UUID, поддерево, внутренние ссылки переназначены, внешние сохранены") {
+        try await withTempDir { dir in
+            let w = dir.appendingPathComponent("w")
+            let ws = try SQLiteWorkspace.create(at: w, name: "A")
+            let root = try await ws.createPage(parent: nil, title: "Проект", id: UUID(), now: 1)
+            let child = try await ws.createPage(parent: root.id, title: "Часть", id: UUID(), now: 1)
+            let outside = try await ws.createPage(parent: nil, title: "Снаружи", id: UUID(), now: 1)
+            let tag = try await ws.createTag(name: "Важно", color: nil, now: 1)
+            try await ws.setTag(tag.id, on: root.id, true)
+            try await ws.setPageIcon(root.id, icon: "🐻")
+            let inner = para(root.id, "a0", "на часть", marks: [PageLink.mark(child.id)])
+            let outer = para(root.id, "a1", "наружу", marks: [PageLink.mark(outside.id)])
+            let nested = Block(id: UUID(), pageID: root.id, parentID: inner.id, sortKey: "a0", content: BlockContent(text: "вложенный"), createdAt: 1)
+            try await commit(ws, [inner, outer, nested, para(child.id, "a0", "текст части")])
+            let copy = try await ws.duplicatePage(root.id, title: "Проект (копия)", ids: RandomIDs(), now: 5)
+            let pages = try await ws.allPages()
+            let copyPage = pages.first { $0.id == copy }!
+            checkEqual(copyPage.title, "Проект (копия)")
+            checkEqual(copyPage.icon, "🐻")
+            check(copyPage.sortKey > root.sortKey && copyPage.sortKey < outside.sortKey, "сразу за исходной")
+            let copyChild = pages.first { $0.parentID == copy }!
+            checkEqual(copyChild.title, "Часть")
+            check(copyChild.id != child.id, "новый UUID")
+            let blocks = try await ws.blocks(ofPage: copy)
+            checkEqual(blocks.count, 3)
+            check(Set(blocks.map(\.id)).isDisjoint(with: [inner.id, outer.id, nested.id]), "новые UUID блоков")
+            let cin = blocks.first { $0.plainText == "на часть" }!
+            checkEqual(PageLink.targets(of: cin), [copyChild.id], "внутренняя ссылка на копию")
+            let cout = blocks.first { $0.plainText == "наружу" }!
+            checkEqual(PageLink.targets(of: cout), [outside.id], "внешняя ссылка прежняя")
+            checkEqual(blocks.first { $0.plainText == "вложенный" }?.parentID, cin.id, "вложенность блоков")
+            let tags = try await ws.pageTags()
+            checkEqual(tags[copy], [tag.id], "теги скопированы")
+            let found = try await ws.search("текст части")
+            checkEqual(found.count, 2, "копия в поиске")
+            let links = try await ws.backlinks(to: outside.id)
+            checkEqual(links.count, 2, "ссылки копии учтены")
+            try await ws.setFavorite(root.id, true)
+            try await ws.setFavorite(copy, true)
+            var fav = try await ws.allPages()
+            let keys = fav.filter { $0.favoriteKey != nil }.sorted { $0.favoriteKey! < $1.favoriteKey! }.map(\.id)
+            checkEqual(keys, [root.id, copy], "порядок избранного")
+            try await ws.setFavorite(root.id, false)
+            fav = try await ws.allPages()
+            checkEqual(fav.first { $0.id == root.id }?.favoriteKey, nil)
+            ws.close()
+        }
+    }
+}

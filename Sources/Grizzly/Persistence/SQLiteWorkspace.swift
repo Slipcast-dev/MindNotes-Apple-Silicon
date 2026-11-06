@@ -202,9 +202,15 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
                 let page = Page(id: id, parentID: parent, sortKey: SortKey.between(last, nil), title: title, createdAt: now)
                 try db.run("INSERT INTO pages(id, parent_id, sort_key, title, created_at, updated_at) VALUES(?,?,?,?,?,?)",
                            [SQLValue(id), SQLValue(parent), .text(page.sortKey), .text(title), .int(now), .int(now)])
+                if try Self.indexExists(db) { try SearchIndex.updateTitle(db, page: id, title: title) }
                 return page
             }
         }
+    }
+
+    /// Индекс появляется с версией схемы 3; старые миграции и их проверки работают без него.
+    private static func indexExists(_ db: SQLiteConnection) throws -> Bool {
+        try db.scalarInt("SELECT 1 FROM sqlite_master WHERE name='search_index'") != nil
     }
 
     private static func exists(_ db: SQLiteConnection, _ id: UUID) throws -> Bool {
@@ -218,6 +224,7 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
             """, [.text(page.title), SQLValue(page.icon), SQLValue(page.coverAssetID), .int(page.fullWidth ? 1 : 0),
                   SQLValue(page.favoriteKey), .int(page.updatedAt), SQLValue(page.id)])
             if db.changes == 0 { throw WorkspaceError.pageNotFound(page.id) }
+            if try Self.indexExists(db) { try SearchIndex.updateTitle(db, page: page.id, title: page.title) }
         }
     }
 
@@ -316,6 +323,8 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
     func purgeTrash(batch: UUID) async throws {
         try await writer.run { db in
             try db.transaction {
+                let doomed = try db.query("SELECT id FROM pages WHERE trash_batch_id = ? AND deleted_at IS NOT NULL", [SQLValue(batch)]) { $0.uuid(0) }
+                if try Self.indexExists(db) { for id in doomed.compactMap({ $0 }) { try SearchIndex.removePage(db, page: id) } }
                 try db.run("DELETE FROM pages WHERE trash_batch_id = ? AND deleted_at IS NOT NULL", [SQLValue(batch)])
             }
         }
@@ -330,8 +339,10 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
         try await writer.run { [weak self] db in
             try db.transaction {
                 try db.execute("PRAGMA defer_foreign_keys=ON") // Родитель может войти в пакет позже потомка.
+                let indexed = try Self.indexExists(db)
                 for id in batch.deletes {
                     try db.run("DELETE FROM blocks WHERE id=?", [SQLValue(id)])
+                    if indexed { try SearchIndex.removeBlock(db, id: id) }
                 }
                 for (b, json) in rows {
                     try db.run("""
@@ -342,9 +353,11 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
                         plain_text=excluded.plain_text, updated_at=excluded.updated_at
                     """, [SQLValue(b.id), SQLValue(b.pageID), SQLValue(b.parentID), .text(b.sortKey), .text(b.type.rawValue),
                           .int(Int64(b.contentVersion)), .text(json), .text(b.plainText), .int(b.createdAt), .int(b.updatedAt)])
+                    if indexed { try SearchIndex.updateBlock(db, id: b.id, page: b.pageID, text: b.plainText, targets: PageLink.targets(of: b)) }
                 }
                 for (id, title) in batch.titles {
                     try db.run("UPDATE pages SET title=?, updated_at=? WHERE id=?", [.text(title), .int(now), SQLValue(id)])
+                    if indexed { try SearchIndex.updateTitle(db, page: id, title: title) }
                 }
                 for id in batch.touchedPages {
                     try db.run("UPDATE pages SET updated_at=?, content_rev=content_rev+1 WHERE id=?", [.int(now), SQLValue(id)])

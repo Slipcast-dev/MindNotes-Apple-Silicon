@@ -10,9 +10,14 @@ enum Migrations {
     static let applicationID: Int64 = 0x47525A4E // "GRZN"
 
     /// Полный список миграций. Изменять уже выпущенные миграции нельзя: только добавлять новые и fixture прошлой версии.
-    static let all: [Migration] = [v1, v2]
+    static let all: [Migration] = [v1, v2, v3]
 
     static var supportedVersion: Int { all.last?.version ?? 0 }
+
+    private static let v3 = Migration(version: 3, name: "поиск и ссылки") { db in
+        try db.execute(schemaV3)
+        try SearchIndex.rebuild(db)
+    }
 
     private static let v2 = Migration(version: 2, name: "теги") { db in
         try db.execute(schemaV2)
@@ -22,6 +27,18 @@ enum Migrations {
         try db.execute("PRAGMA application_id=\(applicationID)")
         try db.execute(schemaV1)
     }
+
+    /// Индекс и ссылки — производные данные: полностью перестраиваются из страниц и блоков.
+    static let schemaV3 = """
+    CREATE VIRTUAL TABLE search_index USING fts5(page_id UNINDEXED, block_id UNINDEXED, text, tokenize = "unicode61 remove_diacritics 0");
+    CREATE TABLE page_links (
+        block_id TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+        from_page TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        to_page TEXT NOT NULL,
+        PRIMARY KEY(block_id, to_page)
+    ) WITHOUT ROWID;
+    CREATE INDEX page_links_to ON page_links(to_page);
+    """
 
     static let schemaV2 = """
     CREATE TABLE tags (
