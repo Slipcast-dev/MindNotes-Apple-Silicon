@@ -20,7 +20,7 @@ struct PageScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 let path = shell.path(of: editor.pageID).map(\.title)
-                Eyebrow(text: path.isEmpty ? L("Страница") : path.joined(separator: " / "))
+                Eyebrow(text: path.isEmpty ? (page?.isFolder == true ? L("Папка") : L("Страница")) : path.joined(separator: " / "))
                 TextField("Без названия", text: $title, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(Tokens.titleFont())

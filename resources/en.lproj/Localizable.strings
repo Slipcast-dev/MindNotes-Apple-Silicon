@@ -510,3 +510,4 @@
 "Разметка" = "Markup";
 "Текст: без кода форматирования. Разметка: исходный текст с подсветкой и номерами строк." = "Text: without formatting code. Markup: source text with highlighting and line numbers.";
 "Нажмите на расширение, чтобы открывать такие файлы в Grizzly Notes. macOS может запросить подтверждение." = "Click an extension to open such files in Grizzly Notes. macOS may ask you to confirm.";
+"Папка" = "Folder";
