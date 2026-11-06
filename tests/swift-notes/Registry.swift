@@ -1,4 +1,7 @@
 import Foundation
 
-func runAllNotesTests() async {}
-func handleCrashChild() async -> Bool { false }
+func runAllNotesTests() async {
+    await runStorageTests()
+    await runSaveTests()
+    await runCrashTests()
+}

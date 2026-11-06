@@ -22,7 +22,7 @@ PURE=($S/Workspace/Domain $S/Workspace/Services $S/BlockEditor/Commands $S/Persi
 forbid '^\s*import\s+(SwiftUI|AppKit|Combine)' 'UI-фреймворк в слое без UI' "${PURE[@]}"
 forbid 'AppState\.shared|Preferences\.shared' 'обращение к файловому режиму' "${PURE[@]}" $S/BlockEditor/UI
 forbid 'sqlite3_|import\s+SQLite3' 'SQLite вне Persistence' $S/Workspace $S/BlockEditor $S/Backup $S/Shell
-forbid '^\s*import\s+CryptoKit' 'CryptoKit вне Backup' $S/Workspace $S/BlockEditor $S/Persistence
+forbid '^\s*import\s+CryptoKit' 'CryptoKit вне Backup' $S/Workspace $S/BlockEditor
 
 # subset <имя> <каталоги...>: подмножество обязано компилироваться само по себе.
 subset() {

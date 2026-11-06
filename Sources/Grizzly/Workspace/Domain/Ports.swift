@@ -33,14 +33,17 @@ struct SaveBatch: Equatable {
     var upserts: [UUID: Block] = [:]
     var deletes: Set<UUID> = []
     var touchedPages: Set<UUID> = []
+    /// Новые заголовки страниц: переименование подтверждается той же транзакцией, что и текст.
+    var titles: [UUID: String] = [:]
 
-    var isEmpty: Bool { upserts.isEmpty && deletes.isEmpty && touchedPages.isEmpty }
+    var isEmpty: Bool { upserts.isEmpty && deletes.isEmpty && touchedPages.isEmpty && titles.isEmpty }
 
     /// Новое важнее: повторная правка заменяет старую, удаление отменяет запись.
     mutating func merge(_ newer: SaveBatch) {
         for id in newer.deletes { upserts[id] = nil; deletes.insert(id) }
         for (id, block) in newer.upserts { upserts[id] = block; deletes.remove(id) }
         touchedPages.formUnion(newer.touchedPages)
+        titles.merge(newer.titles) { _, new in new }
     }
 }
 
