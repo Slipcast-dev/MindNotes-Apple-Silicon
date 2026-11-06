@@ -5,6 +5,7 @@ struct SidebarRow: View {
     let symbol: String
     var active = false
     var indent: CGFloat = 0
+    var tint: Color?
     let action: () -> Void
     @State private var hover = false
 
@@ -14,7 +15,7 @@ struct SidebarRow: View {
                 Image(systemName: symbol)
                     .font(.system(size: 11))
                     .frame(width: 16)
-                    .foregroundColor(active ? Tokens.accent : Tokens.muted)
+                    .foregroundColor(tint ?? (active ? Tokens.accent : Tokens.muted))
                 Text(title)
                     .font(.system(size: 13, weight: active ? .semibold : .regular))
                     .foregroundColor(active ? Tokens.accent : Tokens.ink)
@@ -52,11 +53,7 @@ struct NotesSidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 10) {
-                    Image(systemName: "sparkle")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(width: 35, height: 35)
-                        .background(RoundedRectangle(cornerRadius: 11).fill(Tokens.logo))
+                    BrandLogo()
                     VStack(alignment: .leading, spacing: 2) {
                         Text(shell.isOpen ? shell.workspaceName : AppEdition.displayName).font(.system(size: 14, weight: .bold)).lineLimit(1)
                         Text(shell.isOpen ? "Локально на этом Mac" : "Пространство не открыто").font(.system(size: 11)).foregroundColor(Tokens.muted)
@@ -66,6 +63,17 @@ struct NotesSidebar: View {
             // Меню стирает оформление своей подписи, поэтому прозрачное меню лежит поверх.
             .overlay {
                 Menu {
+                    ForEach(shell.knownWorkspaces) { item in
+                        Button { shell.switchWorkspace(item) } label: {
+                            if item.path == shell.workspaceRoot?.path { Label(item.name, systemImage: "checkmark") } else { Text(item.name) }
+                        }
+                        .disabled(!item.exists)
+                    }
+                    if !shell.knownWorkspaces.isEmpty { Divider() }
+                    if shell.isOpen {
+                        Button("Настроить пространство…") { shell.showsLookSheet = true }
+                        Divider()
+                    }
                     Button("Создать другое пространство…") { shell.presentCreate() }
                     Button("Открыть другое пространство…") { shell.presentOpen() }
                     Divider()
@@ -89,6 +97,13 @@ struct NotesSidebar: View {
                         ForEach(shell.children(of: nil)) { PageTreeRow(page: $0, depth: 0) }
                         SidebarRow(title: L("Новая страница"), symbol: "plus") { shell.createPage() }
                         SidebarRow(title: L("Новая папка"), symbol: "folder.badge.plus") { shell.createFolder() }
+
+                        if !shell.tags.isEmpty {
+                            SidebarGroup(title: L("Теги"))
+                            ForEach(shell.tags) { tag in
+                                SidebarRow(title: tag.name, symbol: "tag", active: shell.section == .tag(tag.id), tint: Tokens.swatch(tag.color)?.fg) { shell.goTag(tag.id) }
+                            }
+                        }
                     }
 
                     SidebarGroup(title: L("Пространство"))

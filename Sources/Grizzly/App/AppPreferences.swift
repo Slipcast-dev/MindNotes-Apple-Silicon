@@ -19,6 +19,13 @@ enum AppLanguage: String {
 
 /// Настройки внешнего вида. Оформление приложения всегда задаётся явно.
 final class AppPreferences: ObservableObject {
+    @Published var theme: AppTheme {
+        didSet {
+            Tokens.theme = theme
+            UserDefaults.standard.set(theme.rawValue, forKey: "theme")
+        }
+    }
+
     @Published var isDark: Bool {
         didSet {
             UserDefaults.standard.set(isDark, forKey: "isDark")
@@ -27,6 +34,9 @@ final class AppPreferences: ObservableObject {
     }
 
     init() {
+        let saved = AppTheme(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .grizzly
+        theme = saved
+        Tokens.theme = saved
         let stored = UserDefaults.standard.object(forKey: "isDark") as? Bool
         isDark = stored ?? (UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark")
     }

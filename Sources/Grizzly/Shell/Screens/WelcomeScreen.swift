@@ -22,6 +22,28 @@ struct WelcomeScreen: View {
                 Button("Открыть пространство…") { shell.presentOpen() }.buttonStyle(NotesButtonStyle())
                 Button("Восстановить из копии…") { shell.presentRestore() }.buttonStyle(NotesButtonStyle())
             }
+            if !shell.knownWorkspaces.isEmpty {
+                VStack(spacing: 4) {
+                    ForEach(shell.knownWorkspaces.prefix(6)) { item in
+                        Button { shell.switchWorkspace(item) } label: {
+                            HStack {
+                                Text(item.name).font(.system(size: 13, weight: .semibold))
+                                Spacer()
+                                Text(item.path).font(.system(size: 11)).foregroundColor(Tokens.muted).lineLimit(1).truncationMode(.middle)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Tokens.card))
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Tokens.line))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!item.exists)
+                    }
+                }
+                .frame(width: 480)
+                .padding(.top, 16)
+            }
             Button("Открыть файл на диске…") { shell.presentOpenFile() }
                 .buttonStyle(NotesButtonStyle(kind: .plain))
                 .padding(.top, 9)

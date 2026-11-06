@@ -35,6 +35,11 @@ struct PageScreen: View {
                     .foregroundColor(Tokens.muted)
                     .padding(.bottom, 24)
                 HStack(spacing: 9) {
+                    ForEach(shell.tagsOf(page: editor.pageID)) { tag in
+                        TagChip(tag: tag)
+                            .contextMenu { Button("Снять тег") { shell.toggleTag(tag.id, on: editor.pageID) } }
+                    }
+                    TagPickerButton(page: editor.pageID)
             Menu {
                         ForEach(Array(EditorAction.slashItems.enumerated()), id: \.offset) { _, item in
                             Button(item.title) { editor.controller.run(item.action) }

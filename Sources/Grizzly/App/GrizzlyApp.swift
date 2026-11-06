@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         preferences.apply()
+        shell.loadKnownWorkspaces()
         shell.restoreLastWorkspace()
         let paths = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
         for path in paths where FileManager.default.fileExists(atPath: path) { shell.previewFile(URL(fileURLWithPath: path)) }

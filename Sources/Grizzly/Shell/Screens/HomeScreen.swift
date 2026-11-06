@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeScreen: View {
     @EnvironmentObject private var shell: ShellModel
+    @State private var coverHover = false
 
     private var dateLine: String {
         let f = DateFormatter()
@@ -13,7 +14,21 @@ struct HomeScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                CoverArt().padding(.bottom, 26)
+                if shell.look.coverKind != .none {
+                    CoverView()
+                        .overlay(alignment: .topTrailing) {
+                            Button("Настроить") { shell.showsLookSheet = true }
+                                .buttonStyle(NotesButtonStyle())
+                                .opacity(coverHover ? 1 : 0)
+                                .padding(12)
+                        }
+                        .onHover { coverHover = $0 }
+                        .padding(.bottom, 26)
+                } else {
+                    Button { shell.showsLookSheet = true } label: { Label("Добавить обложку", systemImage: "photo") }
+                        .buttonStyle(NotesButtonStyle(kind: .plain))
+                        .padding(.bottom, 10)
+                }
                 Eyebrow(text: dateLine)
                 ScreenTitle(text: shell.workspaceName).padding(.top, 8).padding(.bottom, 9)
                 Text("Заметки, проекты и задачи — в одном месте.")

@@ -9,6 +9,15 @@ enum ShellSection: Equatable {
     case backups
     case settings
     case trash
+    case tag(UUID)
+}
+
+/// Пространство, которое уже открывали на этом Mac.
+struct KnownWorkspace: Codable, Equatable, Identifiable {
+    var path: String
+    var name: String
+    var id: String { path }
+    var exists: Bool { FileManager.default.fileExists(atPath: path) }
 }
 
 /// Сборка зависимостей и состояние оболочки. Принадлежит AppDelegate, новых singleton нет.
@@ -23,6 +32,12 @@ final class ShellModel: ObservableObject {
     }
     @Published var errorMessage: String?
     @Published private(set) var recentFiles: [URL] = []
+    @Published private(set) var look = WorkspaceLook()
+    @Published var showsLookSheet = false
+    @Published private(set) var knownWorkspaces: [KnownWorkspace] = []
+    @Published private(set) var tags: [Tag] = []
+    /// Теги страниц в порядке имён.
+    @Published private(set) var pageTags: [UUID: [UUID]] = [:]
     @Published var preview: FilePreview?
     @Published private(set) var trashItems: [TrashItem] = []
     @Published private(set) var backups: [BackupItem] = []
@@ -34,6 +49,8 @@ final class ShellModel: ObservableObject {
     private var navigation: Task<Void, Never>?
     private let lastWorkspaceKey = "lastWorkspacePath"
     private let lastPageKey = "lastPageID"
+    private let knownWorkspacesKey = "knownWorkspaces"
+    private var imageCache: [UUID: NSImage] = [:]
 
     var isOpen: Bool { session != nil }
     var workspaceRoot: URL? { store?.layout.root }
@@ -43,6 +60,154 @@ final class ShellModel: ObservableObject {
         var date: Date
         var size: Int64
         var id: URL { url }
+    }
+
+    // MARK: Пространства
+
+    func loadKnownWorkspaces() {
+        guard let data = UserDefaults.standard.data(forKey: knownWorkspacesKey),
+              let list = try? JSONDecoder().decode([KnownWorkspace].self, from: data) else { return }
+        knownWorkspaces = list
+    }
+
+    private func saveKnownWorkspaces() {
+        if let data = try? JSONEncoder().encode(knownWorkspaces) { UserDefaults.standard.set(data, forKey: knownWorkspacesKey) }
+    }
+
+    /// Последнее открытое — первым.
+    private func rememberWorkspace(path: String, name: String) {
+        knownWorkspaces.removeAll { $0.path == path }
+        knownWorkspaces.insert(KnownWorkspace(path: path, name: name), at: 0)
+        saveKnownWorkspaces()
+    }
+
+    /// Убирает из списка; папка и данные остаются на месте.
+    func forgetWorkspace(_ item: KnownWorkspace) {
+        knownWorkspaces.removeAll { $0.path == item.path }
+        saveKnownWorkspaces()
+    }
+
+    func switchWorkspace(_ item: KnownWorkspace) {
+        guard item.path != workspaceRoot?.path else { return }
+        guard item.exists else {
+            errorMessage = String(format: L("Папка пространства не найдена: %@"), item.path)
+            return
+        }
+        open(at: URL(fileURLWithPath: item.path))
+    }
+
+    // MARK: Вид пространства
+
+    func image(for asset: UUID?) -> NSImage? {
+        guard let asset else { return nil }
+        return imageCache[asset]
+    }
+
+    private func cacheImages(for look: WorkspaceLook) async {
+        guard let store else { return }
+        for id in [look.logoAsset, look.coverAsset].compactMap({ $0 }) where imageCache[id] == nil {
+            if let url = try? await store.assetURL(id), let image = NSImage(contentsOf: url) { imageCache[id] = image }
+        }
+        objectWillChange.send()
+    }
+
+    func saveLook(_ new: WorkspaceLook, name: String) {
+        enqueue {
+            guard let store = self.store else { return }
+            try await store.setLook(new)
+            self.look = new
+            await self.cacheImages(for: new)
+            let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !clean.isEmpty, clean != self.workspaceName {
+                try await store.rename(to: clean)
+                self.workspaceName = clean
+                self.rememberWorkspace(path: store.layout.root.path, name: clean)
+            }
+        }
+    }
+
+    /// Копирует изображение в пространство: архив и восстановление его сохранят.
+    func pickImage(_ done: @escaping (UUID) -> Void) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.prompt = L("Выбрать")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard NSImage(contentsOf: url) != nil else {
+            errorMessage = L("Не удалось прочитать изображение.")
+            return
+        }
+        enqueue {
+            guard let store = self.store else { return }
+            let asset = try await store.addAsset(copying: url, now: SystemClock().nowMillis())
+            self.imageCache[asset.id] = NSImage(contentsOf: url)
+            done(asset.id)
+        }
+    }
+
+    // MARK: Теги
+
+    private func reloadTags() async throws {
+        guard let store else { return }
+        tags = try await store.tags()
+        pageTags = try await store.pageTags()
+    }
+
+    func tagsOf(page: UUID) -> [Tag] {
+        (pageTags[page] ?? []).compactMap { id in tags.first { $0.id == id } }
+    }
+
+    func toggleTag(_ tag: UUID, on page: UUID) {
+        enqueue {
+            guard let store = self.store else { return }
+            try await store.setTag(tag, on: page, self.pageTags[page]?.contains(tag) != true)
+            try await self.reloadTags()
+        }
+    }
+
+    func addTag(named name: String, to page: UUID) {
+        enqueue {
+            guard let store = self.store else { return }
+            let tag = try await store.createTag(name: name, color: nil, now: SystemClock().nowMillis())
+            try await store.setTag(tag.id, on: page, true)
+            try await self.reloadTags()
+        }
+    }
+
+    func renameTag(_ id: UUID, to name: String) {
+        enqueue {
+            guard let store = self.store, !Tag.key(name).isEmpty else { return }
+            try await store.renameTag(id, to: name)
+            try await self.reloadTags()
+            // Тег мог объединиться с другим: экран старого показывать нельзя.
+            if !self.tags.contains(where: { $0.id == id }) { self.section = .home }
+        }
+    }
+
+    func setTagColor(_ id: UUID, _ color: String?) {
+        enqueue {
+            guard let store = self.store else { return }
+            try await store.setTagColor(id, color: color)
+            try await self.reloadTags()
+        }
+    }
+
+    func deleteTag(_ id: UUID) {
+        let alert = NSAlert()
+        alert.messageText = String(format: L("Удалить тег «%@»?"), tags.first { $0.id == id }?.name ?? "")
+        alert.informativeText = L("Тег исчезнет со всех страниц. Сами страницы останутся.")
+        alert.addButton(withTitle: L("Удалить"))
+        alert.addButton(withTitle: L("Отмена"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        enqueue {
+            guard let store = self.store else { return }
+            try await store.deleteTag(id)
+            try await self.reloadTags()
+            if self.section == .tag(id) { self.section = .home }
+        }
+    }
+
+    func goTag(_ id: UUID) {
+        leavePage { self.section = .tag(id) }
     }
 
     /// Обычные настройки приложения; не пространство. Каталог отдельный от оригинального Grizzly.
@@ -110,12 +275,18 @@ final class ShellModel: ObservableObject {
     private func adopt(_ store: SQLiteWorkspace) async throws {
         try await closeSession()
         let name = try await store.workspaceName()
+        let loadedLook = try await store.look()
         let session = WorkspaceSession(store: store, name: name)
         session.coordinator.onStatusChange = { [weak self] in self?.saveStatus = $0 }
         try await session.refreshPages()
         self.store = store
         self.session = session
         workspaceName = name
+        imageCache = [:]
+        look = loadedLook
+        await cacheImages(for: loadedLook)
+        rememberWorkspace(path: store.layout.root.path, name: name)
+        try await reloadTags()
         pages = session.pages
         saveStatus = .saved
         // Файл, открытый из Finder при запуске, важнее восстановления последней страницы.
@@ -144,6 +315,9 @@ final class ShellModel: ObservableObject {
         store = nil
         pages = []
         workspaceName = ""
+        look = WorkspaceLook()
+        tags = []
+        pageTags = [:]
     }
 
     // MARK: Страницы
@@ -229,6 +403,7 @@ final class ShellModel: ObservableObject {
                 if case .page = self.section { self.section = .home }
             }
             try await self.reloadTrash()
+            try await self.reloadTags()
             self.notice = L("Страница перемещена в корзину.")
         }
     }
@@ -239,6 +414,7 @@ final class ShellModel: ObservableObject {
             let moved = try await session.restore(batch: item.batchID)
             self.pages = session.pages
             try await self.reloadTrash()
+            try await self.reloadTags()
             self.notice = moved ? L("Прежняя родительская страница недоступна: страница восстановлена в корень.") : L("Страница восстановлена.")
         }
     }

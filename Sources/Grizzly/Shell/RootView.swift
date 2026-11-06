@@ -8,7 +8,9 @@ struct RootView: View {
 
     var body: some View {
         NotesLayout()
-            .background(WindowChrome())
+            .id(prefs.theme) // Токены читаются при построении: смена темы перестраивает дерево.
+            .sheet(isPresented: $shell.showsLookSheet) { WorkspaceLookSheet() }
+            .background(WindowChrome(theme: prefs.theme))
             .background(WindowFrameSaver(name: "GrizzlyNotesMainWindow"))
             .preferredColorScheme(prefs.isDark ? .dark : .light)
             .toolbar {
@@ -35,6 +37,7 @@ struct RootView: View {
 
 /// Заголовок окна в цвет бумаги.
 struct WindowChrome: NSViewRepresentable {
+    let theme: AppTheme
     func makeNSView(context: Context) -> NSView { NSView() }
 
     func updateNSView(_ view: NSView, context: Context) {
@@ -86,6 +89,7 @@ struct NotesLayout: View {
         case .settings: SettingsScreen()
         case .files: FilesScreen()
         case .trash: TrashScreen()
+        case .tag(let id): TagScreen(id: id).id(id)
         default: HomeScreen().background(Tokens.paper)
         }
     }
@@ -118,6 +122,7 @@ struct CrumbBar: View {
         case .backups: return L("Резервные копии")
         case .settings: return L("Настройки")
         case .trash: return L("Корзина")
+        case .tag(let id): return shell.tags.first { $0.id == id }?.name ?? L("Тег")
         case .files: return L("Файлы")
         default: return L("Главная")
         }
