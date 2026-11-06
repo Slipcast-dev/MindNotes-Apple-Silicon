@@ -23,12 +23,15 @@ func runStorageTests() async {
                 (try db.scalarText("PRAGMA journal_mode"), try db.scalarInt("PRAGMA foreign_keys"), try db.scalarInt("PRAGMA synchronous"),
                  try db.scalarInt("PRAGMA user_version"), try db.scalarInt("PRAGMA application_id"))
             }
-            checkEqual(mode, "wal"); checkEqual(fk, 1); checkEqual(sync, 2); checkEqual(version, 1)
+            checkEqual(mode, "wal"); checkEqual(fk, 1); checkEqual(sync, 2); checkEqual(version, Optional(Int64(Migrations.supportedVersion)))
             checkEqual(app, Migrations.applicationID)
             let live = try ws.maintenanceWrite { try schemaDump($0) }
             let fixture = try SQLiteConnection(path: dir.appendingPathComponent("f.sqlite").path, create: true)
             try fixture.execute(try String(contentsOfFile: "tests/fixtures/notes/schema_v1.sql"))
-            checkEqual(try schemaDump(fixture), live, "fixture и миграция дают одну схему")
+            try fixture.execute("PRAGMA user_version=1")
+            // База прошлой версии после миграции совпадает с новой.
+            try Migrator.migrate(fixture, migrations: Migrations.all, appVersion: "t", now: 1)
+            checkEqual(try schemaDump(fixture), live, "миграция v1 даёт ту же схему, что новая база")
             ws.close()
         }
     }
@@ -54,7 +57,7 @@ func runStorageTests() async {
             a.close()
             let db = WorkspaceLayout(root: w).database
             let before = try fileHash(db)
-            expectError(await checkThrows { try SQLiteWorkspace.open(at: w) }, .schemaTooNew(found: 99, supported: 1))
+            expectError(await checkThrows { try SQLiteWorkspace.open(at: w) }, .schemaTooNew(found: 99, supported: Migrations.supportedVersion))
             checkEqual(try fileHash(db), before, "файл базы не изменён")
         }
     }
@@ -103,12 +106,12 @@ func runStorageTests() async {
             a.close()
 
             var bad = SQLiteWorkspace.Options()
-            bad.migrations = Migrations.all + [Migration(version: 2, name: "ошибка") { db in
+            bad.migrations = Migrations.all + [Migration(version: Migrations.supportedVersion + 1, name: "ошибка") { db in
                 try db.execute("ALTER TABLE pages ADD COLUMN mood TEXT")
                 try db.execute("THIS IS NOT SQL")
             }]
             let failure = await checkThrows { try SQLiteWorkspace.open(at: w, options: bad) }
-            if case .migrationFailed(let v, _)? = failure as? WorkspaceError { checkEqual(v, 2) } else { check(false, "\(String(describing: failure))") }
+            if case .migrationFailed(let v, _)? = failure as? WorkspaceError { checkEqual(v, Migrations.supportedVersion + 1) } else { check(false, "\(String(describing: failure))") }
             let still = try SQLiteWorkspace.open(at: w)
             checkEqual(try still.maintenanceWrite { try $0.scalarInt("SELECT count(*) FROM pragma_table_info('pages') WHERE name='mood'") }, 0, "колонка откатилась")
             still.close()
@@ -119,14 +122,14 @@ func runStorageTests() async {
                 let copy = dir.appendingPathComponent("pre.sqlite")
                 try snapshotter.snapshotDatabase(to: copy)
                 let info = try SQLiteSnapshotInspector().inspect(copy)
-                checkEqual(info.schemaVersion, 1, "копия снята до миграции")
+                checkEqual(info.schemaVersion, Migrations.supportedVersion, "копия снята до миграции")
                 backedUp = true
             }
-            good.migrations = Migrations.all + [Migration(version: 2, name: "настроение") { try $0.execute("ALTER TABLE pages ADD COLUMN mood TEXT") }]
+            good.migrations = Migrations.all + [Migration(version: Migrations.supportedVersion + 1, name: "настроение") { try $0.execute("ALTER TABLE pages ADD COLUMN mood TEXT") }]
             let v2 = try SQLiteWorkspace.open(at: w, options: good)
             check(backedUp, "копия сделана")
-            checkEqual(try v2.maintenanceWrite { try $0.scalarInt("PRAGMA user_version") }, 2)
-            checkEqual(try v2.maintenanceWrite { try $0.scalarInt("SELECT count(*) FROM schema_migrations") }, 2)
+            checkEqual(try v2.maintenanceWrite { try $0.scalarInt("PRAGMA user_version") }, Optional(Int64(Migrations.supportedVersion + 1)))
+            checkEqual(try v2.maintenanceWrite { try $0.scalarInt("SELECT count(*) FROM schema_migrations") }, Optional(Int64(Migrations.supportedVersion + 1)))
             let page = try await v2.page(pid)
             checkEqual(page?.title, "До миграции")
             v2.close()
@@ -263,6 +266,139 @@ func runCrashTests() async {
             blocks = try await r.blocks(ofPage: page)
             checkEqual(blocks.map(\.plainText), ["после аварии: after-commit"], "подтверждённая правка восстановлена")
             r.close()
+        }
+    }
+}
+
+func runTagAndLookTests() async {
+    await test("Миграция настоящей базы v1: страницы целы, копия сделана, теги работают") {
+        try await withTempDir { dir in
+            let w = dir.appendingPathComponent("w")
+            try FileManager.default.createDirectory(at: w, withIntermediateDirectories: true)
+            let c = try SQLiteConnection(path: WorkspaceLayout(root: w).database.path, create: true)
+            try c.execute("PRAGMA application_id=\(Migrations.applicationID)")
+            try c.execute(try String(contentsOfFile: "tests/fixtures/notes/schema_v1.sql"))
+            try c.execute("PRAGMA user_version=1")
+            let wid = UUID(), page = UUID()
+            try c.run("INSERT INTO workspace_meta(key, value) VALUES('workspace_id', ?), ('name', 'Старое')", [SQLValue(wid)])
+            try c.run("INSERT INTO pages(id, sort_key, title, created_at, updated_at) VALUES(?, 'a0', 'Страница v1', 1, 1)", [SQLValue(page)])
+            c.close()
+            var options = SQLiteWorkspace.Options()
+            let copy = dir.appendingPathComponent("pre.grizzlybackup")
+            options.beforeMigration = { snapshotter, root in
+                try BackupService.create(workspaceRoot: root, snapshotter: snapshotter, inspector: SQLiteSnapshotInspector(), destination: copy, appVersion: "t", now: 1)
+            }
+            let ws = try SQLiteWorkspace.open(at: w, options: options)
+            check(FileManager.default.fileExists(atPath: copy.path), "копия до миграции")
+            let manifest = try RestoreService.verify(archive: copy)
+            checkEqual(manifest.schema_version, 1, "в копии старая схема")
+            let p = try await ws.page(page)
+            checkEqual(p?.title, "Страница v1")
+            let t = try await ws.createTag(name: "Проект", color: nil, now: 1)
+            try await ws.setTag(t.id, on: page, true)
+            let pt = try await ws.pageTags()
+            checkEqual(pt[page], [t.id])
+            ws.close()
+            // Архив старой версии восстанавливается и обновляется.
+            let target = dir.appendingPathComponent("r")
+            try RestoreService.restore(archive: copy, to: target, inspector: SQLiteSnapshotInspector(), newID: UUID(), now: 2)
+            let re = try SQLiteWorkspace.open(at: target)
+            let again = try await re.page(page)
+            checkEqual(again?.title, "Страница v1")
+            re.close()
+        }
+    }
+
+    await test("Теги: регистр, ё/е, переименование с объединением, удаление, корзина") {
+        try await withTempDir { dir in
+            let ws = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "A")
+            let a = try await ws.createPage(parent: nil, title: "А", id: UUID(), now: 1)
+            let b = try await ws.createPage(parent: nil, title: "Б", id: UUID(), now: 1)
+            let t1 = try await ws.createTag(name: " Ёлка ", color: "green", now: 1)
+            checkEqual(t1.name, "Ёлка", "пробелы убраны")
+            let same = try await ws.createTag(name: "елка", color: nil, now: 2)
+            checkEqual(same.id, t1.id, "тот же тег без учёта регистра и ё")
+            await checkThrows("пустое имя") { try await ws.createTag(name: "  ", color: nil, now: 1) }
+            let t2 = try await ws.createTag(name: "Работа", color: nil, now: 1)
+            try await ws.setTag(t1.id, on: a.id, true)
+            try await ws.setTag(t1.id, on: a.id, true)
+            try await ws.setTag(t2.id, on: a.id, true)
+            try await ws.setTag(t2.id, on: b.id, true)
+            var map = try await ws.pageTags()
+            checkEqual(map[a.id], [t1.id, t2.id], "порядок по имени, без повторов")
+            try await ws.setTag(t1.id, on: a.id, false)
+            map = try await ws.pageTags()
+            checkEqual(map[a.id], [t2.id])
+            try await ws.setTagColor(t2.id, color: "red")
+            try await ws.renameTag(t2.id, to: "Дела")
+            var all = try await ws.tags()
+            checkEqual(all.first { $0.id == t2.id }?.name, "Дела")
+            checkEqual(all.first { $0.id == t2.id }?.color, "red")
+            try await ws.setTag(t1.id, on: b.id, true)
+            try await ws.renameTag(t2.id, to: "ёлка")
+            all = try await ws.tags()
+            checkEqual(all.map(\.id), [t1.id], "теги объединились")
+            map = try await ws.pageTags()
+            checkEqual(map[a.id], [t1.id], "страницы перешли к оставшемуся тегу")
+            checkEqual(map[b.id], [t1.id])
+            try await ws.trashPage(b.id, batch: UUID(), now: 3)
+            map = try await ws.pageTags()
+            check(map[b.id] == nil, "страница в корзине не считается")
+            try await ws.deleteTag(t1.id)
+            map = try await ws.pageTags()
+            check(map.isEmpty, "удаление снимает тег")
+            let page = try await ws.page(a.id)
+            check(page != nil, "страницы целы")
+            ws.close()
+        }
+    }
+
+    await test("Вид пространства и файлы: сохранение, архив, восстановление") {
+        try await withTempDir { dir in
+            let w = dir.appendingPathComponent("w")
+            var ws = try SQLiteWorkspace.create(at: w, name: "Старое имя")
+            let source = dir.appendingPathComponent("обложка.PNG")
+            let body = Data((0..<4096).map { UInt8($0 % 251) })
+            try body.write(to: source)
+            let asset = try await ws.addAsset(copying: source, now: 1)
+            check(asset.relPath.hasSuffix(".png"), "расширение в нижнем регистре")
+            check(RestoreService.isAllowedAssetPath(asset.relPath), "путь проходит проверку архива")
+            checkEqual(asset.originalName, "обложка.PNG")
+            let url = try await ws.assetURL(asset.id)
+            checkEqual(try Data(contentsOf: url!), body, "копия совпадает")
+            try FileManager.default.removeItem(at: source)
+            check(FileManager.default.fileExists(atPath: url!.path), "копия не зависит от источника")
+            checkEqual((try? FileManager.default.contentsOfDirectory(atPath: w.appendingPathComponent("tmp").path))?.count, 0, "временных файлов нет")
+            await checkThrows("нет исходного файла") { try await ws.addAsset(copying: source, now: 1) }
+            var look = WorkspaceLook()
+            let initial = try await ws.look()
+            checkEqual(initial, look, "по умолчанию")
+            look.logoKind = .emoji
+            look.logoValue = "🐻"
+            look.logoColor = "blue"
+            look.coverKind = .image
+            look.coverAsset = asset.id
+            look.coverLabel = "Мой дом"
+            try await ws.setLook(look)
+            try await ws.rename(to: "Новое имя")
+            ws.close()
+            ws = try SQLiteWorkspace.open(at: w)
+            let reread = try await ws.look()
+            checkEqual(reread, look, "после перезапуска")
+            let name = try await ws.workspaceName()
+            checkEqual(name, "Новое имя")
+            let archive = dir.appendingPathComponent("a.grizzlybackup")
+            let r = try BackupService.create(workspaceRoot: w, snapshotter: ws, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 1)
+            check(r.isComplete, "обложка в архиве")
+            ws.close()
+            let target = dir.appendingPathComponent("r")
+            try RestoreService.restore(archive: archive, to: target, inspector: SQLiteSnapshotInspector(), newID: UUID(), now: 2)
+            let re = try SQLiteWorkspace.open(at: target)
+            let restoredLook = try await re.look()
+            checkEqual(restoredLook, look, "вид перенёсся")
+            let restored = try await re.assetURL(asset.id)
+            checkEqual(try Data(contentsOf: restored!), body, "картинка перенеслась")
+            re.close()
         }
     }
 }

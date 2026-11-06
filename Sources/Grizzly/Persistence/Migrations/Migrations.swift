@@ -10,14 +10,34 @@ enum Migrations {
     static let applicationID: Int64 = 0x47525A4E // "GRZN"
 
     /// Полный список миграций. Изменять уже выпущенные миграции нельзя: только добавлять новые и fixture прошлой версии.
-    static let all: [Migration] = [v1]
+    static let all: [Migration] = [v1, v2]
 
     static var supportedVersion: Int { all.last?.version ?? 0 }
+
+    private static let v2 = Migration(version: 2, name: "теги") { db in
+        try db.execute(schemaV2)
+    }
 
     private static let v1 = Migration(version: 1, name: "начальная схема") { db in
         try db.execute("PRAGMA application_id=\(applicationID)")
         try db.execute(schemaV1)
     }
+
+    static let schemaV2 = """
+    CREATE TABLE tags (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        name_key TEXT NOT NULL UNIQUE,
+        color TEXT,
+        created_at INTEGER NOT NULL
+    );
+    CREATE TABLE page_tags (
+        page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        PRIMARY KEY(page_id, tag_id)
+    ) WITHOUT ROWID;
+    CREATE INDEX page_tags_tag ON page_tags(tag_id);
+    """
 
     static let schemaV1 = """
     CREATE TABLE workspace_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;

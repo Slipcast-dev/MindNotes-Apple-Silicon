@@ -16,8 +16,8 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
 
     let layout: WorkspaceLayout
     private let lock: WorkspaceLock
-    private let writer: DatabaseQueue
-    private let reader: DatabaseQueue
+    let writer: DatabaseQueue
+    let reader: DatabaseQueue
     /// Точки для тестов аварий и отказов: `before-commit`, `after-commit`.
     var faultHook: ((String) throws -> Void)?
     private let clock: WallClock
