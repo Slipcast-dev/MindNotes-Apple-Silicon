@@ -47,7 +47,7 @@ struct PageScreen: View {
                         .buttonStyle(NotesButtonStyle(kind: .plain))
                 }
                 Rectangle().fill(Tokens.line).frame(height: 1).padding(.vertical, 18)
-                InterimPageEditor(editor: editor)
+                NativeBlockEditor(editor: editor).frame(height: editor.contentHeight)
                 let kids = shell.children(of: editor.pageID)
                 if !kids.isEmpty {
                     Text("Подстраницы").font(.system(size: 17, weight: .semibold)).padding(.top, 24).padding(.bottom, 10)

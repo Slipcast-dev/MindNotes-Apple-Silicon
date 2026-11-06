@@ -4,6 +4,7 @@ import Foundation
 func handleExtraChild() async -> Bool {
     let args = CommandLine.arguments
     if args.contains("--bench") { try? await benchCommit(); exit(0) }
+    if args.contains("--bench-editor") { try? await benchEditor(); exit(0) }
     if let i = args.firstIndex(of: "--seed-demo"), args.count > i + 1 {
         do { try await seedDemo(dir: URL(fileURLWithPath: args[i + 1])); _exit(0) }
         catch { print("seed error \(error)"); _exit(7) }

@@ -19,6 +19,8 @@ forbid() {
 }
 
 PURE=($S/Workspace/Domain $S/Workspace/Services $S/BlockEditor/Commands $S/Persistence $S/Backup)
+# Редактор пользуется AppKit, но не SwiftUI и не оболочкой.
+forbid '^\s*import\s+SwiftUI' 'SwiftUI в нативном редакторе' $S/BlockEditor/UI/Native
 forbid '^\s*import\s+(SwiftUI|AppKit|Combine)' 'UI-фреймворк в слое без UI' "${PURE[@]}"
 forbid 'AppState\.shared|Preferences\.shared' 'обращение к файловому режиму' "${PURE[@]}" $S/BlockEditor/UI
 forbid 'sqlite3_|import\s+SQLite3' 'SQLite вне Persistence' $S/Workspace $S/BlockEditor $S/Backup $S/Shell
@@ -40,5 +42,6 @@ subset Domain+Commands $S/Workspace/Domain $S/BlockEditor/Commands
 subset Domain+Persistence $S/Workspace/Domain $S/Persistence
 subset Domain+Commands+Services $S/Workspace/Domain $S/BlockEditor/Commands $S/Workspace/Services
 subset Domain+Backup $S/Workspace/Domain $S/Backup
+subset Domain+Commands+Services+Editor $S/Workspace/Domain $S/BlockEditor/Commands $S/Workspace/Services $S/BlockEditor/UI/Native
 
 exit $fail

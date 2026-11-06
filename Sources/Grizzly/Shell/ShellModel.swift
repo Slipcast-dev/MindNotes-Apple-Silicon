@@ -184,7 +184,8 @@ final class ShellModel: ObservableObject {
         guard let session else { return }
         let editorSession = try await session.open(id)
         pages = session.pages
-        editor = PageEditorModel(session: editorSession) { [weak self] in self?.errorMessage = $0 }
+        let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS)
+        editor = PageEditorModel(session: editorSession, style: style) { [weak self] in self?.errorMessage = $0 }
         section = .page(id)
         UserDefaults.standard.set(id.uuidString, forKey: lastPageKey)
     }
