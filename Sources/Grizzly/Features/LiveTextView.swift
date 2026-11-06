@@ -252,7 +252,7 @@ enum FormatMenu {
         }
         menu.addItem(sub(L("Размер текста"), sizes))
         menu.addItem(ClosureItem(L("Эмодзи и символы")) { NSApp.orderFrontCharacterPalette(nil) })
-        menu.addItem(ClosureItem(L("Настройки…")) { Task { @MainActor in SettingsOpener.show() } })
+        menu.addItem(ClosureItem(L("Настройки…")) { NotificationCenter.default.post(name: .openFileSettings, object: nil) })
     }
 
     private static func colorKey(_ name: String) -> String {

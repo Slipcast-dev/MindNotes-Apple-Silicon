@@ -2,6 +2,10 @@ import Foundation
 
 /// Страница рабочего пространства. Ключ — UUID; заголовок не уникален.
 struct Page: Equatable, Identifiable {
+    /// Значок страницы-папки в дереве.
+    static let folderIcon = "folder"
+    var isFolder: Bool { icon == Self.folderIcon }
+
     var id: UUID
     var parentID: UUID?
     var sortKey: String

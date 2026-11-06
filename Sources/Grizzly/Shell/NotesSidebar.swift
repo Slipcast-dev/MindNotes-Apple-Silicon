@@ -88,6 +88,7 @@ struct NotesSidebar: View {
                         SidebarGroup(title: L("Страницы"))
                         ForEach(shell.children(of: nil)) { PageTreeRow(page: $0, depth: 0) }
                         SidebarRow(title: L("Новая страница"), symbol: "plus") { shell.createPage() }
+                        SidebarRow(title: L("Новая папка"), symbol: "folder.badge.plus") { shell.createFolder() }
                     }
 
                     SidebarGroup(title: L("Пространство"))
@@ -127,12 +128,13 @@ struct PageTreeRow: View {
         let kids = shell.children(of: page.id)
         VStack(alignment: .leading, spacing: 0) {
             SidebarRow(title: page.title.isEmpty ? L("Без названия") : page.title,
-                       symbol: kids.isEmpty ? "doc.text" : (expanded ? "chevron.down" : "chevron.right"),
+                       symbol: kids.isEmpty ? (page.isFolder ? "folder" : "doc.text") : (expanded ? "chevron.down" : "chevron.right"),
                        active: shell.section == .page(page.id), indent: CGFloat(depth) * 14) {
                 if shell.section == .page(page.id), !kids.isEmpty { expanded.toggle() } else { shell.openPage(page.id) }
             }
             .contextMenu {
                 Button("Новая подстраница") { shell.createPage(parent: page.id) }
+                Button("Новая папка") { shell.createFolder(parent: page.id) }
                 Menu("Переместить") {
                     if page.parentID != nil { Button("В корень") { shell.move(page.id, toParent: nil) } }
                     ForEach(shell.moveTargets(for: page.id).filter { $0.id != page.parentID }) { target in

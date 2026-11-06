@@ -84,14 +84,14 @@ final class Preferences: ObservableObject {
     private init() {
         let d = UserDefaults.standard
         appearance = Appearance(rawValue: d.string(forKey: "appearance") ?? "") ?? .system
-        themeID = d.string(forKey: "themeID") ?? "notes"
+        themeID = "notes" // Единственная тема: палитра макетов.
         fontName = d.string(forKey: "fontName") ?? Preferences.systemFont
         fontSize = d.object(forKey: "fontSize") as? Double ?? 15
-        uiFontName = d.string(forKey: "uiFontName") ?? Preferences.systemFont
+        uiFontName = Self.systemFont // Шрифт интерфейса задан макетами.
         uiFontSize = d.object(forKey: "uiFontSize") as? Double ?? AppFont.defaultSize
         headingSpacing = d.object(forKey: "headingSpacing") as? Double ?? 1
         showLineNumbers = d.object(forKey: "showLineNumbers") as? Bool ?? true
-        glassEnabled = d.object(forKey: "glassEnabled") as? Bool ?? false // Макеты непрозрачны; стекло включается в настройках.
+        glassEnabled = false // Макеты непрозрачны.
         glassAmount = d.object(forKey: "glassAmount") as? Double ?? 0.35
         glassTabs = d.object(forKey: "glassTabs") as? Double ?? (d.object(forKey: "glassAmount") as? Double ?? 0.35)
         glassSidebar = d.object(forKey: "glassSidebar") as? Double ?? 1

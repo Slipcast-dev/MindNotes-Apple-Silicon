@@ -30,56 +30,6 @@ struct ContentView: View {
         }
         .environment(\.font, AppFont.body)
                 .background { if prefs.glassEnabled { GlassWindowConfigurator(enabled: true) } }
-        .toolbar {
-            if shell.section == .files {
-            // The view mode switch sits in the middle of the title bar; everything else for the current file is on the right.
-            ToolbarItem(placement: .principal) {
-                Picker("Режим", selection: $state.mode) {
-                    Text("Пользователь").tag(ReadMode.user)
-                    Text("Разработчик").tag(ReadMode.developer)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 230)
-                .help("Пользователь: текст без кода форматирования. Разработчик: исходный текст с разметкой, подсветкой и номерами строк.")
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button { shell.showsLibrary.toggle() } label: { Image(systemName: "sidebar.left") }
-                    .buttonStyle(.hover)
-                    .help("Библиотека файлов")
-                    .accessibilityLabel(Text("Библиотека файлов"))
-
-                Button { state.toggleSplit() } label: {
-                    Image(systemName: state.isSplit ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
-                }
-                .buttonStyle(.hover)
-                .help("Два файла рядом (⌘\\)")
-                .disabled(state.documents.isEmpty)
-
-                Button { state.showFind() } label: { Image(systemName: "magnifyingglass") }
-                    .buttonStyle(.hover)
-                    .help("Найти (⌘F)")
-                    .disabled(state.documents.isEmpty)
-
-                BookmarksButton()
-
-                Button { prefs.resizeFont(by: -1) } label: { Image(systemName: "textformat.size.smaller") }
-                    .buttonStyle(.hover)
-                    .help("Уменьшить текст")
-                Button { prefs.resizeFont(by: 1) } label: { Image(systemName: "textformat.size.larger") }
-                    .buttonStyle(.hover)
-                    .help("Увеличить текст")
-                // Rightmost: the system emoji picker, for the text being edited.
-                Button { NSApp.orderFrontCharacterPalette(nil) } label: { Text("😀") }
-                    .buttonStyle(.hover)
-                    .help("Эмодзи и символы (⌃⌘Пробел)")
-                    .disabled(state.documents.isEmpty)
-                // Rightmost of all: the Settings window.
-                Button { SettingsOpener.show() } label: { Image(systemName: "gearshape") }
-                    .buttonStyle(.hover)
-                    .help("Настройки файлов")
-            }
-            }
-        }
         .environment(\.theme, theme)
         .environment(\.surfaceOpacity, prefs.surfaceOpacity)
         .environment(\.tabsOpacity, prefs.tabsOpacity)
@@ -123,27 +73,9 @@ struct ContentView: View {
 }
 
 /// Opens the Settings window (the same as ⌘,).
-/// Отдельное окно настроек файлового режима: шрифты, подсветка, типы файлов.
-/// Общие настройки приложения находятся на экране «Настройки».
-@MainActor
-enum SettingsOpener {
-    private static var window: NSWindow?
-
-    static func show() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let window {
-            window.makeKeyAndOrderFront(nil)
-            return
-        }
-        let host = NSHostingController(rootView: SettingsView().environmentObject(Preferences.shared))
-        let created = NSWindow(contentViewController: host)
-        created.title = L("Настройки файлов")
-        created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        created.isReleasedWhenClosed = false
-        created.center()
-        created.makeKeyAndOrderFront(nil)
-        window = created
-    }
+extension Notification.Name {
+    /// Контекстное меню редактора не знает об оболочке, поэтому экран настроек открывается уведомлением.
+    static let openFileSettings = Notification.Name("notes.openFileSettings")
 }
 
 struct DetailView: View {

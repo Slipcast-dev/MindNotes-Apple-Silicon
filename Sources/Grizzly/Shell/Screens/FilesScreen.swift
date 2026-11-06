@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Раздел «Файлы», когда ни один файл не открыт. Файлы остаются на диске; импорта здесь нет.
@@ -8,6 +9,28 @@ struct FilesScreen: View {
 
     private var recent: [LibraryFile] {
         Array(library.allFiles.sorted { ($0.lastOpened ?? .distantPast, $0.name) > ($1.lastOpened ?? .distantPast, $1.name) }.prefix(20))
+    }
+
+    /// Папка библиотеки: виртуальная, на диске ничего не создаётся.
+    private func newFolder() {
+        let alert = NSAlert()
+        alert.messageText = L("Новая папка")
+        alert.informativeText = L("Папка появится в библиотеке файлов. На диске ничего не создаётся.")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.placeholderString = L("Название")
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        alert.addButton(withTitle: L("Создать"))
+        alert.addButton(withTitle: L("Отмена"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        guard !library.folderExists(name) else {
+            shell.errorMessage = String(format: L("Папка «%@» уже есть."), name)
+            return
+        }
+        _ = library.createFolder(name)
+        shell.showsLibrary = true
     }
 
     var body: some View {
@@ -22,6 +45,7 @@ struct FilesScreen: View {
                 HStack(spacing: 9) {
                     Button("Открыть файл…") { state.presentOpenPanel() }.buttonStyle(NotesButtonStyle(kind: .primary))
                     Button("Новый файл…") { state.presentNewFilePanel() }.buttonStyle(NotesButtonStyle())
+                    Button("Новая папка…") { newFolder() }.buttonStyle(NotesButtonStyle())
                     Button("Добавить папку с диска…") { state.presentFolderPanel() }.buttonStyle(NotesButtonStyle())
                     Button(shell.showsLibrary ? "Скрыть библиотеку" : "Библиотека") { shell.showsLibrary.toggle() }
                         .buttonStyle(NotesButtonStyle(kind: .plain))

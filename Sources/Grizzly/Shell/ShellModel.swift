@@ -8,6 +8,7 @@ enum ShellSection: Equatable {
     case page(UUID)
     case backups
     case settings
+    case fileSettings
     case trash
 }
 
@@ -155,6 +156,16 @@ final class ShellModel: ObservableObject {
         }
     }
 
+    /// Папка в пространстве — страница со значком папки: у неё такие же подстраницы и UUID, файловой папки нет.
+    func createFolder(parent: UUID? = nil) {
+        enqueue {
+            guard let session = self.session else { return }
+            let page = try await session.createFolder(parent: parent, title: L("Новая папка"))
+            self.pages = session.pages
+            try await self.show(page.id)
+        }
+    }
+
     func openPage(_ id: UUID) {
         enqueue { try await self.show(id) }
     }
@@ -185,6 +196,10 @@ final class ShellModel: ObservableObject {
 
     func goSettings() {
         leavePage { self.section = .settings }
+    }
+
+    func goFileSettings() {
+        leavePage { self.section = .fileSettings }
     }
 
     func goTrash() {

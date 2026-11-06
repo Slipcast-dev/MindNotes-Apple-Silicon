@@ -37,6 +37,16 @@ final class WorkspaceSession {
         return page
     }
 
+    /// Папка: страница со значком папки.
+    @discardableResult
+    func createFolder(parent: UUID?, title: String) async throws -> Page {
+        var page = try await store.createPage(parent: parent, title: title, id: ids.next(), now: clock.nowMillis())
+        page.icon = Page.folderIcon
+        try await store.updatePage(page)
+        try await refreshPages()
+        return page
+    }
+
     /// Переименование: в модели сразу, запись той же очередью, что и текст блоков.
     func rename(_ id: UUID, title: String) {
         if let i = pages.firstIndex(where: { $0.id == id }) { pages[i].title = title }

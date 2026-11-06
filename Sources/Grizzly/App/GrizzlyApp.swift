@@ -74,7 +74,6 @@ struct GrizzlyApp: App {
         }
         .defaultSize(width: 1240, height: 820)
         .windowToolbarStyle(.unified)
-        Settings { SettingsView().environmentObject(settings) }
         .commands {
             CommandGroup(replacing: .appSettings) {
                 Button("Настройки…") { delegate.shell.goSettings() }
@@ -194,9 +193,10 @@ struct GrizzlyApp: App {
                 }
                 .disabled(state.current?.type != .markdown)
             }
-            CommandMenu("Вид") {
-                Button("Пользователь") { state.mode = .user }.keyboardShortcut("1", modifiers: [.command, .option])
-                Button("Разработчик") { state.mode = .developer }.keyboardShortcut("2", modifiers: [.command, .option])
+            // В системное меню «Вид»: отдельное дало бы два одинаковых пункта в русской строке меню.
+            CommandGroup(after: .toolbar) {
+                Button("Режим: текст") { state.mode = .user }.keyboardShortcut("1", modifiers: [.command, .option])
+                Button("Режим: разметка") { state.mode = .developer }.keyboardShortcut("2", modifiers: [.command, .option])
                 Divider()
                 Button("Копировать весь текст") { state.copyAllText() }
                     .keyboardShortcut("c", modifiers: [.command, .option])
@@ -243,7 +243,7 @@ enum WindowFronting {
 enum AppRestart {
     static func offer() {
         let alert = NSAlert()
-        alert.messageText = L("Чтобы сменить язык, нужно перезапустить Grizzly.")
+        alert.messageText = L("Чтобы сменить язык, нужно перезапустить приложение.")
         alert.informativeText = L("Перед выходом предложим сохранить несохранённые изменения.")
         alert.addButton(withTitle: L("Перезапустить"))
         alert.addButton(withTitle: L("Позже"))

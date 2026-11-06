@@ -79,11 +79,11 @@ struct FileAssociationsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Button("Сделать Grizzly приложением по умолчанию для всех") { assoc.makeDefault(assoc.extensions) }
+                Button("Сделать Grizzly Notes приложением по умолчанию для всех") { assoc.makeDefault(assoc.extensions) }
                     .buttonStyle(.hoverFilled)
                 Spacer()
             }
-            Text("Нажмите на расширение, чтобы открывать такие файлы в Grizzly. macOS может запросить подтверждение.")
+            Text("Нажмите на расширение, чтобы открывать такие файлы в Grizzly Notes. macOS может запросить подтверждение.")
                 .font(AppFont.caption).foregroundColor(.secondary)
 
             LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
@@ -122,7 +122,7 @@ struct FileAssociationsView: View {
             .padding(.horizontal, 8)
         }
         .buttonStyle(HoverButtonStyle(size: .row, base: 0.08))
-        .help(isDefault ? L("Открывается в Grizzly") : L("Сейчас: %@", assoc.handlerName(ext)))
+        .help(isDefault ? L("Открывается в Grizzly Notes") : L("Сейчас: %@", assoc.handlerName(ext)))
         .contextMenu {
             if assoc.customExtensions.contains(ext) { Button("Убрать из списка") { assoc.removeCustom(ext) } }
         }

@@ -50,11 +50,15 @@ struct SettingsScreen: View {
                     }
                     divider
                     row(L("Файловый режим"), L("Шрифты, подсветка кода, типы файлов")) {
-                        Button("Настройки файлов…") { SettingsOpener.show() }.buttonStyle(NotesButtonStyle())
+                        Button("Настройки файлов") { shell.goFileSettings() }.buttonStyle(NotesButtonStyle())
                     }
                     divider
                     row(L("Обновления"), L("Локальная сборка обновляется вручную")) {
                         Chip(text: L("Автообновления выключены"))
+                    }
+                    divider
+                    row(AppEdition.displayName, String(format: L("На основе Grizzly %@. © 2026 Slipcast-dev. Изменять и распространять без письменного согласия автора запрещено."), (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "")) {
+                        EmptyView()
                     }
                 }
                 .padding(.horizontal, 18)

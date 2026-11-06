@@ -11,7 +11,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # SWIFT_OPT=-Onone: быстрая отладочная сборка главного бинарника.
 swiftc "${SWIFT_OPT:--O}" -parse-as-library -target "$ARCH-apple-macos13.0" \
-    -o "$APP/Contents/MacOS/Grizzly" $(find Sources -name '*.swift')
+    -o "$APP/Contents/MacOS/GrizzlyNotes" $(find Sources -name '*.swift')
 
 # Icon and translations (resources/en.lproj, resources/ru.lproj).
 cp resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
@@ -48,7 +48,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>LSMultipleInstancesProhibited</key><true/>
   <key>CFBundleLocalizations</key><array><string>ru</string><string>en</string></array>
-  <key>CFBundleExecutable</key><string>Grizzly</string>
+  <key>CFBundleExecutable</key><string>GrizzlyNotes</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$(tr -d "[:space:]" < VERSION)</string>
   <key>CFBundleVersion</key><string>1</string>

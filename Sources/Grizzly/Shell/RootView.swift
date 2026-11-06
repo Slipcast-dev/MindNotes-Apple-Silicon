@@ -15,6 +15,7 @@ struct RootView: View {
             .background(WindowFrameSaver(name: "GrizzlyNotesMainWindow"))
             .preferredColorScheme(prefs.theme.isDark ? .dark : .light)
             // Файл, открытый из Finder, всегда попадает в раздел «Файлы» без импорта.
+            .onReceive(NotificationCenter.default.publisher(for: .openFileSettings)) { _ in shell.goFileSettings() }
             .onReceive(state.$documents) { docs in
                 if !docs.isEmpty && !inFiles { shell.goFiles() }
             }
@@ -105,6 +106,7 @@ struct NotesLayout: View {
             }
         case .backups: BackupsScreen()
         case .settings: SettingsScreen()
+        case .fileSettings: FileSettingsScreen()
         case .trash: TrashScreen()
         default: HomeScreen().background(Tokens.paper)
         }
@@ -129,8 +131,41 @@ struct NotesLayout: View {
     }
 }
 
+/// Управление открытым файлом: живёт в строке раздела, а не в заголовке окна.
+struct FileControls: View {
+    @EnvironmentObject private var shell: ShellModel
+    @EnvironmentObject private var state: AppState
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if !state.documents.isEmpty {
+                Picker("Режим", selection: $state.mode) {
+                    Text("Текст").tag(ReadMode.user)
+                    Text("Разметка").tag(ReadMode.developer)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 170)
+                .help("Текст: без кода форматирования. Разметка: исходный текст с подсветкой и номерами строк.")
+                Button { state.toggleSplit() } label: { Image(systemName: state.isSplit ? "rectangle.split.2x1.fill" : "rectangle.split.2x1") }
+                    .buttonStyle(.hover)
+                    .help("Два файла рядом (⌘\\)")
+                Button { state.showFind() } label: { Image(systemName: "magnifyingglass") }
+                    .buttonStyle(.hover)
+                    .help("Найти (⌘F)")
+                BookmarksButton()
+            }
+            Button { shell.showsLibrary.toggle() } label: { Image(systemName: "sidebar.left") }
+                .buttonStyle(.hover)
+                .help("Библиотека файлов")
+                .accessibilityLabel(Text("Библиотека файлов"))
+        }
+    }
+}
+
 struct CrumbBar: View {
     @EnvironmentObject private var shell: ShellModel
+    @EnvironmentObject private var state: AppState
 
     private var currentTitle: String {
         switch shell.section {
@@ -138,7 +173,8 @@ struct CrumbBar: View {
         case .backups: return L("Резервные копии")
         case .settings: return L("Настройки")
         case .trash: return L("Корзина")
-        case .files: return L("Файлы")
+        case .files: return state.current?.name ?? L("Файлы")
+        case .fileSettings: return L("Настройки файлов")
         default: return L("Главная")
         }
     }
@@ -165,7 +201,9 @@ struct CrumbBar: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .accessibilityLabel(Text("Действия со страницей"))
-            } else if shell.section != .settings {
+            } else if shell.section == .files {
+                FileControls()
+            } else if shell.section != .settings && shell.section != .fileSettings {
                 Button("Настройки") { shell.goSettings() }
                     .buttonStyle(.plain)
                     .foregroundColor(Tokens.muted)

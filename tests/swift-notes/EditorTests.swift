@@ -297,3 +297,26 @@ func runTrashTests() async {
         }
     }
 }
+
+@MainActor
+func runFolderTests() async {
+    await test("Папка: страница со значком, вложение и перезапуск") {
+        try await withTempDir { dir in
+            let w = dir.appendingPathComponent("w")
+            let ws = try SQLiteWorkspace.create(at: w, name: "A")
+            let session = WorkspaceSession(store: ws, name: "A")
+            let folder = try await session.createFolder(parent: nil, title: "Новая папка")
+            check(folder.isFolder, "признак папки")
+            let inner = try await session.createPage(parent: folder.id, title: "Внутри")
+            let nested = try await session.createFolder(parent: folder.id, title: "Вложенная")
+            try await session.close()
+            let re = try SQLiteWorkspace.open(at: w)
+            let pages = try await re.allPages()
+            check(pages.first { $0.id == folder.id }?.isFolder == true, "значок сохранён")
+            check(pages.first { $0.id == nested.id }?.isFolder == true, "вложенная папка")
+            check(pages.first { $0.id == inner.id }?.isFolder == false, "обычная страница не папка")
+            checkEqual(pages.first { $0.id == inner.id }?.parentID, folder.id)
+            re.close()
+        }
+    }
+}
