@@ -100,6 +100,7 @@ struct GrizzlyApp: App {
             }
             CommandMenu("Формат") {
                 Group {
+                Group {
                     Button("Название") { FormatActions.perform(.paragraph(.title)) }
                         .keyboardShortcut("t", modifiers: [.command, .shift])
                     Button("Заголовок") { FormatActions.perform(.paragraph(.heading)) }
@@ -111,6 +112,9 @@ struct GrizzlyApp: App {
                     Button("Моноширинный") { FormatActions.perform(.paragraph(.monospaced)) }
                         .keyboardShortcut("m", modifiers: [.command, .shift])
                     Divider()
+                }
+                // Группы вложены, потому что ViewBuilder в Swift 5.8 / SDK 13 принимает не больше 10 элементов.
+                Group {
                     Button("Жирный") { FormatActions.perform(.inline(.bold)) }.keyboardShortcut("b")
                     Button("Курсив") { FormatActions.perform(.inline(.italic)) }.keyboardShortcut("i")
                     Button("Подчёркнутый") { FormatActions.perform(.inline(.underline)) }.keyboardShortcut("u")
@@ -130,6 +134,8 @@ struct GrizzlyApp: App {
                         Button("По ширине") { FormatActions.perform(.align(.justify)) }
                     }
                     Divider()
+                }
+                Group {
                     Button("Маркированный список") { FormatActions.perform(.list(.bullet)) }
                         .keyboardShortcut("7", modifiers: [.command, .shift])
                     Button("Штриховой список") { FormatActions.perform(.list(.dash)) }
@@ -151,11 +157,13 @@ struct GrizzlyApp: App {
                     Button("Ссылка на сайт…") { FormatActions.insertWebLink() }
                 }
                 Menu("Таблица") {
-                        Button("Добавить строку") { FormatActions.perform(.table(.addRow)) }
-                        Button("Добавить столбец") { FormatActions.perform(.table(.addColumn)) }
-                        Button("Удалить строку") { FormatActions.perform(.table(.deleteRow)) }
-                        Button("Удалить столбец") { FormatActions.perform(.table(.deleteColumn)) }
-                        Divider()
+                        Group {
+                            Button("Добавить строку") { FormatActions.perform(.table(.addRow)) }
+                            Button("Добавить столбец") { FormatActions.perform(.table(.addColumn)) }
+                            Button("Удалить строку") { FormatActions.perform(.table(.deleteRow)) }
+                            Button("Удалить столбец") { FormatActions.perform(.table(.deleteColumn)) }
+                            Divider()
+                        }
                         Button("Строку вверх") { FormatActions.perform(.table(.moveRowUp)) }
                         Button("Строку вниз") { FormatActions.perform(.table(.moveRowDown)) }
                         Button("Столбец влево") { FormatActions.perform(.table(.moveColumnLeft)) }
@@ -163,6 +171,7 @@ struct GrizzlyApp: App {
                         Divider()
                         Button("Преобразовать таблицу в текст") { FormatActions.perform(.table(.toText)) }
                     }
+                }
                 }
                 .disabled(state.current?.type != .markdown)
             }

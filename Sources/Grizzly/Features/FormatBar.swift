@@ -109,6 +109,8 @@ enum FormatActions {
 struct FormatBar: View {
     var body: some View {
         HStack(spacing: 2) {
+            // Группа нужна из-за лимита ViewBuilder (10 элементов); элементы группы раскладываются в этом же HStack.
+            Group {
             Menu {
                 item("Название", .paragraph(.title))
                 item("Заголовок", .paragraph(.heading))
@@ -145,6 +147,7 @@ struct FormatBar: View {
             } label: { Image(systemName: "text.alignleft") }
                 .help("Выравнивание")
                 .modifier(BarMenu())
+            }
 
             separator
             Menu {
@@ -159,13 +162,16 @@ struct FormatBar: View {
             button("minus", .rule, "Линия-разделитель")
 
             Menu {
-                item("Вставить таблицу", .table(.insert))
-                Divider()
-                item("Добавить строку", .table(.addRow))
-                item("Добавить столбец", .table(.addColumn))
-                item("Удалить строку", .table(.deleteRow))
-                item("Удалить столбец", .table(.deleteColumn))
-                Divider()
+                // Группа нужна из-за лимита ViewBuilder (10 элементов) в Swift 5.8 / SDK 13.
+                Group {
+                    item("Вставить таблицу", .table(.insert))
+                    Divider()
+                    item("Добавить строку", .table(.addRow))
+                    item("Добавить столбец", .table(.addColumn))
+                    item("Удалить строку", .table(.deleteRow))
+                    item("Удалить столбец", .table(.deleteColumn))
+                    Divider()
+                }
                 item("Строку вверх", .table(.moveRowUp))
                 item("Строку вниз", .table(.moveRowDown))
                 item("Столбец влево", .table(.moveColumnLeft))
