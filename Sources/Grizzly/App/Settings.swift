@@ -91,7 +91,7 @@ final class Preferences: ObservableObject {
         uiFontSize = d.object(forKey: "uiFontSize") as? Double ?? AppFont.defaultSize
         headingSpacing = d.object(forKey: "headingSpacing") as? Double ?? 1
         showLineNumbers = d.object(forKey: "showLineNumbers") as? Bool ?? true
-        glassEnabled = d.object(forKey: "glassEnabled") as? Bool ?? true
+        glassEnabled = d.object(forKey: "glassEnabled") as? Bool ?? false // Макеты непрозрачны; стекло включается в настройках.
         glassAmount = d.object(forKey: "glassAmount") as? Double ?? 0.35
         glassTabs = d.object(forKey: "glassTabs") as? Double ?? (d.object(forKey: "glassAmount") as? Double ?? 0.35)
         glassSidebar = d.object(forKey: "glassSidebar") as? Double ?? 1

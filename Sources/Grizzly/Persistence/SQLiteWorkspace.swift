@@ -106,8 +106,9 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
     }
 
     func close() {
-        writer.close()
+        // Читатель первым: только последнее пишущее соединение сворачивает WAL в основной файл.
         reader.close()
+        writer.close()
         lock.release()
     }
 

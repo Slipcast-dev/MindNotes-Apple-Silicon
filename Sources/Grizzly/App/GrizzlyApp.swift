@@ -1,6 +1,10 @@
 import SwiftUI
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Сборка пространства принадлежит делегату: завершение и интерфейс видят один объект.
+    let shell = ShellModel()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSWindow.allowsAutomaticWindowTabbing = false
         NSApp.setActivationPolicy(.regular)
@@ -17,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppState.shared.openExternal(urls)
         // Let a file-open event that is already on its way land first, then open everything that was queued.
         DispatchQueue.main.async { AppState.shared.markReady() }
+        shell.restoreLastWorkspace()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -25,7 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let state = AppState.shared
-        return state.confirmDiscard(state.documents.map(\.id)) ? .terminateNow : .terminateCancel
+        guard state.confirmDiscard(state.documents.map(\.id)) else { return .terminateCancel }
+        guard shell.isOpen else { return .terminateNow }
+        // Запись пространства асинхронна: приложение ждёт её подтверждения.
+        shell.prepareToTerminate { NSApp.reply(toApplicationShouldTerminate: $0) }
+        return .terminateLater
     }
 
     /// Finder (double click, "Open With"), the Dock and `open -a` deliver files here, also while the app is launching.
@@ -53,8 +62,9 @@ struct GrizzlyApp: App {
     var body: some Scene {
         // A single window: files opened while the app runs become tabs, never a second window.
         Window(AppEdition.displayName, id: "main") {
-            ContentView()
+            RootView()
                 .background(CloseGuard())
+                .environmentObject(delegate.shell)
                 .environmentObject(state)
                 .environmentObject(state.library)
                 .environmentObject(settings)
@@ -62,12 +72,15 @@ struct GrizzlyApp: App {
                 // Some macOS versions deliver Finder's open event to the scene instead of the app delegate.
                 .onOpenURL { state.openExternal([$0]); WindowFronting.bringMainWindowForward() }
         }
+        .defaultSize(width: 1240, height: 820)
         .windowToolbarStyle(.unified)
         Settings { SettingsView().environmentObject(settings) }
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Новый файл…") { state.presentNewFilePanel() }
+                Button("Новая страница") { delegate.shell.createPage() }
                     .keyboardShortcut("n")
+                    .disabled(!delegate.shell.isOpen)
+                Button("Новый файл…") { state.presentNewFilePanel() }
                 Button("Открыть…") { state.presentOpenPanel() }
                     .keyboardShortcut("o")
                 Button("Добавить папку с диска…") { state.presentFolderPanel() }

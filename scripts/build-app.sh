@@ -9,7 +9,8 @@ ARCH="${ARCH:-$(uname -m)}"
 APP="${OUT:-build}/Grizzly Notes.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-swiftc -O -parse-as-library -target "$ARCH-apple-macos13.0" \
+# SWIFT_OPT=-Onone: быстрая отладочная сборка главного бинарника.
+swiftc "${SWIFT_OPT:--O}" -parse-as-library -target "$ARCH-apple-macos13.0" \
     -o "$APP/Contents/MacOS/Grizzly" $(find Sources -name '*.swift')
 
 # Icon and translations (resources/en.lproj, resources/ru.lproj).

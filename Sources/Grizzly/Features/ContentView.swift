@@ -5,12 +5,23 @@ struct ContentView: View {
     @EnvironmentObject private var state: AppState
     @EnvironmentObject private var prefs: Preferences
     @ObservedObject private var updater = UpdateManager.shared
+    @EnvironmentObject private var shell: ShellModel
 
     var body: some View {
         let theme = prefs.theme
 
         NavigationSplitView {
             SidebarView()
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    // Выход из файлового режима в пространство; сам режим не меняется.
+                    Button { shell.goWorkspaceRoot() } label: {
+                        Label(shell.isOpen ? "Пространство" : "Назад", systemImage: "chevron.left")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
                 .background(theme.background.opacity(prefs.sidebarTint))
                 .id(prefs.uiFontKey)
                 .navigationSplitViewColumnWidth(min: 190, ideal: 230, max: 320)
@@ -21,10 +32,10 @@ struct ContentView: View {
                 .background { if prefs.glassEnabled { VisualEffect(material: .underWindowBackground) } }
         }
         .environment(\.font, AppFont.body)
-        .background(WindowFrameSaver(name: "GrizzlyMainWindow"))
-        .background(GlassWindowConfigurator(enabled: prefs.glassEnabled))
-        .navigationTitle(state.current?.name ?? AppEdition.displayName)
+                .background(GlassWindowConfigurator(enabled: prefs.glassEnabled))
+        .navigationTitle(shell.section == .files ? (state.current?.name ?? AppEdition.displayName) : AppEdition.displayName)
         .toolbar {
+            if shell.section == .files {
             // The view mode switch sits in the middle of the title bar; everything else for the current file is on the right.
             ToolbarItem(placement: .principal) {
                 Picker("Режим", selection: $state.mode) {
@@ -65,6 +76,7 @@ struct ContentView: View {
                 Button { SettingsOpener.show() } label: { Image(systemName: "gearshape") }
                     .buttonStyle(.hover)
                     .help("Настройки (⌘,)")
+            }
             }
         }
         .environment(\.theme, theme)
