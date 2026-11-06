@@ -46,10 +46,13 @@ UUID — TEXT в нижнем регистре, время — INTEGER (мс UTC
 | pages | id, parent_id FK SET NULL, sort_key, title, icon, cover_asset_id FK, full_width, favorite_key, created_at, updated_at, last_opened_at, deleted_at, trash_batch_id, content_rev | частичные (deleted_at IS NULL): (parent_id, sort_key, id), (favorite_key), (last_opened_at DESC); (deleted_at); (cover_asset_id) |
 | blocks | id, page_id FK CASCADE, parent_id FK CASCADE, sort_key, type (без CHECK), content_v, content_json, plain_text, created_at, updated_at | (page_id, parent_id, sort_key, id); (parent_id) |
 | revisions | id, page_id FK CASCADE, seq, created_at, reason, format_v, codec, payload, content_hash, byte_size | UNIQUE(page_id, seq); (page_id, created_at DESC) |
+| tags (v2) | id, name, name_key UNIQUE, color, created_at | сравнение без учёта регистра и ё/е |
+| page_tags (v2) | page_id FK CASCADE, tag_id FK CASCADE | WITHOUT ROWID; (tag_id) |
 | assets | id, rel_path UNIQUE, original_name, mime, byte_size, sha256, created_at, unreferenced_since | (sha256); частичный по unreferenced_since |
 | block_assets, revision_assets | owner_id FK CASCADE, asset_id FK RESTRICT | WITHOUT ROWID; (asset_id) |
 
 - Содержимое блока — `{"runs":[{"t":"Привет","m":["b"]}], ...}`. Неизвестные поля сохраняются; неизвестный `type` или более новый `content_v` хранятся непрозрачно.
+- Вид пространства (логотип, обложка) — JSON в `workspace_meta.look`; изображения — управляемые файлы `assets/`.
 - Позже миграциями: M4 — `page_links`, `blocks_fts`; M5 — `databases`, `property_definitions`, типизированные `property_values`, `database_views`, `pages.database_id`; M6 — `templates`.
 - Ключ порядка — дробная строка base-62, сравнение BINARY, разрешение ничьей по `id`; длина больше 48 символов — перенумерация соседей в той же транзакции.
 - Корзина: поддерево получает общий `trash_batch_id`. Перемещение: `BEGIN IMMEDIATE`, проверка цикла рекурсивным CTE, обновление.

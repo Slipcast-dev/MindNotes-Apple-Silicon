@@ -133,6 +133,7 @@ struct NotesButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 14))
+            .fixedSize()
             .foregroundColor(kind == .primary ? .white : Tokens.ink)
             .padding(.horizontal, 13)
             .padding(.vertical, 9)
