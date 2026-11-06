@@ -195,14 +195,19 @@ struct SettingsView: View {
         case .updates:
             card("Обновления") {
                 row("Установленная версия") { Text(updater.currentVersion).monospacedDigit() }
-                HStack {
+                if AppEdition.updatesEnabled {
+                    HStack {
                     Button("Проверить обновления") { Task { await updater.check(silent: false) } }
                         .buttonStyle(.hoverFilled)
                         .disabled(updater.phase == .checking || updater.phase == .installing)
+                    }
+                    UpdateView(updater: updater)
+                    Text("Grizzly проверяет GitHub при каждом запуске. Новая версия скачивается и устанавливается прямо из приложения.")
+                        .font(AppFont.caption).foregroundColor(.secondary)
+                } else {
+                    Text("Автообновления выключены. Локальная сборка обновляется вручную.")
+                        .font(AppFont.caption).foregroundColor(.secondary)
                 }
-                UpdateView(updater: updater)
-                Text("Grizzly проверяет GitHub при каждом запуске. Новая версия скачивается и устанавливается прямо из приложения.")
-                    .font(AppFont.caption).foregroundColor(.secondary)
                 Text("Лицензия: © 2026 Slipcast-dev. Изменять и распространять Grizzly без письменного согласия автора запрещено.")
                     .font(AppFont.caption).foregroundColor(.secondary)
             }

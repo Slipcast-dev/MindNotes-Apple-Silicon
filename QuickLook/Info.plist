@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleName</key><string>GrizzlyQuickLook</string>
-  <key>CFBundleDisplayName</key><string>Grizzly Quick Look</string>
-  <key>CFBundleIdentifier</key><string>app.grizzly.Grizzly.QuickLook</string>
+  <key>CFBundleDisplayName</key><string>Grizzly Notes Quick Look</string>
+  <key>CFBundleIdentifier</key><string>local.personal.GrizzlyNotes.QuickLook</string>
   <key>CFBundleExecutable</key><string>GrizzlyQuickLook</string>
   <key>CFBundlePackageType</key><string>XPC!</string>
   <key>CFBundleShortVersionString</key><string>__VERSION__</string>

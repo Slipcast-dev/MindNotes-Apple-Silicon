@@ -36,6 +36,7 @@ final class UpdateManager: ObservableObject {
 
     /// `silent`: the check at launch. It says nothing when there is nothing new or the network is down.
     func check(silent: Bool) async {
+        guard AppEdition.updatesEnabled else { return }
         switch phase {
         case .checking, .downloading, .installing: return
         default: break
@@ -66,6 +67,7 @@ final class UpdateManager: ObservableObject {
     }
 
     func install(_ release: ReleaseInfo) {
+        guard AppEdition.updatesEnabled else { return }
         guard case .available = phase else { return }
         phase = .downloading(0)
         task = Task { [weak self] in

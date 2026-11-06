@@ -23,7 +23,7 @@ struct ContentView: View {
         .environment(\.font, AppFont.body)
         .background(WindowFrameSaver(name: "GrizzlyMainWindow"))
         .background(GlassWindowConfigurator(enabled: prefs.glassEnabled))
-        .navigationTitle(state.current?.name ?? "Grizzly")
+        .navigationTitle(state.current?.name ?? AppEdition.displayName)
         .toolbar {
             // The view mode switch sits in the middle of the title bar; everything else for the current file is on the right.
             ToolbarItem(placement: .principal) {

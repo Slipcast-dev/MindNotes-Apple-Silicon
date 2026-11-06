@@ -29,6 +29,11 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         AppLanguage(rawValue: UserDefaults.standard.string(forKey: "language") ?? "") ?? .auto
     }
 
+    /// Русский — язык первого запуска (FR-16). Вызывается до первого обращения к локализованным строкам.
+    static func applyFirstRunDefault() {
+        if UserDefaults.standard.string(forKey: "language") == nil { AppLanguage.ru.apply() }
+    }
+
     /// macOS picks the bundle language from `AppleLanguages` at launch, so the choice takes effect after a restart.
     func apply() {
         let d = UserDefaults.standard

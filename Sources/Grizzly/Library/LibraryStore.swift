@@ -234,10 +234,10 @@ final class LibraryStore: ObservableObject {
             self.storeURL = storeURL
         } else {
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            let base = support.appendingPathComponent("Grizzly", isDirectory: true)
+            let base = support.appendingPathComponent(AppEdition.supportDirectoryName, isDirectory: true)
             // The app used to be called MD Reader: carry its library over once.
             let old = support.appendingPathComponent("MDReader", isDirectory: true)
-            if !FileManager.default.fileExists(atPath: base.path), FileManager.default.fileExists(atPath: old.path) {
+            if AppEdition.migratesLegacyLibrary, !FileManager.default.fileExists(atPath: base.path), FileManager.default.fileExists(atPath: old.path) {
                 try? FileManager.default.moveItem(at: old, to: base)
             }
             try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)

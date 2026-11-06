@@ -1,12 +1,12 @@
 #!/bin/zsh
-# Builds a release binary and wraps it in Grizzly.app (ad-hoc signed, for local use).
+# Builds a release binary and wraps it in Grizzly Notes.app (ad-hoc signed, for local use).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # swiftc is used directly because `swift build` needs a full Xcode install (PlatformPath lookup fails with Command Line Tools only).
 # ARCH (arm64 | x86_64) and OUT override the defaults: the host architecture and build/.
 ARCH="${ARCH:-$(uname -m)}"
-APP="${OUT:-build}/Grizzly.app"
+APP="${OUT:-build}/Grizzly Notes.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 swiftc -O -parse-as-library -target "$ARCH-apple-macos13.0" \
@@ -40,9 +40,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Grizzly</string>
-  <key>CFBundleDisplayName</key><string>Grizzly</string>
-  <key>CFBundleIdentifier</key><string>app.grizzly.Grizzly</string>
+  <key>CFBundleName</key><string>Grizzly Notes</string>
+  <key>CFBundleDisplayName</key><string>Grizzly Notes</string>
+  <key>CFBundleIdentifier</key><string>local.personal.GrizzlyNotes</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>LSMultipleInstancesProhibited</key><true/>
@@ -59,7 +59,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <dict>
       <key>CFBundleTypeName</key><string>Text document</string>
       <key>CFBundleTypeRole</key><string>Viewer</string>
-      <key>LSHandlerRank</key><string>Default</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
       <key>CFBundleTypeExtensions</key>
       <array>$EXTS</array>
     </dict>

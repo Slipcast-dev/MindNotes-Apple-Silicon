@@ -9,7 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         WindowFronting.installGuard()
         AppState.shared.startWatching()
         AppState.shared.scanTagsInLibrary()
-        // Every launch asks GitHub whether a newer version is out; the answer appears only if there is one.
+        // Без личного канала `check` сразу завершается (AppEdition.updatesEnabled).
         Task { await UpdateManager.shared.check(silent: true) }
 
         let paths = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
@@ -48,9 +48,11 @@ struct GrizzlyApp: App {
     @StateObject private var state = AppState.shared
     @StateObject private var settings = Preferences.shared
 
+    init() { AppLanguage.applyFirstRunDefault() }
+
     var body: some Scene {
         // A single window: files opened while the app runs become tabs, never a second window.
-        Window("Grizzly", id: "main") {
+        Window(AppEdition.displayName, id: "main") {
             ContentView()
                 .background(CloseGuard())
                 .environmentObject(state)
