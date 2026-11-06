@@ -10,6 +10,7 @@ struct RootView: View {
         NotesLayout()
             .id(prefs.theme) // Токены читаются при построении: смена темы перестраивает дерево.
             .sheet(isPresented: $shell.showsLookSheet) { WorkspaceLookSheet() }
+            .sheet(isPresented: $shell.showsSearch) { SearchSheet() }
             .background(WindowChrome(theme: prefs.theme))
             .background(WindowFrameSaver(name: "GrizzlyNotesMainWindow"))
             .preferredColorScheme(prefs.isDark ? .dark : .light)
@@ -130,9 +131,20 @@ struct CrumbBar: View {
 
     var body: some View {
         HStack(spacing: 9) {
+            navButton("chevron.left", L("Назад"), enabled: !shell.backStack.isEmpty) { shell.goBack() }
+            navButton("chevron.right", L("Вперёд"), enabled: !shell.forwardStack.isEmpty) { shell.goForward() }
             Button(shell.isOpen ? shell.workspaceName : AppEdition.displayName) { shell.goHome() }
                 .buttonStyle(.plain)
                 .foregroundColor(Tokens.muted)
+            if case .page(let id) = shell.section {
+                ForEach(shell.path(of: id)) { parent in
+                    Text("/").foregroundColor(Tokens.muted)
+                    Button(parent.title.isEmpty ? L("Без названия") : parent.title) { shell.openPage(parent.id) }
+                        .buttonStyle(.plain)
+                        .foregroundColor(Tokens.muted)
+                        .lineLimit(1)
+                }
+            }
             Text("/").foregroundColor(Tokens.muted)
             Text(currentTitle.isEmpty ? L("Без названия") : currentTitle)
                 .fontWeight(.semibold)
@@ -142,7 +154,12 @@ struct CrumbBar: View {
             if case .page = shell.section { saveIndicator } else if case .failed = shell.saveStatus { saveIndicator }
             if case .page(let id) = shell.section {
                 Menu {
+                    let page = shell.pages.first { $0.id == id }
+                    Button(page?.favoriteKey != nil ? "Убрать из избранного" : "Добавить в избранное") { shell.toggleFavorite(id) }
+                    Button(page?.fullWidth == true ? "Обычная ширина" : "Во всю ширину") { shell.toggleFullWidth(id) }
+                    Divider()
                     Button("Новая подстраница") { shell.createPage(parent: id) }
+                    Button("Дублировать страницу") { shell.duplicatePage(id) }
                     Divider()
                     Button("Удалить страницу") { shell.trash(id) }
                 } label: { Image(systemName: "ellipsis") }
@@ -159,6 +176,20 @@ struct CrumbBar: View {
         .font(.system(size: 12))
         .padding(.horizontal, 27)
         .frame(height: Tokens.crumbHeight)
+    }
+
+    private func navButton(_ symbol: String, _ help: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(enabled ? Tokens.ink : Tokens.muted.opacity(0.4))
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .help(help)
+        .accessibilityLabel(Text(help))
     }
 
     @ViewBuilder private var saveIndicator: some View {

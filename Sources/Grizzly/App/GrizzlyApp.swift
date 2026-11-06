@@ -50,6 +50,18 @@ struct GrizzlyApp: App {
         .windowToolbarStyle(.unified)
         .commands {
             FormatCommands()
+            CommandMenu(L("Переход")) {
+                Button("Поиск…") { delegate.shell.showsSearch = true }
+                    .keyboardShortcut("k")
+                    .disabled(!delegate.shell.isOpen)
+                Button("Назад") { delegate.shell.goBack() }
+                    .keyboardShortcut("[")
+                Button("Вперёд") { delegate.shell.goForward() }
+                    .keyboardShortcut("]")
+                Divider()
+                Button("Главная") { delegate.shell.goHome() }
+                    .keyboardShortcut("h", modifiers: [.command, .shift])
+            }
             CommandGroup(replacing: .appSettings) {
                 Button("Настройки…") { delegate.shell.goSettings() }
                     .keyboardShortcut(",")

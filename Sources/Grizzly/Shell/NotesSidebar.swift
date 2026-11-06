@@ -6,16 +6,22 @@ struct SidebarRow: View {
     var active = false
     var indent: CGFloat = 0
     var tint: Color?
+    /// Значок-emoji страницы вместо символа.
+    var emoji: String?
     let action: () -> Void
     @State private var hover = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11))
-                    .frame(width: 16)
-                    .foregroundColor(tint ?? (active ? Tokens.accent : Tokens.muted))
+                if let emoji {
+                    Text(emoji).font(.system(size: 13)).frame(width: 16)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 11))
+                        .frame(width: 16)
+                        .foregroundColor(tint ?? (active ? Tokens.accent : Tokens.muted))
+                }
                 Text(title)
                     .font(.system(size: 13, weight: active ? .semibold : .regular))
                     .foregroundColor(active ? Tokens.accent : Tokens.ink)
@@ -89,9 +95,34 @@ struct NotesSidebar: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
+                    if shell.isOpen {
+                        Button { shell.showsSearch = true } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "magnifyingglass").font(.system(size: 11)).frame(width: 16).foregroundColor(Tokens.muted)
+                                Text("Поиск").font(.system(size: 13))
+                                Spacer()
+                                Text("⌘K")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(Tokens.muted)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Tokens.line))
+                            }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                     SidebarRow(title: L("Главная"), symbol: "house", active: shell.section == .home) { shell.goHome() }
                     SidebarRow(title: L("Файлы"), symbol: "doc", active: shell.section == .files) { shell.goFiles() }
 
+                    if shell.isOpen, !shell.favorites.isEmpty {
+                        SidebarGroup(title: L("Избранное"))
+                        ForEach(shell.favorites) { page in
+                            SidebarRow(title: page.title.isEmpty ? L("Без названия") : page.title, symbol: page.isFolder ? "folder" : "star", active: shell.section == .page(page.id), emoji: page.emoji) { shell.openPage(page.id) }
+                        }
+                    }
                     if shell.isOpen {
                         SidebarGroup(title: L("Страницы"))
                         ForEach(shell.children(of: nil)) { PageTreeRow(page: $0, depth: 0) }
@@ -144,12 +175,14 @@ struct PageTreeRow: View {
         VStack(alignment: .leading, spacing: 0) {
             SidebarRow(title: page.title.isEmpty ? L("Без названия") : page.title,
                        symbol: kids.isEmpty ? (page.isFolder ? "folder" : "doc.text") : (expanded ? "chevron.down" : "chevron.right"),
-                       active: shell.section == .page(page.id), indent: CGFloat(depth) * 14) {
+                       active: shell.section == .page(page.id), indent: CGFloat(depth) * 14, emoji: kids.isEmpty ? page.emoji : nil) {
                 if shell.section == .page(page.id), !kids.isEmpty { expanded.toggle() } else { shell.openPage(page.id) }
             }
             .contextMenu {
                 Button("Новая подстраница") { shell.createPage(parent: page.id) }
                 Button("Новая папка") { shell.createFolder(parent: page.id) }
+                Button(page.favoriteKey != nil ? "Убрать из избранного" : "Добавить в избранное") { shell.toggleFavorite(page.id) }
+                Button("Дублировать страницу") { shell.duplicatePage(page.id) }
                 Menu("Переместить") {
                     if page.parentID != nil { Button("В корень") { shell.move(page.id, toParent: nil) } }
                     ForEach(shell.moveTargets(for: page.id).filter { $0.id != page.parentID }) { target in

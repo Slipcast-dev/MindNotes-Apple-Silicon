@@ -843,3 +843,75 @@ func runNotionReviewTests() async {
         }
     }
 }
+
+@MainActor
+func runPageLinkTests() async {
+    _ = NSApplication.shared
+    await test("[[: список страниц, поиск, вставка ссылки, переход, обратная ссылка") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "см. "), (.code, "код")])
+            let target = UUID()
+            r.controller.pageSearch = { q in
+                let all: [(id: UUID, title: String)] = [(target, "Ёлка"), (UUID(), "Дневник")]
+                return all.filter { q.isEmpty || SearchText.normalize($0.title).contains(SearchText.normalize(q)) }
+            }
+            var shown: [[String]] = []
+            r.controller.onSlashChange = { s, items, _ in if s != nil { shown.append(items.map(\.title)) } }
+            var opened: UUID?
+            r.controller.onOpenPage = { opened = $0 }
+            r.caret(0, 4)
+            r.type("[")
+            check(r.controller.slash == nil, "одна скобка не открывает")
+            r.type("[")
+            check(r.controller.slash?.kind == .pageLink, "две скобки открывают")
+            checkEqual(shown.last?.count, 2)
+            r.type("е")
+            r.type("л")
+            checkEqual(shown.last, ["Ёлка"], "поиск с ё/е")
+            r.key(#selector(NSResponder.insertNewline(_:)))
+            checkEqual(r.texts[0], "см. Ёлка", "запрос заменён заголовком")
+            check(r.doc.blocks[0].content!.runs.contains { $0.marks == [PageLink.mark(target)] }, "ссылка по UUID")
+            r.checkSync("ссылка")
+            let url = r.tv.textStorage?.attribute(.link, at: 5, effectiveRange: nil) as? URL
+            checkEqual(url.flatMap(PageLink.page(from:)), target, "ссылка в виде")
+            check(r.controller.textView(r.tv, clickedOnLink: url!, at: 5), "внутренняя ссылка обработана")
+            checkEqual(opened, target)
+            check(!r.controller.textView(r.tv, clickedOnLink: URL(string: "https://example.com")!, at: 0), "внешняя идёт в браузер")
+            r.type(" дальше")
+            checkEqual(r.doc.blocks[0].content!.runs.last?.text, " дальше")
+            check(r.doc.blocks[0].content!.runs.last?.marks.isEmpty == true, "после ссылки обычный текст")
+            try await r.session.coordinator.flush()
+            let pages = try await r.ws.backlinks(to: target)
+            checkEqual(pages.first?.blockID, r.doc.blocks[0].id, "обратная ссылка записана")
+            r.tv.undo(nil)
+            r.checkSync("отмена")
+            r.caret(1, 3)
+            r.type("[")
+            r.type("[")
+            check(r.controller.slash == nil, "в коде не открывается")
+            r.caret(0, 0)
+            r.type("[")
+            r.type("[")
+            r.key(#selector(NSResponder.cancelOperation(_:)))
+            check(r.controller.slash == nil, "Escape")
+            try await r.close()
+        }
+    }
+    await test("Показ блока из поиска") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "один"), (.paragraph, "два")])
+            r.controller.reveal(r.doc.blocks[1].id)
+            checkEqual(r.tv.selectedRange().location, r.controller.spans[1].location)
+            try await r.close()
+        }
+    }
+    await test("Поиск: нормализация и фрагмент") {
+        checkEqual(SearchText.tokens("  Ёлка-Палка!  "), ["елка", "палка"])
+        checkEqual(SearchText.match("\"а*"), "\"а\"*")
+        check(SearchText.match("!!!") == nil, "нет слов")
+        let long = String(repeating: "слово ", count: 40) + "цель " + String(repeating: "конец ", count: 40)
+        let s = SearchText.snippet(long, query: "цель")
+        check(s.contains("цель") && s.hasPrefix("…") && s.hasSuffix("…"), "вокруг совпадения: \(s)")
+        checkEqual(PageLink.page(fromMark: "a:https://example.com"), nil)
+    }
+}

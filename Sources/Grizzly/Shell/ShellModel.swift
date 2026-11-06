@@ -24,7 +24,18 @@ struct KnownWorkspace: Codable, Equatable, Identifiable {
 /// Сборка зависимостей и состояние оболочки. Принадлежит AppDelegate, новых singleton нет.
 @MainActor
 final class ShellModel: ObservableObject {
-    @Published var section: ShellSection = .welcome
+    @Published var section: ShellSection = .welcome {
+        didSet {
+            guard oldValue != section, !restoringHistory else { return }
+            if oldValue != .welcome { backStack.append(oldValue) }
+            forwardStack = []
+        }
+    }
+    @Published private(set) var backStack: [ShellSection] = []
+    @Published private(set) var forwardStack: [ShellSection] = []
+    private var restoringHistory = false
+    @Published var showsSearch = false
+    @Published private(set) var backlinks: [Backlink] = []
     @Published private(set) var workspaceName = ""
     @Published private(set) var pages: [Page] = []
     @Published private(set) var saveStatus: SaveStatus = .saved
@@ -423,6 +434,9 @@ final class ShellModel: ObservableObject {
     private func installEditor(_ editorSession: EditorSession, id: UUID) {
         let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS, soft: Tokens.softNS)
         editor = PageEditorModel(session: editorSession, style: style) { [weak self] in self?.errorMessage = $0 }
+        editor?.controller.pageSearch = { [weak self] in self?.linkCandidates($0) ?? [] }
+        editor?.controller.onOpenPage = { [weak self] in self?.followLink(to: $0) }
+        backlinks = []
         section = .page(id)
         UserDefaults.standard.set(id.uuidString, forKey: lastPageKey)
     }
@@ -430,6 +444,119 @@ final class ShellModel: ObservableObject {
     func goHome() {
         UserDefaults.standard.removeObject(forKey: lastPageKey)
         leavePage { self.section = self.isOpen ? .home : .welcome }
+    }
+
+    // MARK: История переходов
+
+    func goBack() {
+        guard let target = backStack.popLast() else { return }
+        forwardStack.append(section)
+        restore(target)
+    }
+
+    func goForward() {
+        guard let target = forwardStack.popLast() else { return }
+        backStack.append(section)
+        restore(target)
+    }
+
+    private func restore(_ target: ShellSection) {
+        enqueue {
+            self.restoringHistory = true
+            defer { self.restoringHistory = false }
+            if case .page(let id) = target {
+                // Страница могла уйти в корзину: на неё не переходим.
+                if self.pages.contains(where: { $0.id == id }) { try await self.show(id) } else { self.section = .home }
+            } else {
+                try await self.session?.closeEditor()
+                self.editor = nil
+                self.section = target
+            }
+        }
+    }
+
+    // MARK: Поиск и ссылки
+
+    func search(_ query: String) async -> [SearchHit] {
+        (try? await store?.search(query)) ?? []
+    }
+
+    /// Страницы для ссылки «[[»: по заголовку, без текущей корзины.
+    func linkCandidates(_ query: String) -> [(id: UUID, title: String)] {
+        let key = SearchText.normalize(query.trimmingCharacters(in: .whitespaces))
+        let list = pages.filter { key.isEmpty || SearchText.normalize($0.title).contains(key) }
+        return Array(list.prefix(12)).map { ($0.id, $0.title) }
+    }
+
+    func reloadBacklinks(for page: UUID) {
+        enqueue {
+            guard let session = self.session, let store = self.store else { return }
+            try await session.coordinator.flush() // Ссылки считаются по записанному тексту.
+            self.backlinks = try await store.backlinks(to: page)
+        }
+    }
+
+    /// Переход по ссылке. Страница в корзине не подменяется другой (FR-04).
+    func followLink(to id: UUID) {
+        if pages.contains(where: { $0.id == id }) {
+            openPage(id)
+        } else {
+            notice = L("Страница, на которую ведёт ссылка, в корзине.")
+        }
+    }
+
+    func openPage(_ id: UUID, block: UUID?) {
+        enqueue {
+            try await self.show(id)
+            if let block { self.editor?.controller.reveal(block) }
+        }
+    }
+
+    // MARK: Действия со страницей
+
+    func toggleFavorite(_ id: UUID) {
+        enqueue {
+            guard let store = self.store, let session = self.session else { return }
+            let isFavorite = self.pages.first { $0.id == id }?.favoriteKey != nil
+            try await store.setFavorite(id, !isFavorite)
+            try await session.refreshPages()
+            self.pages = session.pages
+        }
+    }
+
+    func setIcon(_ id: UUID, _ icon: String?) {
+        enqueue {
+            guard let store = self.store, let session = self.session else { return }
+            try await store.setPageIcon(id, icon: icon)
+            try await session.refreshPages()
+            self.pages = session.pages
+        }
+    }
+
+    func toggleFullWidth(_ id: UUID) {
+        enqueue {
+            guard let store = self.store, let session = self.session else { return }
+            try await store.setPageFullWidth(id, self.pages.first { $0.id == id }?.fullWidth != true)
+            try await session.refreshPages()
+            self.pages = session.pages
+        }
+    }
+
+    func duplicatePage(_ id: UUID) {
+        enqueue {
+            guard let store = self.store, let session = self.session else { return }
+            try await session.coordinator.flush()
+            let title = self.pages.first { $0.id == id }?.title ?? ""
+            let copy = try await store.duplicatePage(id, title: String(format: L("%@ (копия)"), title), ids: RandomIDs(), now: SystemClock().nowMillis())
+            try await session.refreshPages()
+            self.pages = session.pages
+            try await self.reloadTags()
+            try await self.show(copy)
+        }
+    }
+
+    var favorites: [Page] {
+        pages.filter { $0.favoriteKey != nil }.sorted { ($0.favoriteKey ?? "") < ($1.favoriteKey ?? "") }
     }
 
     func goSettings() {

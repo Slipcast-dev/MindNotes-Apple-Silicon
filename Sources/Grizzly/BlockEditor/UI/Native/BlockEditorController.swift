@@ -16,6 +16,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     /// Открытое меню «/»: где стоит косая черта и что введено после неё.
     struct SlashState: Equatable {
+        enum Kind { case blocks, pageLink }
+        var kind: Kind = .blocks
         var blockID: UUID
         var slashOffset: Int
         var query: String
@@ -36,6 +38,10 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     var onSelectionRect: ((NSRect?) -> Void)?
     /// Нужен адрес ссылки: интерфейс спрашивает и возвращает значение.
     var requestLink: ((String?, @escaping (String?) -> Void) -> Void)?
+    /// Страницы для «[[»: запрос → найденные.
+    var pageSearch: ((String) -> [(id: UUID, title: String)])?
+    /// Нажата внутренняя ссылка.
+    var onOpenPage: ((UUID) -> Void)?
 
     private(set) var spans: [Span] = []
     private(set) var visible: [Block] = []
@@ -341,6 +347,10 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         case .deleteBlock:
             perform(.batch(topSelectedBlockIDs().map { .deleteBlock($0) }))
             if document.blocks.isEmpty { perform(.insertBlock(after: nil, type: .paragraph)) }
+        case .linkPage, .beginPageLink:
+            if case .beginPageLink = action {
+                textView.insertText("[[", replacementRange: range)
+            }
         case .duplicateBlock:
             let fragments = topSelectedBlockIDs().compactMap { document.block($0) }.map { b in
                 b.content.map { BlockFragment(type: b.type, content: $0) } ?? BlockFragment(opaque: b)
@@ -526,6 +536,9 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
                 slash = SlashState(blockID: id, slashOffset: offset - 1, query: "", selected: 0)
             }
         }
+        if typed == "[", block.type != .code, slash == nil, offset >= 2, (text as NSString).substring(with: NSRange(location: offset - 2, length: 2)) == "[[" {
+            slash = SlashState(kind: .pageLink, blockID: id, slashOffset: offset - 2, query: "", selected: 0)
+        }
         if slash != nil { updateSlash(); return }
 
         guard block.type == .paragraph else { return }
@@ -550,15 +563,25 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         guard var state = slash else { return }
         guard let block = document.block(state.blockID), let content = block.content else { return closeSlash() }
         let caret = textView.selectedRange().location
-        guard let span = spans.first(where: { $0.id == state.blockID }), caret >= span.location + state.slashOffset + 1, caret <= span.end else { return closeSlash() }
+        let trigger = state.kind == .blocks ? "/" : "[["
+        guard let span = spans.first(where: { $0.id == state.blockID }), caret >= span.location + state.slashOffset + trigger.utf16.count, caret <= span.end else { return closeSlash() }
         let text = content.plainText as NSString
-        guard text.length > state.slashOffset, text.substring(with: NSRange(location: state.slashOffset, length: 1)) == "/" else { return closeSlash() }
-        state.query = text.substring(with: NSRange(location: state.slashOffset + 1, length: caret - span.location - state.slashOffset - 1))
-        let items = EditorAction.filterSlash(state.query)
+        guard text.length >= state.slashOffset + trigger.utf16.count, text.substring(with: NSRange(location: state.slashOffset, length: trigger.utf16.count)) == trigger else { return closeSlash() }
+        let queryStart = state.slashOffset + trigger.utf16.count
+        state.query = text.substring(with: NSRange(location: queryStart, length: caret - span.location - queryStart))
+        let items = slashItems(state)
         guard !items.isEmpty, !state.query.contains("\n") else { return closeSlash() }
         state.selected = min(state.selected, items.count - 1)
         slash = state
         onSlashChange?(state, items, caretRectOnScreen())
+    }
+
+    private func slashItems(_ state: SlashState) -> [EditorAction.Item] {
+        switch state.kind {
+        case .blocks: return EditorAction.filterSlash(state.query)
+        case .pageLink:
+            return (pageSearch?(state.query) ?? []).map { EditorAction.Item(title: $0.title.isEmpty ? NSLocalizedString("Без названия", comment: "") : $0.title, action: .linkPage($0.id, $0.title)) }
+        }
     }
 
     func closeSlash() {
@@ -569,7 +592,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     func moveSlashSelection(by delta: Int) {
         guard var state = slash else { return }
-        let items = EditorAction.filterSlash(state.query)
+        let items = slashItems(state)
         guard !items.isEmpty else { return }
         state.selected = (state.selected + delta + items.count) % items.count
         slash = state
@@ -579,7 +602,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     /// Применяет пункт меню: убирает «/запрос» и выполняет действие одной правкой.
     func chooseSlash(_ index: Int? = nil) {
         guard let state = slash else { return }
-        let items = EditorAction.filterSlash(state.query)
+        let items = slashItems(state)
         let i = index ?? state.selected
         guard items.indices.contains(i), let span = spans.first(where: { $0.id == state.blockID }) else { return closeSlash() }
         let action = items[i].action
@@ -589,6 +612,14 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         let tailLength = span.end - textView.selectedRange().location
         cut.focus.offset = span.length - tailLength
         switch action {
+        case let .linkPage(id, title):
+            let shown = title.isEmpty ? NSLocalizedString("Без названия", comment: "") : title
+            perform(.replaceRange(cut, [BlockFragment(type: .paragraph, content: BlockContent(runs: [TextRun(shown, marks: [PageLink.mark(id)])]))]))
+            // Набор после ссылки идёт обычным текстом.
+            pendingRemoved.insert(PageLink.mark(id))
+        case .beginPageLink:
+            perform(.replaceRange(cut, []))
+            run(.beginPageLink)
         case .turnInto(let type):
             perform(.batch([.replaceRange(cut, []), .changeType(block: state.blockID, type: type)]))
         case .insert(let type):
@@ -668,6 +699,22 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         closeSlash()
         onSelectionRect?(nil)
         if !textView.hasMarkedText(), let index = editingIndex { commitText(at: index) }
+    }
+
+    /// Внутренние ссылки открывают страницу; внешние — системный браузер, только по нажатию.
+    func textView(_ view: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+        let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
+        guard let url, let page = PageLink.page(from: url) else { return false }
+        onOpenPage?(page)
+        return true
+    }
+
+    /// Показывает блок: переход из поиска и обратных ссылок.
+    func reveal(_ block: UUID) {
+        guard let span = spans.first(where: { $0.id == block }) else { return }
+        textView.setSelectedRange(NSRange(location: span.location, length: 0))
+        textView.scrollRangeToVisible(NSRange(location: span.location, length: span.length))
+        textView.showFindIndicator(for: NSRange(location: span.location, length: span.length))
     }
 
     // MARK: Клавиши

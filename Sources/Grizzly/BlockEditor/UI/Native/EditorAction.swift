@@ -13,6 +13,10 @@ enum EditorAction: Equatable {
     case outdent
     case deleteBlock
     case duplicateBlock
+    /// Вставляет ссылку на страницу вместо набранного «[[запрос».
+    case linkPage(UUID, String)
+    /// Начинает набор ссылки: вводит «[[».
+    case beginPageLink
 
     struct Item {
         let title: String
@@ -44,7 +48,10 @@ enum EditorAction: Equatable {
          Item(title: t("Код"), action: .turnInto(.code), aliases: ["code", "программа"])]
     }
 
-    static var inserts: [Item] { [Item(title: t("Разделитель"), action: .insert(.divider), aliases: ["линия", "divider", "черта"])] }
+    static var inserts: [Item] {
+        [Item(title: t("Разделитель"), action: .insert(.divider), aliases: ["линия", "divider", "черта"]),
+         Item(title: t("Ссылка на страницу"), action: .beginPageLink, aliases: ["link", "страница"])]
+    }
 
     static var marks: [Item] {
         [Item(title: t("Жирный"), action: .mark("b"), key: "b"),
@@ -65,8 +72,8 @@ enum EditorAction: Equatable {
     }
 
     static var blockActions: [Item] {
-        [Item(title: t("Увеличить вложенность"), action: .indent, key: "]"),
-         Item(title: t("Уменьшить вложенность"), action: .outdent, key: "["),
+        [Item(title: t("Увеличить вложенность"), action: .indent),
+         Item(title: t("Уменьшить вложенность"), action: .outdent),
          Item(title: t("Дублировать блок"), action: .duplicateBlock, key: "d"),
          Item(title: t("Удалить блок"), action: .deleteBlock)]
     }

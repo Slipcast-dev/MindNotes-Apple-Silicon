@@ -5,6 +5,8 @@ struct Page: Equatable, Identifiable {
     /// Значок страницы-папки в дереве.
     static let folderIcon = "folder"
     var isFolder: Bool { icon == Self.folderIcon }
+    /// Значок-emoji; у папки значок задан символом.
+    var emoji: String? { icon == Self.folderIcon ? nil : icon }
 
     var id: UUID
     var parentID: UUID?
