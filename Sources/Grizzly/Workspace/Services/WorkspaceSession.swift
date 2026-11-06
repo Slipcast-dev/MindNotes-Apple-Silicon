@@ -52,6 +52,29 @@ final class WorkspaceSession {
         try await refreshPages()
     }
 
+    /// Удаляет страницу с подстраницами в корзину. Открытая в них правка сначала записывается.
+    func trash(_ id: UUID) async throws {
+        var inSubtree: Set<UUID> = [id]
+        var grew = true
+        while grew {
+            grew = false
+            for p in pages where p.parentID.map({ inSubtree.contains($0) }) == true && !inSubtree.contains(p.id) {
+                inSubtree.insert(p.id)
+                grew = true
+            }
+        }
+        if let open = editor, inSubtree.contains(open.pageID) { try await closeEditor() }
+        try await coordinator.flush()
+        try await store.trashPage(id, batch: ids.next(), now: clock.nowMillis())
+        try await refreshPages()
+    }
+
+    func restore(batch: UUID) async throws -> Bool {
+        let moved = try await store.restoreTrash(batch: batch)
+        try await refreshPages()
+        return moved
+    }
+
     /// Открывает страницу. Предыдущая сначала записывается, чтобы новая не прочитала устаревшие данные.
     func open(_ id: UUID) async throws -> EditorSession {
         try await editor?.close()

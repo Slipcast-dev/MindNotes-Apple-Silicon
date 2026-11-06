@@ -16,6 +16,10 @@ final class FlakyStore: WorkspaceStore {
     func updatePage(_ page: Page) async throws { try await inner.updatePage(page) }
     func movePage(_ id: UUID, toParent parent: UUID?, afterSibling: UUID?, now: Int64) async throws { try await inner.movePage(id, toParent: parent, afterSibling: afterSibling, now: now) }
     func blocks(ofPage id: UUID) async throws -> [Block] { try await inner.blocks(ofPage: id) }
+    func trashPage(_ id: UUID, batch: UUID, now: Int64) async throws { try await inner.trashPage(id, batch: batch, now: now) }
+    func trashItems() async throws -> [TrashItem] { try await inner.trashItems() }
+    func restoreTrash(batch: UUID) async throws -> Bool { try await inner.restoreTrash(batch: batch) }
+    func purgeTrash(batch: UUID) async throws { try await inner.purgeTrash(batch: batch) }
     func markOpened(_ id: UUID, now: Int64) async throws { try await inner.markOpened(id, now: now) }
     func saveRevision(pageID: UUID, reason: String, blocks: [Block], id: UUID, now: Int64) async throws -> Revision? { try await inner.saveRevision(pageID: pageID, reason: reason, blocks: blocks, id: id, now: now) }
     func revisions(ofPage id: UUID) async throws -> [Revision] { try await inner.revisions(ofPage: id) }

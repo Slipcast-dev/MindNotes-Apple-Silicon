@@ -1,8 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Корень окна. Файловый режим монтируется при первом входе и дальше живёт скрытым:
-/// отмена и прокрутка файлов хранятся в его видах.
+/// Корень окна. Боковая панель общая; файловый режим живёт в области содержимого.
 struct RootView: View {
     @EnvironmentObject private var shell: ShellModel
     @EnvironmentObject private var state: AppState
@@ -11,26 +10,15 @@ struct RootView: View {
     private var inFiles: Bool { shell.section == .files }
 
     var body: some View {
-        ZStack {
-            if shell.filesMounted {
-                ContentView()
-                    .opacity(inFiles ? 1 : 0)
-                    .allowsHitTesting(inFiles)
-                    .accessibilityHidden(!inFiles)
+        NotesLayout()
+            .background(WindowChrome(opaque: !inFiles || !prefs.glassEnabled))
+            .background(WindowFrameSaver(name: "GrizzlyNotesMainWindow"))
+            .preferredColorScheme(prefs.theme.isDark ? .dark : .light)
+            // Файл, открытый из Finder, всегда попадает в раздел «Файлы» без импорта.
+            .onReceive(state.$documents) { docs in
+                if !docs.isEmpty && !inFiles { shell.goFiles() }
             }
-            if !inFiles {
-                NotesLayout()
-            }
-        }
-        .background(WindowChrome(notes: !inFiles))
-        .background(WindowFrameSaver(name: "GrizzlyNotesMainWindow"))
-        .preferredColorScheme(prefs.theme.isDark ? .dark : .light)
-        // Файл, открытый из Finder, всегда попадает в файловый режим без импорта.
-        .onReceive(state.$documents) { docs in
-            if !docs.isEmpty && !inFiles { shell.goFiles() }
-        }
-        .toolbar {
-            if !inFiles {
+            .toolbar {
                 ToolbarItem(placement: .navigation) {
                     Text(AppEdition.displayName).font(.system(size: 13, weight: .semibold))
                 }
@@ -44,48 +32,26 @@ struct RootView: View {
                     .accessibilityLabel(Text("Переключить тему"))
                 }
             }
-        }
-        .alert("Ошибка", isPresented: Binding(get: { shell.errorMessage != nil }, set: { if !$0 { shell.errorMessage = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(shell.errorMessage ?? "")
-        }
+            .alert("Ошибка", isPresented: Binding(get: { shell.errorMessage != nil }, set: { if !$0 { shell.errorMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(shell.errorMessage ?? "")
+            }
     }
 }
 
-/// Заголовок окна в цвет бумаги в пространстве и обычный в файловом режиме.
+/// Заголовок окна в цвет бумаги. Эффект стекла файлового режима включается в его настройках.
 struct WindowChrome: NSViewRepresentable {
-    let notes: Bool
-
-    /// Скрытый файловый режим оставляет в заголовке кнопку своей боковой панели; вне «Файлов» она не нужна.
-    final class Coordinator {
-        private var removed: NSToolbarItem.Identifier?
-
-        func syncSidebarToggle(window: NSWindow, visible: Bool) {
-            guard let toolbar = window.toolbar else { return }
-            if visible {
-                if let id = removed {
-                    toolbar.insertItem(withItemIdentifier: id, at: 0)
-                    removed = nil
-                }
-            } else if let index = toolbar.items.firstIndex(where: { $0.itemIdentifier.rawValue.lowercased().contains("togglesidebar") }) {
-                removed = toolbar.items[index].itemIdentifier
-                toolbar.removeItem(at: index)
-            }
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    let opaque: Bool
 
     func makeNSView(context: Context) -> NSView { NSView() }
 
     func updateNSView(_ view: NSView, context: Context) {
         DispatchQueue.main.async {
             guard let window = view.window else { return }
-            window.titleVisibility = notes ? .hidden : .visible
-            window.titlebarAppearsTransparent = notes
-            context.coordinator.syncSidebarToggle(window: window, visible: !notes)
-            if notes {
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            if opaque {
                 window.isOpaque = true
                 window.backgroundColor = Tokens.paperNS
             }
@@ -109,7 +75,16 @@ struct NotesLayout: View {
                     VStack(spacing: 0) {
                         CrumbBar()
                         Rectangle().fill(Tokens.line).frame(height: 1)
-                        content
+                        ZStack {
+                            // Смонтирован после первого входа и дальше скрыт: отмена и прокрутка файлов живут в его видах.
+                            if shell.filesMounted {
+                                ContentView()
+                                    .opacity(shell.section == .files ? 1 : 0)
+                                    .allowsHitTesting(shell.section == .files)
+                                    .accessibilityHidden(shell.section != .files)
+                            }
+                            if shell.section != .files { content }
+                        }
                     }
                 }
             }
@@ -129,7 +104,9 @@ struct NotesLayout: View {
                 Color.clear
             }
         case .backups: BackupsScreen()
-        default: HomeScreen()
+        case .settings: SettingsScreen()
+        case .trash: TrashScreen()
+        default: HomeScreen().background(Tokens.paper)
         }
     }
 
@@ -159,13 +136,16 @@ struct CrumbBar: View {
         switch shell.section {
         case .page(let id): return shell.pages.first { $0.id == id }?.title ?? ""
         case .backups: return L("Резервные копии")
+        case .settings: return L("Настройки")
+        case .trash: return L("Корзина")
+        case .files: return L("Файлы")
         default: return L("Главная")
         }
     }
 
     var body: some View {
         HStack(spacing: 9) {
-            Button(shell.workspaceName) { shell.goHome() }
+            Button(shell.isOpen ? shell.workspaceName : AppEdition.displayName) { shell.goHome() }
                 .buttonStyle(.plain)
                 .foregroundColor(Tokens.muted)
             Text("/").foregroundColor(Tokens.muted)
@@ -175,9 +155,21 @@ struct CrumbBar: View {
             Spacer()
             // Ошибка записи видна на любом экране: уход со страницы не отменяет её.
             if case .page = shell.section { saveIndicator } else if case .failed = shell.saveStatus { saveIndicator }
-            Button("Настройки") { SettingsOpener.show() }
-                .buttonStyle(.plain)
-                .foregroundColor(Tokens.muted)
+            if case .page(let id) = shell.section {
+                Menu {
+                    Button("Новая подстраница") { shell.createPage(parent: id) }
+                    Divider()
+                    Button("Удалить страницу") { shell.trash(id) }
+                } label: { Image(systemName: "ellipsis") }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .accessibilityLabel(Text("Действия со страницей"))
+            } else if shell.section != .settings {
+                Button("Настройки") { shell.goSettings() }
+                    .buttonStyle(.plain)
+                    .foregroundColor(Tokens.muted)
+            }
         }
         .font(.system(size: 12))
         .padding(.horizontal, 27)

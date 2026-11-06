@@ -84,7 +84,7 @@ final class Preferences: ObservableObject {
     private init() {
         let d = UserDefaults.standard
         appearance = Appearance(rawValue: d.string(forKey: "appearance") ?? "") ?? .system
-        themeID = d.string(forKey: "themeID") ?? "xcode"
+        themeID = d.string(forKey: "themeID") ?? "notes"
         fontName = d.string(forKey: "fontName") ?? Preferences.systemFont
         fontSize = d.object(forKey: "fontSize") as? Double ?? 15
         uiFontName = d.string(forKey: "uiFontName") ?? Preferences.systemFont

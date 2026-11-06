@@ -7,6 +7,8 @@ enum ShellSection: Equatable {
     case files
     case page(UUID)
     case backups
+    case settings
+    case trash
 }
 
 /// Сборка зависимостей и состояние оболочки. Принадлежит AppDelegate, новых singleton нет.
@@ -19,6 +21,9 @@ final class ShellModel: ObservableObject {
     @Published private(set) var editor: PageEditorModel?
     @Published var errorMessage: String?
     @Published var filesMounted = false
+    /// Панель библиотеки в разделе «Файлы».
+    @Published var showsLibrary = false
+    @Published private(set) var trashItems: [TrashItem] = []
     @Published private(set) var backups: [BackupItem] = []
     @Published private(set) var busyMessage: String?
     @Published var notice: String?
@@ -175,7 +180,67 @@ final class ShellModel: ObservableObject {
 
     func goHome() {
         UserDefaults.standard.removeObject(forKey: lastPageKey)
-        leavePage { self.section = .home }
+        leavePage { self.section = self.isOpen ? .home : .welcome }
+    }
+
+    func goSettings() {
+        leavePage { self.section = .settings }
+    }
+
+    func goTrash() {
+        leavePage {
+            self.section = .trash
+            self.enqueue { try await self.reloadTrash() }
+        }
+    }
+
+    // MARK: Корзина
+
+    private func reloadTrash() async throws {
+        trashItems = (try await session?.store.trashItems()) ?? []
+    }
+
+    /// Удаление мягкое: страницу можно вернуть из корзины.
+    func trash(_ id: UUID) {
+        enqueue {
+            guard let session = self.session else { return }
+            try await session.trash(id)
+            self.pages = session.pages
+            if session.editor == nil, self.editor != nil {
+                self.editor = nil
+                UserDefaults.standard.removeObject(forKey: self.lastPageKey)
+                if case .page = self.section { self.section = .home }
+            }
+            try await self.reloadTrash()
+            self.notice = L("Страница перемещена в корзину.")
+        }
+    }
+
+    func restoreFromTrash(_ item: TrashItem) {
+        enqueue {
+            guard let session = self.session else { return }
+            let moved = try await session.restore(batch: item.batchID)
+            self.pages = session.pages
+            try await self.reloadTrash()
+            self.notice = moved ? L("Прежняя родительская страница недоступна: страница восстановлена в корень.") : L("Страница восстановлена.")
+        }
+    }
+
+    /// Окончательное удаление только после явного подтверждения.
+    func purgeFromTrash(_ item: TrashItem) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = String(format: L("Удалить «%@» навсегда?"), item.page.title.isEmpty ? L("Без названия") : item.page.title)
+        alert.informativeText = item.descendants > 0
+            ? String(format: L("Вместе с подстраницами (%d). Это действие нельзя отменить."), item.descendants)
+            : L("Это действие нельзя отменить.")
+        alert.addButton(withTitle: L("Удалить навсегда"))
+        alert.addButton(withTitle: L("Отмена"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        enqueue {
+            try await self.session?.store.purgeTrash(batch: item.batchID)
+            try await self.reloadTrash()
+        }
     }
 
     func goBackups() {
@@ -190,10 +255,6 @@ final class ShellModel: ObservableObject {
             self.filesMounted = true
             self.section = .files
         }
-    }
-
-    func goWorkspaceRoot() {
-        section = isOpen ? .home : .welcome
     }
 
     /// Уход со страницы: правка уже в очереди записи; снимок истории делается после неё.

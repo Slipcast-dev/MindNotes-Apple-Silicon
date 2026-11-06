@@ -22,7 +22,7 @@ struct WelcomeScreen: View {
                 Button("Открыть пространство…") { shell.presentOpen() }.buttonStyle(NotesButtonStyle())
                 Button("Восстановить из копии…") { shell.presentRestore() }.buttonStyle(NotesButtonStyle())
             }
-            Button("Открыть файл на диске") { shell.goFiles() }
+            Button("Открыть файлы на диске") { shell.goFiles() }
                 .buttonStyle(NotesButtonStyle(kind: .plain))
                 .padding(.top, 9)
         }

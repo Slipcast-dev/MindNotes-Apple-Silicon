@@ -215,3 +215,85 @@ func runReviewFixTests() async {
         checkEqual(d?.text.unicodeScalars.count, 2)
     }
 }
+
+@MainActor
+func runTrashTests() async {
+    await test("AT-08: удалить страницу с дочерними и восстановить") {
+        try await withTempDir { dir in
+            let w = dir.appendingPathComponent("w")
+            let ws = try SQLiteWorkspace.create(at: w, name: "A")
+            let session = WorkspaceSession(store: ws, name: "A")
+            let root = try await session.createPage(parent: nil, title: "Проект")
+            let child = try await session.createPage(parent: root.id, title: "Подстраница")
+            let grand = try await session.createPage(parent: child.id, title: "Внучка")
+            let other = try await session.createPage(parent: nil, title: "Другая")
+            let e = try await session.open(child.id)
+            try e.perform(.setPlainText(block: e.document.blocks[0].id, text: "Несохранённый текст ёж"))
+
+            try await session.trash(root.id)
+            check(session.editor == nil, "открытая страница закрыта")
+            checkEqual(session.pages.map(\.id), [other.id], "поддерево исчезло из обычного списка")
+            let items = try await ws.trashItems()
+            checkEqual(items.count, 1, "одно действие — одна запись корзины")
+            checkEqual(items[0].page.id, root.id)
+            checkEqual(items[0].descendants, 2)
+
+            await checkThrows("перемещение под удалённую запрещено") { try await session.move(other.id, toParent: root.id, afterSibling: nil) }
+
+            let moved = try await session.restore(batch: items[0].batchID)
+            check(!moved, "родитель не менялся")
+            checkEqual(session.pages.first { $0.id == grand.id }?.parentID, child.id, "дерево вернулось")
+            checkEqual(session.pages.first { $0.id == child.id }?.parentID, root.id)
+            let blocks = try await ws.blocks(ofPage: child.id)
+            checkEqual(blocks.first?.plainText, "Несохранённый текст ёж", "содержимое и последняя правка на месте")
+            let empty = try await ws.trashItems()
+            check(empty.isEmpty, "корзина пуста")
+            try await session.close()
+        }
+    }
+
+    await test("Корзина: родитель удалён отдельно — восстановление в корень") {
+        try await withTempDir { dir in
+            let ws = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "A")
+            let session = WorkspaceSession(store: ws, name: "A")
+            let parent = try await session.createPage(parent: nil, title: "Родитель")
+            let child = try await session.createPage(parent: parent.id, title: "Дочерняя")
+            try await session.trash(child.id)
+            try await session.trash(parent.id)
+            let items = try await ws.trashItems()
+            checkEqual(items.count, 2, "два действия — две записи")
+            let childItem = items.first { $0.page.id == child.id }!
+            let moved = try await session.restore(batch: childItem.batchID)
+            check(moved, "сообщаем о восстановлении в корень")
+            checkEqual(session.pages.first { $0.id == child.id }?.parentID, nil)
+            try await session.close()
+        }
+    }
+
+    await test("Корзина: окончательное удаление не трогает остальное и переживает перезапуск") {
+        try await withTempDir { dir in
+            let w = dir.appendingPathComponent("w")
+            var ws = try SQLiteWorkspace.create(at: w, name: "A")
+            let a = try await ws.createPage(parent: nil, title: "A", id: UUID(), now: 1)
+            let aa = try await ws.createPage(parent: a.id, title: "AA", id: UUID(), now: 1)
+            let b = try await ws.createPage(parent: nil, title: "B", id: UUID(), now: 1)
+            var batch = SaveBatch()
+            let bid = UUID()
+            batch.upserts[bid] = Block(id: bid, pageID: aa.id, sortKey: "a0", content: BlockContent(text: "x"), createdAt: 1)
+            try await ws.commit(batch)
+            let del = UUID()
+            try await ws.trashPage(a.id, batch: del, now: 2)
+            ws.close()
+            ws = try SQLiteWorkspace.open(at: w)
+            let after = try await ws.trashItems()
+            checkEqual(after.map(\.batchID), [del], "корзина сохранилась после перезапуска")
+            try await ws.purgeTrash(batch: del)
+            let pages = try await ws.allPages()
+            checkEqual(pages.map(\.id), [b.id])
+            let gone = try await ws.page(aa.id)
+            check(gone == nil, "страница удалена окончательно")
+            checkEqual(try ws.maintenanceWrite { try $0.scalarInt("SELECT count(*) FROM blocks") }, 0, "блоки удалены")
+            ws.close()
+        }
+    }
+}

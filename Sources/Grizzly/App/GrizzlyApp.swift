@@ -76,6 +76,10 @@ struct GrizzlyApp: App {
         .windowToolbarStyle(.unified)
         Settings { SettingsView().environmentObject(settings) }
         .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Настройки…") { delegate.shell.goSettings() }
+                    .keyboardShortcut(",")
+            }
             CommandGroup(replacing: .newItem) {
                 Button("Новая страница") { delegate.shell.createPage() }
                     .keyboardShortcut("n")

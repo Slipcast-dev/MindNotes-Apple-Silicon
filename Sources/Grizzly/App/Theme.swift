@@ -50,6 +50,12 @@ struct ThemeSet: Identifiable {
     func variant(dark wantsDark: Bool) -> Theme { wantsDark ? dark : (light ?? dark) }
 
     static let all: [ThemeSet] = [
+        // Палитра макетов Grizzly Notes; файловый редактор выглядит как остальное приложение.
+        ThemeSet(id: "notes", name: "Grizzly Notes",
+                 light: Theme(dark: false, [0xFDFCF8, 0x252B22, 0x666D60, 0x395740, 0x252B22, 0x7A4A2A, 0xF4F4ED, 0xA9AEA3, 0xE3E5D9,
+                                            0x335467, 0x36583B, 0x694922, 0x7A3F5C, 0x8A9184, 0xAD463C, 0x946A1E, 0x36583B]),
+                 dark: Theme(dark: true, [0x252D25, 0xEDF0E7, 0xB6C0B0, 0xABD1A1, 0xEDF0E7, 0xE8C9A8, 0x2D372D, 0x6E7A6C, 0x3B463A,
+                                          0x9CC3D6, 0xB5D8A8, 0xEBD39A, 0xE3A8C4, 0x8C9988, 0xE8988F, 0xEBC26B, 0xABD1A1])),
         ThemeSet(id: "xcode", name: "Xcode",
                  light: Theme(dark: false, [0xFFFFFF, 0x24292F, 0x6E7781, 0x0A64D6, 0x0B7A6B, 0xB3361E, 0xF1F1F3, 0xB0B5BB, 0xD0D4D9,
                                             0x0550AE, 0xA3410F, 0x6F42C1, 0xC2185B, 0x6E7781, 0xCF222E, 0x9A6700, 0x1A7F37]),

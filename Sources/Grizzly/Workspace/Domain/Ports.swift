@@ -52,6 +52,14 @@ protocol BlockSink: AnyObject {
     func commit(_ batch: SaveBatch) async throws
 }
 
+/// Удаление одним действием: страница с её подстраницами.
+struct TrashItem: Equatable, Identifiable {
+    var page: Page
+    var batchID: UUID
+    var descendants: Int
+    var id: UUID { batchID }
+}
+
 /// Операции над страницами и блоками.
 protocol WorkspaceStore: BlockSink {
     func workspaceID() async throws -> UUID
@@ -61,6 +69,13 @@ protocol WorkspaceStore: BlockSink {
     func updatePage(_ page: Page) async throws
     /// Перемещение транзакционно; цикл запрещён.
     func movePage(_ id: UUID, toParent parent: UUID?, afterSibling: UUID?, now: Int64) async throws
+    /// Мягкое удаление поддерева одним пакетом.
+    func trashPage(_ id: UUID, batch: UUID, now: Int64) async throws
+    func trashItems() async throws -> [TrashItem]
+    /// Возвращает true, если прежний родитель недоступен и страница восстановлена в корень.
+    func restoreTrash(batch: UUID) async throws -> Bool
+    /// Окончательное удаление: только по явному действию пользователя.
+    func purgeTrash(batch: UUID) async throws
     func blocks(ofPage id: UUID) async throws -> [Block]
     func markOpened(_ id: UUID, now: Int64) async throws
     func saveRevision(pageID: UUID, reason: String, blocks: [Block], id: UUID, now: Int64) async throws -> Revision?

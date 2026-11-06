@@ -10,30 +10,26 @@ struct ContentView: View {
     var body: some View {
         let theme = prefs.theme
 
-        NavigationSplitView {
-            SidebarView()
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    // Выход из файлового режима в пространство; сам режим не меняется.
-                    Button { shell.goWorkspaceRoot() } label: {
-                        Label(shell.isOpen ? "Пространство" : "Назад", systemImage: "chevron.left")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                }
-                .background(theme.background.opacity(prefs.sidebarTint))
-                .id(prefs.uiFontKey)
-                .navigationSplitViewColumnWidth(min: 190, ideal: 230, max: 320)
-        } detail: {
-            DetailView(fontSize: CGFloat(prefs.fontSize))
-                .id(prefs.uiFontKey)
-                .background(theme.background.opacity(prefs.surfaceOpacity))
-                .background { if prefs.glassEnabled { VisualEffect(material: .underWindowBackground) } }
+        HStack(spacing: 0) {
+            // Библиотека файлов открывается по кнопке; основная боковая панель — общая для всего окна.
+            if shell.showsLibrary {
+                SidebarView()
+                    .frame(width: 260)
+                    .background(Tokens.side)
+                    .id(prefs.uiFontKey)
+                Rectangle().fill(Tokens.line).frame(width: 1)
+            }
+            if state.documents.isEmpty {
+                FilesScreen()
+            } else {
+                DetailView(fontSize: CGFloat(prefs.fontSize))
+                    .id(prefs.uiFontKey)
+                    .background(theme.background.opacity(prefs.surfaceOpacity))
+                    .background { if prefs.glassEnabled { VisualEffect(material: .underWindowBackground) } }
+            }
         }
         .environment(\.font, AppFont.body)
-                .background(GlassWindowConfigurator(enabled: prefs.glassEnabled))
-        .navigationTitle(shell.section == .files ? (state.current?.name ?? AppEdition.displayName) : AppEdition.displayName)
+                .background { if prefs.glassEnabled { GlassWindowConfigurator(enabled: true) } }
         .toolbar {
             if shell.section == .files {
             // The view mode switch sits in the middle of the title bar; everything else for the current file is on the right.
@@ -47,6 +43,11 @@ struct ContentView: View {
                 .help("Пользователь: текст без кода форматирования. Разработчик: исходный текст с разметкой, подсветкой и номерами строк.")
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                Button { shell.showsLibrary.toggle() } label: { Image(systemName: "sidebar.left") }
+                    .buttonStyle(.hover)
+                    .help("Библиотека файлов")
+                    .accessibilityLabel(Text("Библиотека файлов"))
+
                 Button { state.toggleSplit() } label: {
                     Image(systemName: state.isSplit ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
                 }
@@ -75,7 +76,7 @@ struct ContentView: View {
                 // Rightmost of all: the Settings window.
                 Button { SettingsOpener.show() } label: { Image(systemName: "gearshape") }
                     .buttonStyle(.hover)
-                    .help("Настройки (⌘,)")
+                    .help("Настройки файлов")
             }
             }
         }
@@ -122,17 +123,26 @@ struct ContentView: View {
 }
 
 /// Opens the Settings window (the same as ⌘,).
+/// Отдельное окно настроек файлового режима: шрифты, подсветка, типы файлов.
+/// Общие настройки приложения находятся на экране «Настройки».
+@MainActor
 enum SettingsOpener {
+    private static var window: NSWindow?
+
     static func show() {
         NSApp.activate(ignoringOtherApps: true)
-        // The system menu item does the same as ⌘,; looking it up works on every macOS version (sending the action
-        // to nobody finds no target when no window of the Settings scene exists yet).
-        if let appMenu = NSApp.mainMenu?.items.first?.submenu,
-           let index = appMenu.items.firstIndex(where: { $0.keyEquivalent == "," && $0.isEnabled }) {
-            appMenu.performActionForItem(at: index)
-        } else if !NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+        if let window {
+            window.makeKeyAndOrderFront(nil)
+            return
         }
+        let host = NSHostingController(rootView: SettingsView().environmentObject(Preferences.shared))
+        let created = NSWindow(contentViewController: host)
+        created.title = L("Настройки файлов")
+        created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        created.isReleasedWhenClosed = false
+        created.center()
+        created.makeKeyAndOrderFront(nil)
+        window = created
     }
 }
 

@@ -267,6 +267,60 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
         }
     }
 
+    // MARK: Корзина
+
+    func trashPage(_ id: UUID, batch: UUID, now: Int64) async throws {
+        try await writer.run { db in
+            try db.transaction {
+                guard try Self.exists(db, id) else { throw WorkspaceError.pageNotFound(id) }
+                try db.run("""
+                WITH RECURSIVE sub(id) AS (
+                    SELECT ? UNION ALL SELECT p.id FROM pages p JOIN sub ON p.parent_id = sub.id WHERE p.deleted_at IS NULL
+                ) UPDATE pages SET deleted_at=?, trash_batch_id=? WHERE id IN (SELECT id FROM sub)
+                """, [SQLValue(id), .int(now), SQLValue(batch)])
+            }
+        }
+    }
+
+    func trashItems() async throws -> [TrashItem] {
+        try await reader.run { db in
+            // Корень пакета: страница, родитель которой не удалён тем же действием.
+            try db.query("""
+            SELECT \(Self.pageColumns), (SELECT count(*) - 1 FROM pages q WHERE q.trash_batch_id = pages.trash_batch_id)
+            FROM pages WHERE deleted_at IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM pages q WHERE q.id = pages.parent_id AND q.trash_batch_id = pages.trash_batch_id
+            ) ORDER BY deleted_at DESC
+            """) { r -> TrashItem? in
+                guard let page = Self.decodePage(r), let batch = page.trashBatchID else { return nil }
+                return TrashItem(page: page, batchID: batch, descendants: Int(r.int(14)))
+            }.compactMap { $0 }
+        }
+    }
+
+    func restoreTrash(batch: UUID) async throws -> Bool {
+        try await writer.run { db in
+            try db.transaction {
+                // Родитель в другом пакете корзины недоступен: страница возвращается в корень, а не теряется.
+                try db.run("""
+                UPDATE pages SET parent_id = NULL WHERE trash_batch_id = ? AND parent_id IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM pages q WHERE q.id = pages.parent_id AND q.deleted_at IS NOT NULL AND q.trash_batch_id IS NOT ?
+                )
+                """, [SQLValue(batch), SQLValue(batch)])
+                let moved = db.changes > 0
+                try db.run("UPDATE pages SET deleted_at = NULL, trash_batch_id = NULL WHERE trash_batch_id = ?", [SQLValue(batch)])
+                return moved
+            }
+        }
+    }
+
+    func purgeTrash(batch: UUID) async throws {
+        try await writer.run { db in
+            try db.transaction {
+                try db.run("DELETE FROM pages WHERE trash_batch_id = ? AND deleted_at IS NOT NULL", [SQLValue(batch)])
+            }
+        }
+    }
+
     // MARK: Пакет правок
 
     func commit(_ batch: SaveBatch) async throws {

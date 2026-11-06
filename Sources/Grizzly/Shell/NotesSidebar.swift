@@ -58,8 +58,8 @@ struct NotesSidebar: View {
                         .frame(width: 35, height: 35)
                         .background(RoundedRectangle(cornerRadius: 11).fill(Tokens.logo))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(shell.workspaceName).font(.system(size: 14, weight: .bold)).lineLimit(1)
-                        Text("Локально на этом Mac").font(.system(size: 11)).foregroundColor(Tokens.muted)
+                        Text(shell.isOpen ? shell.workspaceName : AppEdition.displayName).font(.system(size: 14, weight: .bold)).lineLimit(1)
+                        Text(shell.isOpen ? "Локально на этом Mac" : "Пространство не открыто").font(.system(size: 11)).foregroundColor(Tokens.muted)
                     }
                 }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -69,7 +69,7 @@ struct NotesSidebar: View {
                     Button("Создать другое пространство…") { shell.presentCreate() }
                     Button("Открыть другое пространство…") { shell.presentOpen() }
                     Divider()
-                    Button("Закрыть пространство") { shell.closeWorkspace() }
+                    if shell.isOpen { Button("Закрыть пространство") { shell.closeWorkspace() } }
                 } label: { Color.clear }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
@@ -82,20 +82,27 @@ struct NotesSidebar: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     SidebarRow(title: L("Главная"), symbol: "house", active: shell.section == .home) { shell.goHome() }
-                    SidebarRow(title: L("Файлы"), symbol: "doc", active: false) { shell.goFiles() }
+                    SidebarRow(title: L("Файлы"), symbol: "doc", active: shell.section == .files) { shell.goFiles() }
 
-                    SidebarGroup(title: L("Страницы"))
-                    ForEach(shell.children(of: nil)) { PageTreeRow(page: $0, depth: 0) }
-                    SidebarRow(title: L("Новая страница"), symbol: "plus") { shell.createPage() }
+                    if shell.isOpen {
+                        SidebarGroup(title: L("Страницы"))
+                        ForEach(shell.children(of: nil)) { PageTreeRow(page: $0, depth: 0) }
+                        SidebarRow(title: L("Новая страница"), symbol: "plus") { shell.createPage() }
+                    }
 
                     SidebarGroup(title: L("Пространство"))
-                    SidebarRow(title: L("Настройки"), symbol: "gearshape") { SettingsOpener.show() }
+                    if shell.isOpen {
+                        SidebarRow(title: L("Корзина"), symbol: "trash", active: shell.section == .trash) { shell.goTrash() }
+                    }
+                    SidebarRow(title: L("Настройки"), symbol: "gearshape", active: shell.section == .settings) { shell.goSettings() }
                 }
             }
 
             Rectangle().fill(Tokens.line).frame(height: 1).padding(.top, 8)
-            SidebarRow(title: L("Резервные копии"), symbol: "arrow.clockwise", active: shell.section == .backups) { shell.goBackups() }
-                .padding(.top, 8)
+            if shell.isOpen {
+                SidebarRow(title: L("Резервные копии"), symbol: "arrow.clockwise", active: shell.section == .backups) { shell.goBackups() }
+                    .padding(.top, 8)
+            }
             HStack(spacing: 6) {
                 Circle().fill(Tokens.muted).frame(width: 8, height: 8)
                 Text("Локальный режим").font(.system(size: 11)).foregroundColor(Tokens.muted)
@@ -132,6 +139,8 @@ struct PageTreeRow: View {
                         Button(target.title.isEmpty ? L("Без названия") : target.title) { shell.move(page.id, toParent: target.id) }
                     }
                 }
+                Divider()
+                Button("Удалить") { shell.trash(page.id) }
             }
             if expanded {
                 ForEach(kids) { PageTreeRow(page: $0, depth: depth + 1) }
