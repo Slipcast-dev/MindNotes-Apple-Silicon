@@ -1,35 +1,27 @@
 import AppKit
 import SwiftUI
 
-struct BlockKind {
-    let type: BlockType
-    let title: String
-    static var all: [BlockKind] {
-        [BlockKind(type: .paragraph, title: L("Текст")), BlockKind(type: .heading1, title: L("Заголовок 1")),
-         BlockKind(type: .heading2, title: L("Заголовок 2")), BlockKind(type: .heading3, title: L("Заголовок 3")),
-         BlockKind(type: .task, title: L("Задача"))]
-    }
-}
-
 /// Открытая страница для интерфейса: контроллер живёт столько же, сколько сессия редактора.
 @MainActor
 final class PageEditorModel: ObservableObject {
     private let session: EditorSession
     let controller: BlockEditorController
     @Published private(set) var contentHeight: CGFloat = 60
+    private let panels: EditorPanels
 
     var pageID: UUID { session.pageID }
 
     init(session: EditorSession, style: BlockTextStyle, onError: @escaping (String) -> Void) {
         self.session = session
         controller = BlockEditorController(session: session, style: style)
+        panels = EditorPanels(controller: controller)
         controller.onError = onError
         controller.onHeightChange = { [weak self] in self?.contentHeight = $0 }
         controller.updateHeight(force: true)
     }
 
     func insert(_ type: BlockType) {
-        controller.insertBlock(type)
+        controller.run(type.isAtom ? .insert(type) : .turnInto(type))
         controller.textView.window?.makeFirstResponder(controller.textView)
     }
 
@@ -43,4 +35,213 @@ struct NativeBlockEditor: NSViewRepresentable {
     func makeNSView(context: Context) -> BlockTextView { editor.controller.textView }
 
     func updateNSView(_ view: BlockTextView, context: Context) {}
+}
+
+/// Плавающие панели редактора: меню «/» и панель форматирования при выделении.
+@MainActor
+final class EditorPanels {
+    private let controller: BlockEditorController
+    private var slashPanel: NSPanel?
+    private var toolbarPanel: NSPanel?
+
+    init(controller: BlockEditorController) {
+        self.controller = controller
+        controller.onSlashChange = { [weak self] state, items, rect in self?.showSlash(state, items, rect) }
+        controller.onSelectionRect = { [weak self] rect in self?.showToolbar(rect) }
+        controller.requestLink = { current, done in
+            let alert = NSAlert()
+            alert.messageText = L("Ссылка")
+            alert.informativeText = L("Пустой адрес убирает ссылку.")
+            let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+            field.stringValue = current ?? ""
+            field.placeholderString = "https://"
+            alert.accessoryView = field
+            alert.window.initialFirstResponder = field
+            alert.addButton(withTitle: L("Готово"))
+            alert.addButton(withTitle: L("Отмена"))
+            if alert.runModal() == .alertFirstButtonReturn { done(field.stringValue) }
+        }
+    }
+
+    deinit {
+        let panels = [slashPanel, toolbarPanel]
+        Task { @MainActor in panels.forEach { $0?.orderOut(nil) } }
+    }
+
+    private func panel(_ size: NSSize) -> NSPanel {
+        let p = NSPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        p.isFloatingPanel = true
+        p.level = .popUpMenu
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = true
+        return p
+    }
+
+    private func showSlash(_ state: BlockEditorController.SlashState?, _ items: [EditorAction.Item], _ rect: NSRect) {
+        guard let state else {
+            slashPanel?.orderOut(nil)
+            return
+        }
+        let height = min(CGFloat(items.count) * 30 + 12, 320)
+        let size = NSSize(width: 260, height: height)
+        let view = SlashMenuView(items: items, selected: state.selected) { [weak self] i in self?.controller.chooseSlash(i) }
+        let p = slashPanel ?? panel(size)
+        p.contentView = NSHostingView(rootView: view)
+        p.setContentSize(size)
+        p.setFrameOrigin(NSPoint(x: rect.minX, y: rect.minY - height - 4))
+        controller.textView.window?.addChildWindow(p, ordered: .above)
+        slashPanel = p
+    }
+
+    private func showToolbar(_ rect: NSRect?) {
+        guard let rect, controller.slash == nil, NSEvent.pressedMouseButtons == 0 else {
+            toolbarPanel?.orderOut(nil)
+            return
+        }
+        let size = NSSize(width: 376, height: 40)
+        let view = FormatToolbarView(controller: controller)
+        let p = toolbarPanel ?? panel(size)
+        p.contentView = NSHostingView(rootView: view)
+        p.setContentSize(size)
+        p.setFrameOrigin(NSPoint(x: rect.minX, y: rect.maxY + 6))
+        controller.textView.window?.addChildWindow(p, ordered: .above)
+        toolbarPanel = p
+    }
+}
+
+struct SlashMenuView: View {
+    let items: [EditorAction.Item]
+    let selected: Int
+    let choose: (Int) -> Void
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { i, item in
+                        Button { choose(i) } label: {
+                            Text(item.title)
+                                .font(.system(size: 13))
+                                .foregroundColor(Tokens.ink)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 10)
+                                .frame(height: 30)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(i == selected ? Tokens.soft : .clear))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .id(i)
+                    }
+                }
+                .padding(6)
+            }
+            .onAppear { proxy.scrollTo(selected) }
+            .onChange(of: selected) { proxy.scrollTo($0) }
+        }
+        .background(RoundedRectangle(cornerRadius: 10).fill(Tokens.card))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Tokens.line))
+    }
+}
+
+/// Панель при выделении: те же действия, что в меню.
+@MainActor
+struct FormatToolbarView: View {
+    let controller: BlockEditorController
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Menu(L("Тип")) {
+                ForEach(Array(EditorAction.blockTypes.enumerated()), id: \.offset) { _, item in
+                    Button(item.title) { controller.run(item.action) }
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            mark("bold", "b", L("Жирный"))
+            mark("italic", "i", L("Курсив"))
+            mark("underline", "u", L("Подчёркнутый"))
+            mark("strikethrough", "s", L("Зачёркнутый"))
+            mark("chevron.left.forwardslash.chevron.right", "code", L("Встроенный код"))
+            icon("link", L("Ссылка…")) { controller.run(.link) }
+            Menu {
+                Section(L("Цвет текста")) {
+                    ForEach(Array(EditorAction.colors.enumerated()), id: \.offset) { _, item in
+                        Button(item.title) { controller.run(item.action) }
+                    }
+                }
+                Section(L("Цветной маркер")) {
+                    ForEach(Array(EditorAction.highlights.enumerated()), id: \.offset) { _, item in
+                        Button(item.title) { controller.run(item.action) }
+                    }
+                }
+            } label: { Image(systemName: "paintpalette") }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 40)
+        .frame(maxWidth: .infinity)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Tokens.card))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Tokens.line))
+    }
+
+    private func mark(_ symbol: String, _ mark: String, _ help: String) -> some View {
+        icon(symbol, help) { controller.run(.mark(mark)) }
+    }
+
+    private func icon(_ symbol: String, _ help: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13))
+                .foregroundColor(Tokens.ink)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(Text(help))
+    }
+}
+
+/// Меню «Формат» в строке меню: тот же список действий, что в правом клике.
+struct FormatCommands: Commands {
+    private func run(_ action: EditorAction) {
+        Task { @MainActor in (NSApp.keyWindow?.firstResponder as? BlockTextView)?.controller?.run(action) }
+    }
+
+    @ViewBuilder private func buttons(_ items: [EditorAction.Item]) -> some View {
+        ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+            if item.key.isEmpty {
+                Button(item.title) { run(item.action) }
+            } else {
+                Button(item.title) { run(item.action) }
+                    .keyboardShortcut(KeyEquivalent(Character(item.key)), modifiers: Self.modifiers(item.modifiers))
+            }
+        }
+    }
+
+    private static func modifiers(_ flags: NSEvent.ModifierFlags) -> EventModifiers {
+        var out: EventModifiers = []
+        if flags.contains(.command) { out.insert(.command) }
+        if flags.contains(.shift) { out.insert(.shift) }
+        if flags.contains(.option) { out.insert(.option) }
+        return out
+    }
+
+    var body: some Commands {
+        CommandMenu(L("Формат")) {
+            Menu(L("Преобразовать")) { buttons(EditorAction.blockTypes) }
+            Divider()
+            buttons(EditorAction.marks)
+            Divider()
+            Menu(L("Цвет текста")) { buttons(EditorAction.colors) }
+            Menu(L("Цветной маркер")) { buttons(EditorAction.highlights) }
+            Divider()
+            Menu(L("Вставить блок")) { buttons(EditorAction.inserts) }
+            Divider()
+            buttons(EditorAction.blockActions)
+        }
+    }
 }

@@ -14,6 +14,21 @@ enum EditCommand: Equatable {
     case setChecked(block: UUID, checked: Bool)
     /// Заменяет выделение (возможно, через несколько блоков) фрагментами; пустой список — удаление.
     case replaceRange(BlockSelection, [BlockFragment])
+    /// Форматирование выделенного текста.
+    case formatText(BlockSelection, MarkEdit)
+    case indent(UUID)
+    case outdent(UUID)
+    case setCollapsed(block: UUID, collapsed: Bool)
+    /// Несколько правок одним шагом отмены.
+    case batch([EditCommand])
+}
+
+/// Изменение меток: b, i, u, s, code и метки с значением a:адрес, c:цвет, bg:цвет.
+enum MarkEdit: Equatable {
+    case toggle(String)
+    /// Заменяет метку с этим префиксом; nil снимает её.
+    case setValue(prefix: String, value: String?)
+    case clear
 }
 
 enum EditError: Error, Equatable {
@@ -96,8 +111,9 @@ enum BlockEditing {
             var first = c
             first.runs = RichText.normalized(left)
             // Enter в начале заголовка: заголовок сдвигается вниз, над ним появляется пустой абзац.
-            let headingStart = left.isEmpty && !right.isEmpty && b.type != .paragraph && b.type != .task
-            let newType: BlockType = headingStart ? b.type : (b.type == .task ? .task : .paragraph)
+            let headingStart = left.isEmpty && !right.isEmpty && b.type.isHeading
+            let keepsType = b.type == .task || b.type == .bullet || b.type == .numbered
+            let newType: BlockType = headingStart ? b.type : (keepsType ? b.type : .paragraph)
             let newID = ids.next()
             let placed = place(parent: b.parentID, after: b, upper: document.nextSibling(of: b)?.sortKey, id: newID)
             var new = Block(id: newID, pageID: b.pageID, parentID: b.parentID,
@@ -140,8 +156,9 @@ enum BlockEditing {
                 ?? (anchor == nil ? document.blocks.first { $0.parentID == nil }?.sortKey : nil)
             let newID = ids.next()
             let placed = place(parent: parent, after: anchor, upper: upper, id: newID)
-            var new = Block(id: newID, pageID: document.pageID, parentID: parent,
-                            sortKey: placed.key, type: type, createdAt: now)
+            var new = type.isAtom || (!type.isKnown && type != .paragraph)
+                ? Block(atom: type, id: newID, pageID: document.pageID, parentID: parent, sortKey: placed.key, createdAt: now)
+                : Block(id: newID, pageID: document.pageID, parentID: parent, sortKey: placed.key, type: type, createdAt: now)
             new.updatedAt = now
             return result(placed.renumbered + [.upsert(new)], selection: BlockSelection(block: new.id, offset: 0))
 
@@ -287,6 +304,78 @@ enum BlockEditing {
                 return EditResult(document: document, changes: [], inverse: [], selection: caret, coalesceKey: nil)
             }
             return result(changes, selection: caret)
+
+        case let .formatText(selection, edit):
+            guard let (start, end) = document.ordered(selection), let si = document.index(of: start.blockID), let ei = document.index(of: end.blockID) else {
+                throw EditError.blockNotFound(selection.anchor.blockID)
+            }
+            let targets = document.blocks[si...ei].compactMap { b -> (Block, BlockContent, Range<Int>)? in
+                guard let c = b.content, b.type != .code else { return nil }
+                let lower = b.id == start.blockID ? start.offset : 0
+                let upper = b.id == end.blockID ? end.offset : RichText.length(c.runs)
+                return upper > lower ? (b, c, lower..<upper) : nil
+            }
+            var transform: ([String]) -> [String]
+            switch edit {
+            case .toggle(let mark):
+                let allMarked = !targets.isEmpty && targets.allSatisfy { RichText.hasMark($0.1.runs, range: $0.2, mark) }
+                transform = { marks in allMarked ? marks.filter { $0 != mark } : (marks.contains(mark) ? marks : marks + [mark]) }
+            case let .setValue(prefix, value):
+                transform = { marks in marks.filter { !$0.hasPrefix(prefix) } + (value.map { [prefix + $0] } ?? []) }
+            case .clear:
+                transform = { _ in [] }
+            }
+            let changes: [BlockChange] = targets.map { b, c, range in
+                var n = c
+                n.runs = RichText.mapMarks(c.runs, range: range, transform)
+                return .upsert(updated(b, n))
+            }
+            return result(changes, selection: selection)
+
+        case let .indent(id):
+            guard let b = document.block(id) else { throw EditError.blockNotFound(id) }
+            let siblings = document.blocks.filter { $0.parentID == b.parentID }
+            guard let i = siblings.firstIndex(where: { $0.id == id }), i > 0 else {
+                return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
+            }
+            let newParent = siblings[i - 1]
+            let lastChild = document.blocks.last { $0.parentID == newParent.id }
+            var n = b
+            n.parentID = newParent.id
+            n.sortKey = SortKey.between(lastChild?.sortKey, nil)
+            n.updatedAt = now
+            return result([.upsert(n)], selection: nil)
+
+        case let .outdent(id):
+            guard let b = document.block(id) else { throw EditError.blockNotFound(id) }
+            guard let parentID = b.parentID, let parent = document.block(parentID) else {
+                return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
+            }
+            var n = b
+            n.parentID = parent.parentID
+            n.sortKey = SortKey.between(parent.sortKey, document.nextSibling(of: parent)?.sortKey)
+            n.updatedAt = now
+            return result([.upsert(n)], selection: nil)
+
+        case let .setCollapsed(id, collapsed):
+            let (b, c) = try editable(id)
+            var n = c
+            n.extra["collapsed"] = collapsed ? .bool(true) : nil
+            return result([.upsert(updated(b, n))], selection: nil)
+
+        case let .batch(commands):
+            var current = document
+            var changes: [BlockChange] = []
+            var inverse: [BlockChange] = []
+            var selection: BlockSelection?
+            for command in commands {
+                let step = try apply(command, to: current, ids: ids, now: now)
+                current = step.document
+                changes += step.changes
+                inverse = step.inverse + inverse
+                if let s = step.selection { selection = s }
+            }
+            return EditResult(document: current, changes: changes, inverse: inverse, selection: selection, coalesceKey: nil)
 
         case let .setChecked(id, checked):
             let (b, c) = try editable(id)

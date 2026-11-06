@@ -9,6 +9,7 @@ final class EditorRig {
     let editor: EditorSession
     let controller: BlockEditorController
     let clock = FakeClock()
+    let window: NSWindow
     var tv: BlockTextView { controller.textView }
     var doc: BlockDocument { controller.document }
 
@@ -29,7 +30,13 @@ final class EditorRig {
         if !batch.isEmpty { try await store.commit(batch) }
         editor = try await session.open(page.id)
         controller = BlockEditorController(session: editor)
-        tv.setFrameSize(NSSize(width: 600, height: 300))
+        // Настоящее окно вне экрана: вид остаётся первым получателем, как в приложении.
+        window = NSWindow(contentRect: NSRect(x: -2000, y: -2000, width: 600, height: 300), styleMask: [.titled], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        let view = controller.textView
+        view.setFrameSize(NSSize(width: 600, height: 300))
+        window.contentView?.addSubview(view)
+        window.makeFirstResponder(view)
     }
 
     func type(_ text: String) { tv.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0)) }
@@ -46,9 +53,9 @@ final class EditorRig {
 
     /// Главный инвариант: текст вида и разбиение совпадают с моделью.
     func checkSync(_ what: String = "", file: StaticString = #fileID, line: UInt = #line) {
-        let expected = doc.blocks.map { $0.content.map { BlockTextMapping.toView($0.plainText) } ?? "\u{FFFC}" }.joined(separator: "\n")
+        let expected = controller.visible.map { $0.content.map { BlockTextMapping.toView($0.plainText) } ?? "\u{FFFC}" }.joined(separator: "\n")
         checkEqual(tv.string, expected, "вид и модель \(what)", file: file, line: line)
-        checkEqual(controller.spans.map(\.id), doc.blocks.map(\.id), "порядок спанов \(what)", file: file, line: line)
+        checkEqual(controller.spans.map(\.id), controller.visible.map(\.id), "порядок спанов \(what)", file: file, line: line)
         var at = 0
         for s in controller.spans {
             check(s.location == at, "положение спана \(what)", file: file, line: line)
@@ -277,18 +284,18 @@ func runNativeEditorTests() async {
             r.controller.perform(.setChecked(block: r.doc.blocks[1].id, checked: true))
             checkEqual(r.doc.blocks[1].content?.checked, true)
             r.checkSync("отметка")
-            let a = r.controller.checkboxRect(for: r.controller.spans[1])!
-            let b = r.controller.checkboxRect(for: r.controller.spans[2])!
+            let a = r.controller.markerRect(for: r.controller.spans[1])!
+            let b = r.controller.markerRect(for: r.controller.spans[2])!
             check(a.minY < b.minY, "отметки идут сверху вниз \(a) \(b)")
             check(r.controller.handleClick(at: NSPoint(x: a.midX, y: a.midY)), "нажатие на отметку")
             checkEqual(r.doc.blocks[1].content?.checked, false)
             check(!r.controller.handleClick(at: NSPoint(x: 200, y: a.midY)), "нажатие по тексту не отмечает")
             r.caret(0, 2)
-            r.controller.changeBlockType(.heading2)
+            r.controller.run(.turnInto(.heading2))
             checkEqual(r.types[0], .heading2)
             checkEqual((r.tv.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.pointSize, 21, "оформление обновилось")
             checkEqual(r.tv.selectedRange().location, 2, "курсор на месте")
-            r.controller.insertBlock(.task)
+            r.controller.perform(.insertBlock(after: r.doc.blocks[0].id, type: .task))
             checkEqual(r.types[1], .task)
             r.checkSync("вставка блока")
             try await r.close()
@@ -321,7 +328,7 @@ func runNativeEditorTests() async {
                 case 5: r.key(#selector(NSResponder.deleteForward(_:)))
                 case 6: r.controller.copy(to: board); r.tv.setSelectedRange(NSRange(location: (r.tv.string as NSString).length, length: 0)); r.controller.paste(from: board)
                 case 7: if r.controller.canUndo { r.tv.undo(nil) }
-                default: r.controller.changeBlockType([BlockType.paragraph, .heading1, .task][next(3)])
+                default: r.controller.run(.turnInto([BlockType.paragraph, .heading1, .task, .bullet, .quote, .code][next(6)]))
                 }
                 r.checkSync("шаг \(step)")
                 if !TestRun.failed.isEmpty { break }
@@ -452,6 +459,228 @@ func runNativeEditorReviewTests() async {
             checkEqual((r.tv.typingAttributes[.font] as? NSFont)?.pointSize, 21)
             r.caret(1, 0)
             checkEqual((r.tv.typingAttributes[.font] as? NSFont)?.pointSize, 14, "у начала блока — оформление блока")
+            try await r.close()
+        }
+    }
+}
+
+@MainActor
+func runNotionEditorTests() async {
+    _ = NSApplication.shared
+    await test("Markdown-сокращения превращают абзац в блок и отменяются") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "")])
+            for (input, type) in [("# ", BlockType.heading1), ("## ", .heading2), ("### ", .heading3), ("- ", .bullet), ("1. ", .numbered), ("[] ", .task), ("> ", .quote)] {
+                r.caret(0, 0)
+                for ch in input { r.type(String(ch)) }
+                checkEqual(r.types[0], type, input)
+                checkEqual(r.texts[0], "", "текст сокращения убран: \(input)")
+                r.checkSync(input)
+                r.tv.undo(nil)
+                r.controller.perform(.changeType(block: r.doc.blocks[0].id, type: .paragraph))
+                r.controller.perform(.setPlainText(block: r.doc.blocks[0].id, text: ""))
+            }
+            r.caret(0, 0)
+            for ch in "---" { r.type(String(ch)) }
+            checkEqual(r.doc.blocks[0].type, .divider, "разделитель")
+            check(r.doc.blocks.count == 2 && r.types[1] == .paragraph, "ввод продолжается ниже")
+            r.checkSync("разделитель")
+            r.type("дальше")
+            checkEqual(r.texts[1], "дальше")
+            try await r.close()
+        }
+    }
+
+    await test("Списки: Enter продолжает, на пустом пункте снимает, номера считаются") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.numbered, "раз"), (.numbered, "два"), (.paragraph, "текст"), (.numbered, "снова")])
+            checkEqual(r.doc.blocks.map { r.controller.number(of: $0.id) }, [1, 2, 1, 1], "нумерация и сброс")
+            r.caret(1, 3)
+            r.key(#selector(NSResponder.insertNewline(_:)))
+            checkEqual(r.types[2], .numbered, "список продолжается")
+            r.key(#selector(NSResponder.insertNewline(_:)))
+            checkEqual(r.types[2], .paragraph, "пустой пункт снимает тип")
+            r.checkSync()
+            try await r.close()
+        }
+    }
+
+    await test("Вложенность: Tab, Shift+Tab, отступ в виде, Backspace выводит наверх") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.bullet, "первый"), (.bullet, "второй"), (.paragraph, "третий")])
+            r.caret(1, 2)
+            r.key(#selector(NSResponder.insertTab(_:)))
+            checkEqual(r.doc.blocks[1].parentID, r.doc.blocks[0].id, "вложен в предыдущий")
+            checkEqual(r.controller.depth(of: r.doc.blocks[1].id), 1)
+            checkEqual(r.tv.selectedRange().location, r.controller.spans[1].location + 2, "курсор на месте")
+            let style = r.tv.textStorage?.attribute(.paragraphStyle, at: r.controller.spans[1].location, effectiveRange: nil) as? NSParagraphStyle
+            checkEqual(style?.headIndent, BlockTextStyle.markerIndent + BlockTextStyle.nestIndent, "отступ в виде")
+            r.checkSync("Tab")
+            r.key(#selector(NSResponder.insertBacktab(_:)))
+            checkEqual(r.doc.blocks[1].parentID, nil, "обратно")
+            r.key(#selector(NSResponder.insertTab(_:)))
+            r.controller.perform(.changeType(block: r.doc.blocks[1].id, type: .paragraph))
+            r.caret(1, 0)
+            r.key(#selector(NSResponder.deleteBackward(_:)))
+            checkEqual(r.doc.blocks[1].parentID, nil, "Backspace уменьшает вложенность")
+            checkEqual(r.texts.count, 3, "без объединения")
+            r.key(#selector(NSResponder.deleteBackward(_:)))
+            checkEqual(r.texts.count, 2, "затем объединяет")
+            r.checkSync("Backspace")
+            try await r.close()
+        }
+    }
+
+    await test("Сворачиваемый блок скрывает потомков, не теряя их") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.toggle, "раздел"), (.paragraph, "внутри"), (.paragraph, "снаружи")])
+            r.caret(1, 0)
+            r.key(#selector(NSResponder.insertTab(_:)))
+            let id = r.doc.blocks[0].id
+            r.controller.perform(.setCollapsed(block: id, collapsed: true))
+            checkEqual(r.tv.string, "раздел\nснаружи", "потомок скрыт")
+            checkEqual(r.doc.blocks.count, 3, "но остался в модели")
+            r.checkSync("свёрнуто")
+            r.caret(1, 3)
+            r.type("ё")
+            checkEqual(r.texts, ["раздел", "внутри", "снаёружи"], "правка попадает в нужный блок")
+            r.checkSync("правка рядом")
+            r.controller.perform(.setCollapsed(block: id, collapsed: false))
+            checkEqual(r.tv.string, "раздел\nвнутри\nснаёружи")
+            r.checkSync("развёрнуто")
+            try await r.close()
+        }
+    }
+
+    await test("Форматирование: выделение через блоки, снятие, цвет, ссылка, очистка") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "первый"), (.paragraph, "второй")])
+            let before = r.doc
+            r.select(0, 2, 1, 3)
+            r.controller.run(.mark("b"))
+            let marks: @MainActor (Int) -> [[String]] = { r.doc.blocks[$0].content!.runs.map(\.marks) }
+            checkEqual(marks(0), [[], ["b"]])
+            checkEqual(marks(1), [["b"], []])
+            checkEqual(r.tv.selectedRange().length, 8, "выделение сохранено")
+            check(r.controller.isMarked("b"), "состояние кнопки")
+            let bold = r.tv.textStorage?.attribute(.font, at: 3, effectiveRange: nil) as? NSFont
+            check(bold?.fontDescriptor.symbolicTraits.contains(.bold) == true, "вид обновлён")
+            r.checkSync("жирный")
+            r.controller.run(.mark("b"))
+            checkEqual(marks(0), [[]], "повторное действие снимает")
+            r.controller.run(.color("red"))
+            r.controller.run(.highlight("yellow"))
+            r.controller.run(.color("blue"))
+            check(marks(0)[1].contains("c:blue") && !marks(0)[1].contains("c:red"), "цвет заменяется")
+            check(marks(0)[1].contains("bg:yellow"), "маркер остаётся")
+            r.controller.perform(.formatText(r.controller.selection(for: r.tv.selectedRange()), .setValue(prefix: "a:", value: "https://example.com")))
+            let link = r.tv.textStorage?.attribute(.link, at: 3, effectiveRange: nil) as? URL
+            checkEqual(link?.absoluteString, "https://example.com", "ссылка в виде")
+            r.controller.run(.clearFormat)
+            checkEqual(marks(0), [[]], "очистка")
+            while r.controller.canUndo { r.tv.undo(nil) }
+            checkEqual(r.doc, before, "всё отменяется")
+            r.caret(0, 6)
+            r.controller.run(.mark("b"))
+            r.type("Ж")
+            check(r.doc.blocks[0].content!.runs.contains { $0.text == "Ж" && $0.marks == ["b"] }, "⌘B перед набором")
+            r.checkSync("ввод с меткой")
+            try await r.close()
+        }
+    }
+
+    await test("Меню «/»: поиск по-русски, клавиши, Escape, применение одной правкой") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "")])
+            var shown: [[String]] = []
+            r.controller.onSlashChange = { state, items, _ in if state != nil { shown.append(items.map(\.title)) } }
+            r.caret(0, 0)
+            r.type("/")
+            check(r.controller.slash != nil, "открылось")
+            checkEqual(shown.last?.count, EditorAction.slashItems.count)
+            r.type("ц")
+            r.type("и")
+            checkEqual(shown.last, ["Цитата"], "поиск по названию")
+            let beforeChoice = r.controller.slash?.query
+            checkEqual(beforeChoice, "ци")
+            r.key(#selector(NSResponder.insertNewline(_:)))
+            check(r.controller.slash == nil, "закрылось")
+            checkEqual(r.types[0], .quote)
+            checkEqual(r.texts, [""], "текст запроса убран")
+            r.checkSync("выбор")
+            r.tv.undo(nil)
+            checkEqual(r.types[0], .paragraph, "одна правка отмены")
+            checkEqual(r.texts[0], "/ци")
+            r.checkSync("отмена")
+            r.controller.perform(.setPlainText(block: r.doc.blocks[0].id, text: ""))
+            r.controller.renderAll()
+            r.caret(0, 0)
+            r.type("/")
+            r.key(#selector(NSResponder.moveDown(_:)))
+            checkEqual(r.controller.slash?.selected, 1, "стрелка вниз")
+            r.key(#selector(NSResponder.moveUp(_:)))
+            r.key(#selector(NSResponder.cancelOperation(_:)))
+            check(r.controller.slash == nil, "Escape закрывает")
+            checkEqual(r.texts[0], "/", "текст остаётся")
+            r.type("ёёё")
+            check(r.controller.slash == nil, "после Escape не открывается снова")
+            r.caret(0, 0)
+            r.controller.perform(.setPlainText(block: r.doc.blocks[0].id, text: "слово "))
+            r.controller.renderAll()
+            r.caret(0, 6)
+            r.type("/")
+            check(r.controller.slash != nil, "после пробела открывается")
+            r.type("разд")
+            r.key(#selector(NSResponder.insertNewline(_:)))
+            check(r.doc.blocks.contains { $0.type == .divider }, "вставка разделителя")
+            checkEqual(r.texts[0], "слово ", "остальной текст цел")
+            r.checkSync("вставка")
+            r.controller.perform(.setPlainText(block: r.doc.blocks.last!.id, text: "url/путь"))
+            r.controller.renderAll()
+            r.caret(r.doc.blocks.count - 1, 3)
+            r.type("/")
+            check(r.controller.slash == nil, "внутри слова не открывается")
+            checkEqual(EditorAction.filterSlash("зелёный").count, 0)
+            check(EditorAction.filterSlash("ЗАГОЛОВОК").count == 3, "регистр не важен")
+            check(!EditorAction.filterSlash("спойлер").isEmpty, "синонимы")
+            try await r.close()
+        }
+    }
+
+    await test("Код: Enter и Tab внутри блока, разделитель неделим") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.code, "let x"), (.paragraph, "текст")])
+            r.caret(0, 5)
+            r.key(#selector(NSResponder.insertNewline(_:)))
+            r.key(#selector(NSResponder.insertTab(_:)))
+            r.type("y")
+            checkEqual(r.texts, ["let x\n    y", "текст"], "новая строка и отступ в том же блоке")
+            r.checkSync()
+            r.controller.perform(.insertBlock(after: r.doc.blocks[0].id, type: .divider))
+            checkEqual(r.controller.spans[1].length, 1)
+            r.caret(2, 0)
+            r.key(#selector(NSResponder.deleteBackward(_:)))
+            check(r.doc.blocks.contains { $0.type == .divider }, "с разделителем абзац не сливается")
+            r.checkSync("разделитель")
+            try await r.close()
+        }
+    }
+
+    await test("Импорт Markdown: все типы блоков, оригинал не меняется") {
+        try await withTempDir { dir in
+            let file = dir.appendingPathComponent("заметка.md")
+            let text = "# З\n\n- пункт\n1. номер\n> цитата\n---\n```\nкод\n\n  строка\n```\nабзац\n"
+            try text.write(to: file, atomically: true, encoding: .utf8)
+            let hash = try fileHash(file)
+            let read = try TextFileReader.read(file)
+            let f = MarkdownImport.fragments(from: read.text)
+            checkEqual(f.map(\.type), ["heading1", "bullet", "numbered", "quote", "divider", "code", "paragraph"])
+            checkEqual(f[5].plain, "код\n\n  строка", "код без изменений")
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "")])
+            r.controller.perform(.replaceRange(BlockSelection(block: r.doc.blocks[0].id, offset: 0), f))
+            checkEqual(r.types.map(\.rawValue), ["heading1", "bullet", "numbered", "quote", "divider", "code", "paragraph"])
+            r.checkSync()
+            checkEqual(try fileHash(file), hash, "файл не изменён")
             try await r.close()
         }
     }

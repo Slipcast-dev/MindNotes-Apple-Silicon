@@ -48,6 +48,7 @@ struct GrizzlyApp: App {
         .defaultSize(width: 1240, height: 820)
         .windowToolbarStyle(.unified)
         .commands {
+            FormatCommands()
             CommandGroup(replacing: .appSettings) {
                 Button("Настройки…") { delegate.shell.goSettings() }
                     .keyboardShortcut(",")

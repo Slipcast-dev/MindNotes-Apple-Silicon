@@ -2,8 +2,8 @@ import AppKit
 
 /// Связывает единый NSTextView с документом страницы.
 ///
-/// Текст вида — блоки через "\n". Правка внутри блока идёт штатным путём NSTextView, поэтому IME, раскладки и
-/// emoji работают системно; модель догоняет вид. Всё, что меняет структуру, выполняется командой, и в вид
+/// Текст вида — видимые блоки через "\n". Правка внутри блока идёт штатным путём NSTextView, поэтому IME, раскладки
+/// и emoji работают системно; модель догоняет вид. Всё, что меняет структуру, выполняется командой, и в вид
 /// вносится только изменившийся участок: выделение и прокрутка не сбрасываются.
 @MainActor
 final class BlockEditorController: NSObject, NSTextViewDelegate {
@@ -14,6 +14,14 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         var end: Int { location + length }
     }
 
+    /// Открытое меню «/»: где стоит косая черта и что введено после неё.
+    struct SlashState: Equatable {
+        var blockID: UUID
+        var slashOffset: Int
+        var query: String
+        var selected: Int
+    }
+
     static let pasteboardType = NSPasteboard.PasteboardType("local.personal.GrizzlyNotes.blocks")
 
     let session: EditorSession
@@ -22,14 +30,28 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     /// Высота содержимого изменилась.
     var onHeightChange: ((CGFloat) -> Void)?
     var onError: ((String) -> Void)?
+    /// Изменилось меню «/»; прямоугольник в экранных координатах.
+    var onSlashChange: ((SlashState?, [EditorAction.Item], NSRect) -> Void)?
+    /// Изменилось выделение текста: прямоугольник для панели форматирования или nil.
+    var onSelectionRect: ((NSRect?) -> Void)?
+    /// Нужен адрес ссылки: интерфейс спрашивает и возвращает значение.
+    var requestLink: ((String?, @escaping (String?) -> Void) -> Void)?
 
     private(set) var spans: [Span] = []
+    private(set) var visible: [Block] = []
+    private var depths: [UUID: Int] = [:]
+    private var numbers: [UUID: Int] = [:]
     private var applying = false
     private var editingIndex: Int?
     /// Блок правки между shouldChange и textDidChange. AppKit сообщает о новом выделении раньше, чем о новом
     /// тексте: в этот момент разбиение устарело, и определять блок по выделению нельзя.
     private var pendingIndex: Int?
+    /// Что было до правки: для Markdown-сокращений и меню «/» нужен только введённый символ.
+    private var typedText: String?
     private var lastHeight: CGFloat = 0
+    private(set) var slash: SlashState?
+    /// Метки для следующего ввода, включённые при пустом выделении (⌘B перед набором).
+    private(set) var pendingMarks: Set<String> = []
 
     init(session: EditorSession, style: BlockTextStyle = BlockTextStyle()) {
         self.session = session
@@ -57,6 +79,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         textView.textContainerInset = .zero
         textView.isVerticallyResizable = false
         textView.isHorizontallyResizable = false
+        textView.linkTextAttributes = [.cursor: NSCursor.pointingHand]
         textView.setAccessibilityLabel(NSLocalizedString("Текст страницы", comment: ""))
         SystemAI.disableWritingTools(on: textView)
         renderAll()
@@ -66,12 +89,45 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     // MARK: Отображение
 
+    /// Блоки, не скрытые свёрнутым родителем, с глубиной и номерами списков.
+    private func computeVisible() -> [Block] {
+        var depth: [UUID: Int] = [:]
+        var hidden: Set<UUID> = []
+        var nums: [UUID: Int] = [:]
+        var lastNumber: [UUID?: (id: UUID, value: Int)] = [:]
+        var previousSibling: [UUID?: UUID] = [:]
+        var out: [Block] = []
+        for block in document.blocks {
+            let parent = block.parentID.flatMap { document.block($0) }
+            depth[block.id] = parent.map { (depth[$0.id] ?? 0) + 1 } ?? 0
+            if block.type == .numbered {
+                let key = block.parentID
+                if let last = lastNumber[key], previousSibling[key] == last.id {
+                    lastNumber[key] = (block.id, last.value + 1)
+                } else {
+                    lastNumber[key] = (block.id, 1)
+                }
+                nums[block.id] = lastNumber[key]?.value
+            }
+            previousSibling[block.parentID] = block.id
+            if let p = parent, hidden.contains(p.id) || p.isCollapsed {
+                hidden.insert(block.id)
+            } else {
+                out.append(block)
+            }
+        }
+        depths = depth
+        numbers = nums
+        return out
+    }
+
     func renderAll() {
+        visible = computeVisible()
         let out = NSMutableAttributedString()
         spans = []
-        for (i, block) in document.blocks.enumerated() {
-            if i > 0 { out.append(separator(after: document.blocks[i - 1])) }
-            let piece = style.render(block)
+        for (i, block) in visible.enumerated() {
+            if i > 0 { out.append(separator(after: visible[i - 1])) }
+            let piece = style.render(block, depth: depths[block.id] ?? 0)
             spans.append(Span(id: block.id, location: out.length, length: piece.length))
             out.append(piece)
         }
@@ -82,12 +138,12 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     private func separator(after block: Block) -> NSAttributedString {
-        NSAttributedString(string: "\n", attributes: style.attributes(for: block.type))
+        NSAttributedString(string: "\n", attributes: style.attributes(for: block.type, depth: depths[block.id] ?? 0))
     }
 
     private func rebuildSpans() {
         var location = 0
-        spans = document.blocks.map { block in
+        spans = visible.map { block in
             let length = block.content.map { BlockTextMapping.toView($0.plainText).utf16.count } ?? 1
             defer { location += length + 1 }
             return Span(id: block.id, location: location, length: length)
@@ -95,31 +151,39 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     /// Вносит в вид только изменившийся участок.
-    private func syncView(from old: BlockDocument) {
-        let new = document
-        func same(_ a: Block, _ b: Block) -> Bool { a.id == b.id && a.type == b.type && a.payload == b.payload }
-        var prefix = 0
-        while prefix < old.blocks.count, prefix < new.blocks.count, same(old.blocks[prefix], new.blocks[prefix]) { prefix += 1 }
-        var suffix = 0
-        while suffix < old.blocks.count - prefix, suffix < new.blocks.count - prefix,
-              same(old.blocks[old.blocks.count - 1 - suffix], new.blocks[new.blocks.count - 1 - suffix]) { suffix += 1 }
-        guard prefix < old.blocks.count || prefix < new.blocks.count else { return }
-
-        let storage = textView.textStorage!
+    private func syncView() {
+        let oldBlocks = visible
+        let oldDepths = depths
         let oldSpans = spans
+        let new = computeVisible()
+        let newDepths = depths
+        func same(_ a: Block, _ b: Block) -> Bool {
+            a.id == b.id && a.type == b.type && a.payload == b.payload && oldDepths[a.id] == newDepths[b.id]
+        }
+        var prefix = 0
+        while prefix < oldBlocks.count, prefix < new.count, same(oldBlocks[prefix], new[prefix]) { prefix += 1 }
+        var suffix = 0
+        while suffix < oldBlocks.count - prefix, suffix < new.count - prefix,
+              same(oldBlocks[oldBlocks.count - 1 - suffix], new[new.count - 1 - suffix]) { suffix += 1 }
+        visible = new
+        guard prefix < oldBlocks.count || prefix < new.count else {
+            rebuildSpans()
+            textView.needsDisplay = true
+            return
+        }
+        let storage = textView.textStorage!
         // Заменяемый участок вместе с разделителями на его краях.
         let hasBefore = prefix > 0
         let hasAfter = suffix > 0
         let lower = hasBefore ? oldSpans[prefix - 1].end : 0
-        let upper = hasAfter ? oldSpans[old.blocks.count - suffix].location : storage.length
+        let upper = hasAfter ? oldSpans[oldBlocks.count - suffix].location : storage.length
         let piece = NSMutableAttributedString()
-        if hasBefore, prefix < new.blocks.count - suffix || hasAfter {
-            piece.append(separator(after: new.blocks[prefix - 1]))
+        if hasBefore, prefix < new.count - suffix || hasAfter {
+            piece.append(separator(after: new[prefix - 1]))
         }
-        let middle = prefix..<(new.blocks.count - suffix)
-        for i in middle {
-            piece.append(style.render(new.blocks[i]))
-            if i < new.blocks.count - 1 { piece.append(separator(after: new.blocks[i])) }
+        for i in prefix..<(new.count - suffix) {
+            piece.append(style.render(new[i], depth: depths[new[i].id] ?? 0))
+            if i < new.count - 1 { piece.append(separator(after: new[i])) }
         }
         applying = true
         storage.beginEditing()
@@ -145,6 +209,9 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     // MARK: Координаты
+
+    func depth(of id: UUID) -> Int { depths[id] ?? 0 }
+    func number(of id: UUID) -> Int { numbers[id] ?? 1 }
 
     func offset(of point: BlockPoint) -> Int? {
         guard let i = spans.firstIndex(where: { $0.id == point.blockID }) else { return nil }
@@ -176,19 +243,20 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         return NSRange(location: min(a, f), length: abs(a - f))
     }
 
+    var currentBlock: Block? { spans.isEmpty ? nil : document.block(spans[spanIndex(at: textView.selectedRange().location)].id) }
+
     // MARK: Команды
 
     /// Выполняет команду и переносит её результат в вид.
     @discardableResult
     func perform(_ command: EditCommand) -> Bool {
-        let old = document
         do {
             let result = try session.perform(command)
             guard !result.changes.isEmpty else {
                 if let s = result.selection, let r = range(for: s) { textView.setSelectedRange(r) }
                 return false
             }
-            syncView(from: old)
+            syncView()
             restoreSelection()
             return true
         } catch {
@@ -207,16 +275,14 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     func undo() {
-        let old = document
         session.undoStep()
-        syncView(from: old)
+        syncView()
         restoreSelection()
     }
 
     func redo() {
-        let old = document
         session.redoStep()
-        syncView(from: old)
+        syncView()
         restoreSelection()
     }
 
@@ -227,19 +293,105 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         perform(.replaceRange(selection(for: textView.selectedRange()), fragments))
     }
 
-    func insertBlock(_ type: BlockType) {
-        let anchor = point(at: textView.selectedRange().location).blockID
-        perform(.insertBlock(after: anchor, type: type))
+    /// Выполняет действие из единого меню.
+    func run(_ action: EditorAction) {
+        let range = textView.selectedRange()
+        let sel = selection(for: range)
+        let id = point(at: range.location).blockID
+        switch action {
+        case .turnInto(let type):
+            perform(.batch(selectedBlockIDs().map { .changeType(block: $0, type: type) }))
+        case .insert(let type):
+            perform(.insertBlock(after: id, type: type))
+            if document.blocks.last?.type.isAtom == true || type.isAtom { ensureTextAfterAtom() }
+        case .mark(let mark):
+            if range.length == 0 {
+                if pendingMarks.contains(mark) { pendingMarks.remove(mark) } else { pendingMarks.insert(mark) }
+                applyTypingAttributes()
+            } else {
+                perform(.formatText(sel, .toggle(mark)))
+            }
+        case .color(let name):
+            perform(.formatText(sel, .setValue(prefix: "c:", value: name)))
+        case .highlight(let name):
+            perform(.formatText(sel, .setValue(prefix: "bg:", value: name)))
+        case .link:
+            guard range.length > 0 else { return }
+            requestLink?(currentLink(in: range)) { [weak self] url in
+                guard let self else { return }
+                let value = url?.trimmingCharacters(in: .whitespaces)
+                self.perform(.formatText(sel, .setValue(prefix: "a:", value: value?.isEmpty == false ? value : nil)))
+            }
+        case .clearFormat:
+            perform(.formatText(sel, .clear))
+        case .indent:
+            perform(.batch(topSelectedBlockIDs().map { .indent($0) }))
+            caretKeep(range)
+        case .outdent:
+            perform(.batch(topSelectedBlockIDs().reversed().map { .outdent($0) }))
+            caretKeep(range)
+        case .deleteBlock:
+            perform(.batch(topSelectedBlockIDs().map { .deleteBlock($0) }))
+            if document.blocks.isEmpty { perform(.insertBlock(after: nil, type: .paragraph)) }
+        case .duplicateBlock:
+            let fragments = topSelectedBlockIDs().compactMap { document.block($0) }.map { b in
+                b.content.map { BlockFragment(type: b.type, content: $0) } ?? BlockFragment(opaque: b)
+            }
+            guard let last = topSelectedBlockIDs().last, let tail = document.block(last) else { return }
+            perform(.insertBlock(after: tail.id, type: .paragraph))
+            if let s = session.selection { perform(.replaceRange(s, fragments)) }
+        }
     }
 
-    func changeBlockType(_ type: BlockType) {
-        perform(.changeType(block: point(at: textView.selectedRange().location).blockID, type: type))
+    /// После разделителя нужна строка для ввода, если он оказался последним.
+    private func ensureTextAfterAtom() {
+        if let last = document.blocks.last, last.type.isAtom {
+            perform(.insertBlock(after: last.id, type: .paragraph))
+        } else if let at = session.selection?.anchor.blockID, let i = document.index(of: at), i + 1 < document.blocks.count {
+            textView.setSelectedRange(NSRange(location: spans.first { $0.id == document.blocks[i + 1].id }?.location ?? 0, length: 0))
+        }
     }
 
-    func deleteCurrentBlock() {
-        let id = point(at: textView.selectedRange().location).blockID
-        perform(.deleteBlock(id))
-        if document.blocks.isEmpty { perform(.insertBlock(after: nil, type: .paragraph)) }
+    private func caretKeep(_ range: NSRange) {
+        textView.setSelectedRange(NSRange(location: min(range.location, textView.textStorage?.length ?? 0), length: range.length))
+    }
+
+    private func selectedBlockIDs() -> [UUID] {
+        let range = textView.selectedRange()
+        let a = spanIndex(at: range.location), b = spanIndex(at: range.location + range.length)
+        return spans[a...b].map(\.id)
+    }
+
+    /// Выбранные блоки без потомков других выбранных: вложенность и удаление применяются к поддереву целиком.
+    private func topSelectedBlockIDs() -> [UUID] {
+        let ids = selectedBlockIDs()
+        let set = Set(ids)
+        return ids.filter { id in
+            var p = document.block(id)?.parentID
+            while let current = p {
+                if set.contains(current) { return false }
+                p = document.block(current)?.parentID
+            }
+            return true
+        }
+    }
+
+    private func currentLink(in range: NSRange) -> String? {
+        (textView.textStorage?.attribute(.link, at: range.location, effectiveRange: nil) as? URL)?.absoluteString
+    }
+
+    func isMarked(_ mark: String) -> Bool {
+        let range = textView.selectedRange()
+        if range.length == 0 { return pendingMarks.contains(mark) }
+        let sel = selection(for: range)
+        guard let (start, end) = document.ordered(sel), let si = document.index(of: start.blockID), let ei = document.index(of: end.blockID) else { return false }
+        for b in document.blocks[si...ei] {
+            guard let c = b.content else { continue }
+            let lower = b.id == start.blockID ? start.offset : 0
+            let upper = b.id == end.blockID ? end.offset : RichText.length(c.runs)
+            if upper > lower, !RichText.hasMark(c.runs, range: lower..<upper, mark) { return false }
+        }
+        return true
     }
 
     // MARK: Правка текста внутри блока
@@ -256,13 +408,14 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         let start = spanIndex(at: range.location)
         pendingIndex = start
         editingIndex = start
+        typedText = range.length == 0 ? text : nil
         // Если AppKit не сообщит об изменении (правка оказалась пустой), выделение не должно замолчать.
         DispatchQueue.main.async { [weak self] in self?.pendingIndex = nil }
         if view.hasMarkedText() { return true }
         let endIndex = spanIndex(at: range.location + range.length)
         let block = document.block(spans[start].id)
         if start == endIndex, block?.isEditable == true, !BlockFragment.containsLineSeparator(text) { return true }
-        // Граница блока или непонятный блок: штатная правка испортила бы структуру.
+        // Граница блока или неделимый блок: штатная правка испортила бы структуру.
         pendingIndex = nil
         replaceWithCommand(range: range, text: text)
         return false
@@ -309,11 +462,126 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         guard document.block(span.id)?.isEditable == true, span.end <= storage.length else { return }
         let text = (storage.string as NSString).substring(with: NSRange(location: span.location, length: span.length))
         do {
+            let before = document.block(span.id)?.plainText ?? ""
             try session.perform(.setPlainText(block: span.id, text: BlockTextMapping.toModel(text)))
+            visible = computeVisible()
             session.updateSelection(selection(for: textView.selectedRange()))
+            applyPendingMarks(block: span.id, before: before)
+            afterTyping(block: span.id)
         } catch {
             onError?((error as? LocalizedError)?.errorDescription ?? "\(error)")
         }
+    }
+
+    /// ⌘B при пустом выделении действует на следующий введённый текст.
+    private func applyPendingMarks(block id: UUID, before: String) {
+        guard !pendingMarks.isEmpty, let typed = typedText, !typed.isEmpty else { return }
+        let caret = textView.selectedRange().location
+        let length = typed.utf16.count
+        var sel = selection(for: NSRange(location: max(0, caret - length), length: 0))
+        sel.focus = point(at: caret)
+        let edits: [EditCommand] = pendingMarks.map { .formatText(sel, .setValue(prefix: $0, value: "")) } // Метка без значения: префикс и есть метка.
+        do { try session.perform(.batch(edits)) } catch { return }
+        syncView()
+        textView.setSelectedRange(NSRange(location: caret, length: 0))
+    }
+
+    /// Markdown-сокращения и меню «/» срабатывают только на только что введённый символ.
+    private func afterTyping(block id: UUID) {
+        guard let typed = typedText else { updateSlash(); return }
+        typedText = nil
+        guard let block = document.block(id), let content = block.content else { return }
+        let caret = textView.selectedRange().location
+        guard let span = spans.first(where: { $0.id == id }) else { return }
+        let offset = caret - span.location
+        let text = content.plainText
+
+        if typed == "/", block.type != .code, slash == nil {
+            let before = (text as NSString).substring(to: max(0, offset - 1))
+            if before.isEmpty || before.last?.isWhitespace == true {
+                slash = SlashState(blockID: id, slashOffset: offset - 1, query: "", selected: 0)
+            }
+        }
+        if slash != nil { updateSlash(); return }
+
+        guard block.type == .paragraph else { return }
+        let shortcuts: [(String, BlockType)] = [("# ", .heading1), ("## ", .heading2), ("### ", .heading3), ("- ", .bullet), ("* ", .bullet),
+                                                ("1. ", .numbered), ("[] ", .task), ("[ ] ", .task), ("> ", .quote), ("``` ", .code)]
+        if typed == " ", let hit = shortcuts.first(where: { $0.0.utf16.count == offset && text.hasPrefix($0.0) }) {
+            var range = BlockSelection(block: id, offset: 0)
+            range.focus = BlockPoint(blockID: id, offset: offset)
+            perform(.batch([.replaceRange(range, []), .changeType(block: id, type: hit.1)]))
+            return
+        }
+        if typed == "-", text == "---" {
+            // Текст убирается, блок становится разделителем, ввод продолжается ниже.
+            perform(.batch([.insertBlock(after: id, type: .divider), .deleteBlock(id)]))
+            ensureTextAfterAtom()
+        }
+    }
+
+    // MARK: Меню «/»
+
+    private func updateSlash() {
+        guard var state = slash else { return }
+        guard let block = document.block(state.blockID), let content = block.content else { return closeSlash() }
+        let caret = textView.selectedRange().location
+        guard let span = spans.first(where: { $0.id == state.blockID }), caret >= span.location + state.slashOffset + 1, caret <= span.end else { return closeSlash() }
+        let text = content.plainText as NSString
+        guard text.length > state.slashOffset, text.substring(with: NSRange(location: state.slashOffset, length: 1)) == "/" else { return closeSlash() }
+        state.query = text.substring(with: NSRange(location: state.slashOffset + 1, length: caret - span.location - state.slashOffset - 1))
+        let items = EditorAction.filterSlash(state.query)
+        guard !items.isEmpty, !state.query.contains("\n") else { return closeSlash() }
+        state.selected = min(state.selected, items.count - 1)
+        slash = state
+        onSlashChange?(state, items, caretRectOnScreen())
+    }
+
+    func closeSlash() {
+        guard slash != nil else { return }
+        slash = nil
+        onSlashChange?(nil, [], .zero)
+    }
+
+    func moveSlashSelection(by delta: Int) {
+        guard var state = slash else { return }
+        let items = EditorAction.filterSlash(state.query)
+        guard !items.isEmpty else { return }
+        state.selected = (state.selected + delta + items.count) % items.count
+        slash = state
+        onSlashChange?(state, items, caretRectOnScreen())
+    }
+
+    /// Применяет пункт меню: убирает «/запрос» и выполняет действие одной правкой.
+    func chooseSlash(_ index: Int? = nil) {
+        guard let state = slash else { return }
+        let items = EditorAction.filterSlash(state.query)
+        let i = index ?? state.selected
+        guard items.indices.contains(i), let span = spans.first(where: { $0.id == state.blockID }) else { return closeSlash() }
+        let action = items[i].action
+        closeSlash()
+        var cut = BlockSelection(block: state.blockID, offset: state.slashOffset)
+        cut.focus = BlockPoint(blockID: state.blockID, offset: span.length)
+        let tailLength = span.end - textView.selectedRange().location
+        cut.focus.offset = span.length - tailLength
+        switch action {
+        case .turnInto(let type):
+            perform(.batch([.replaceRange(cut, []), .changeType(block: state.blockID, type: type)]))
+        case .insert(let type):
+            perform(.replaceRange(cut, []))
+            let emptyBlock = document.block(state.blockID)?.plainText.isEmpty == true
+            perform(.insertBlock(after: state.blockID, type: type))
+            if emptyBlock { perform(.deleteBlock(state.blockID)) }
+            ensureTextAfterAtom()
+        default:
+            perform(.replaceRange(cut, []))
+            run(action)
+        }
+    }
+
+    private func caretRectOnScreen() -> NSRect {
+        var actual = NSRange()
+        return textView.firstRect(forCharacterRange: textView.selectedRange(), actualRange: &actual)
     }
 
     /// Составной ввод завершился без обычного изменения текста.
@@ -338,8 +606,18 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         if !textView.hasMarkedText() {
             editingIndex = spanIndex(at: textView.selectedRange().location)
             session.updateSelection(selection(for: textView.selectedRange()))
+            pendingMarks = []
         }
         applyTypingAttributes()
+        if slash != nil { updateSlash() }
+        reportSelection()
+    }
+
+    private func reportSelection() {
+        let range = textView.selectedRange()
+        guard range.length > 0, textView.window != nil else { return onSelectionRect?(nil) ?? () }
+        var actual = NSRange()
+        onSelectionRect?(textView.firstRect(forCharacterRange: range, actualRange: &actual))
     }
 
     /// Новый текст получает оформление своего блока, а не соседнего.
@@ -349,20 +627,35 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         // Набор продолжает оформление символа слева, как и правка в модели.
         let location = textView.selectedRange().location
         let span = spans[spanIndex(at: location)]
+        var attrs: [NSAttributedString.Key: Any]
         if location > span.location, block.isEditable, let storage = textView.textStorage, location <= storage.length {
-            textView.typingAttributes = storage.attributes(at: location - 1, effectiveRange: nil)
+            attrs = storage.attributes(at: location - 1, effectiveRange: nil)
+            attrs[.link] = nil
         } else {
-            textView.typingAttributes = style.attributes(for: block.type)
+            attrs = style.attributes(for: block.type, depth: depths[block.id] ?? 0)
         }
+        if !pendingMarks.isEmpty { attrs = style.attributes(base: attrs, marks: Array(pendingMarks)) }
+        textView.typingAttributes = attrs
     }
 
     func textDidEndEditing(_ notification: Notification) {
+        closeSlash()
+        onSelectionRect?(nil)
         if !textView.hasMarkedText(), let index = editingIndex { commitText(at: index) }
     }
 
     // MARK: Клавиши
 
     func textView(_ view: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if slash != nil {
+            switch selector {
+            case #selector(NSResponder.moveDown(_:)): moveSlashSelection(by: 1); return true
+            case #selector(NSResponder.moveUp(_:)): moveSlashSelection(by: -1); return true
+            case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertTab(_:)): chooseSlash(); return true
+            case #selector(NSResponder.cancelOperation(_:)): closeSlash(); return true
+            default: break
+            }
+        }
         let range = view.selectedRange()
         let here = point(at: range.location)
         let block = document.block(here.blockID)
@@ -373,8 +666,15 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
                 replaceCurrentSelection(with: [empty, empty])
             } else if block?.isEditable != true {
                 perform(.insertBlock(after: here.blockID, type: .paragraph))
-            } else if block?.type == .task, block?.plainText.isEmpty == true {
-                perform(.changeType(block: here.blockID, type: .paragraph))
+            } else if block?.type == .code {
+                view.insertText(BlockTextMapping.lineBreak, replacementRange: range) // В коде Enter — новая строка.
+            } else if let b = block, b.plainText.isEmpty, [.task, .bullet, .numbered, .toggle].contains(b.type) {
+                if b.parentID != nil {
+                    perform(.outdent(b.id))
+                    restoreCaret(block: b.id, offset: 0)
+                } else {
+                    perform(.changeType(block: b.id, type: .paragraph))
+                }
             } else {
                 perform(.splitBlock(here))
             }
@@ -382,14 +682,24 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         case #selector(NSResponder.insertLineBreak(_:)):
             view.insertText(BlockTextMapping.lineBreak, replacementRange: range)
             return true
-        case #selector(NSResponder.insertTab(_:)), #selector(NSResponder.insertBacktab(_:)):
-            return true // Вложенность появится вместе со списками (этап M4).
+        case #selector(NSResponder.insertTab(_:)):
+            if block?.type == .code { view.insertText("    ", replacementRange: range) } else { run(.indent) }
+            return true
+        case #selector(NSResponder.insertBacktab(_:)):
+            run(.outdent)
+            return true
         case #selector(NSResponder.deleteBackward(_:)):
             guard range.length == 0, here.offset == 0 else { return false }
-            if let block, block.isEditable, block.type != .paragraph {
-                perform(.changeType(block: block.id, type: .paragraph)) // Сначала снимается тип блока.
-            } else if let block, block.isEditable {
-                perform(.mergeBackward(block: block.id))
+            if let b = block, b.isEditable, b.type != .paragraph {
+                perform(.changeType(block: b.id, type: .paragraph)) // Сначала снимается тип блока.
+            } else if let b = block, b.isEditable, b.parentID != nil {
+                perform(.outdent(b.id)) // Затем уменьшается вложенность.
+                restoreCaret(block: b.id, offset: 0)
+            } else if let b = block, b.isEditable {
+                // Скрытые свёрнутым блоком потомки не объединяются с видимым текстом.
+                if let i = document.index(of: b.id), i > 0, spans.first(where: { $0.id == document.blocks[i - 1].id }) != nil {
+                    perform(.mergeBackward(block: b.id))
+                }
             } else {
                 return false
             }
@@ -397,7 +707,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         case #selector(NSResponder.deleteForward(_:)):
             guard range.length == 0, let i = spans.firstIndex(where: { $0.id == here.blockID }),
                   here.offset == spans[i].length, i + 1 < spans.count, block?.isEditable == true else { return false }
-            // Со следующим непонятным блоком не объединяем: его данные важнее.
+            // Со следующим неделимым блоком не объединяем: его данные важнее.
             guard document.block(spans[i + 1].id)?.isEditable == true else { return true }
             perform(.mergeBackward(block: spans[i + 1].id))
             restoreCaret(block: here.blockID, offset: here.offset)
@@ -440,10 +750,10 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         }
     }
 
-    // MARK: Задачи
+    // MARK: Декор блоков
 
-    /// Прямоугольник отметки задачи в координатах вида.
-    func checkboxRect(for span: Span) -> NSRect? {
+    /// Строка начала блока в координатах вида.
+    private func firstLineRect(for span: Span) -> NSRect? {
         guard let manager = textView.layoutManager, let storage = textView.textStorage else { return nil }
         var line: NSRect
         if span.location >= storage.length {
@@ -453,50 +763,136 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         }
         if line == .zero { return nil }
         line.origin.y += textView.textContainerOrigin.y
+        return line
+    }
+
+    /// Весь блок в координатах вида.
+    private func blockRect(for span: Span) -> NSRect? {
+        guard let manager = textView.layoutManager, let container = textView.textContainer, var first = firstLineRect(for: span) else { return nil }
+        if span.length > 0, span.end <= manager.numberOfGlyphs {
+            let glyphs = manager.glyphRange(forCharacterRange: NSRange(location: span.location, length: span.length), actualCharacterRange: nil)
+            first = first.union(manager.boundingRect(forGlyphRange: glyphs, in: container).offsetBy(dx: 0, dy: textView.textContainerOrigin.y))
+        }
+        return first
+    }
+
+    /// Квадрат маркера слева от текста блока.
+    func markerRect(for span: Span) -> NSRect? {
+        guard let line = firstLineRect(for: span), let block = document.block(span.id) else { return nil }
         let size = BlockTextStyle.checkboxSize
-        let font = style.font(for: .task)
+        let font = style.font(for: block.type)
         let top = line.minY + max(0, (font.ascender - font.descender - size) / 2)
-        return NSRect(x: textView.textContainerOrigin.x, y: top, width: size, height: size)
+        let x = textView.textContainerOrigin.x + CGFloat(depths[span.id] ?? 0) * BlockTextStyle.nestIndent
+        return NSRect(x: x, y: top, width: size, height: size)
     }
 
-    /// Нажатие на отметку; true — нажатие обработано.
+    /// Нажатие на отметку или треугольник; true — нажатие обработано.
     func handleClick(at point: NSPoint) -> Bool {
-        guard let glyphRange = textView.layoutManager?.glyphRange(forBoundingRect: NSRect(x: 0, y: point.y - 2, width: textView.bounds.width, height: 4), in: textView.textContainer!),
-              let manager = textView.layoutManager else { return false }
-        let character = manager.characterIndexForGlyph(at: glyphRange.location)
-        let span = spans[spanIndex(at: character)]
-        guard let block = document.block(span.id), block.type == .task, let rect = checkboxRect(for: span),
-              rect.insetBy(dx: -4, dy: -4).contains(point) else { return false }
-        perform(.setChecked(block: block.id, checked: block.content?.checked != true))
-        return true
+        guard let manager = textView.layoutManager, let container = textView.textContainer, !spans.isEmpty else { return false }
+        let glyphRange = manager.glyphRange(forBoundingRect: NSRect(x: 0, y: point.y - 2, width: textView.bounds.width, height: 4), in: container)
+        let index: Int
+        if glyphRange.length == 0 {
+            index = spans.count - 1 // Пустая последняя строка.
+        } else {
+            index = spanIndex(at: manager.characterIndexForGlyph(at: glyphRange.location))
+        }
+        let span = spans[index]
+        guard let block = document.block(span.id), let rect = markerRect(for: span), rect.insetBy(dx: -4, dy: -4).contains(point) else { return false }
+        if block.type == .task {
+            perform(.setChecked(block: block.id, checked: block.content?.checked != true))
+            return true
+        }
+        if block.type == .toggle {
+            let caret = textView.selectedRange()
+            perform(.setCollapsed(block: block.id, collapsed: !block.isCollapsed))
+            textView.setSelectedRange(NSRange(location: min(caret.location, textView.textStorage?.length ?? 0), length: 0))
+            return true
+        }
+        return false
     }
 
-    func drawCheckboxes(in dirty: NSRect) {
-        guard let manager = textView.layoutManager, let container = textView.textContainer else { return }
+    /// Фон выноски и кода, полоска цитаты: рисуются под текстом.
+    func drawBackgrounds(in dirty: NSRect) {
+        guard let (first, last) = visibleSpanRange(in: dirty) else { return }
+        for i in first...last {
+            guard let block = document.block(spans[i].id), [.callout, .code, .quote].contains(block.type), let rect = blockRect(for: spans[i]) else { continue }
+            let x = textView.textContainerOrigin.x + CGFloat(depths[block.id] ?? 0) * BlockTextStyle.nestIndent
+            let width = textView.bounds.width - x
+            switch block.type {
+            case .quote:
+                style.ink.setFill()
+                NSRect(x: x + 2, y: rect.minY + 1, width: 3, height: rect.height - 1).fill()
+            default:
+                let box = NSRect(x: x, y: rect.minY - 10, width: width, height: rect.height + 20)
+                style.soft.setFill()
+                NSBezierPath(roundedRect: box, xRadius: 9, yRadius: 9).fill()
+            }
+        }
+    }
+
+    /// Маркеры поверх текста.
+    func drawMarkers(in dirty: NSRect) {
+        guard let (first, last) = visibleSpanRange(in: dirty) else { return }
+        for i in first...last {
+            guard let block = document.block(spans[i].id), let rect = markerRect(for: spans[i]) else { continue }
+            switch block.type {
+            case .task: drawCheckbox(rect, checked: block.content?.checked == true)
+            case .bullet:
+                style.ink.setFill()
+                NSBezierPath(ovalIn: NSRect(x: rect.minX + 4.5, y: rect.midY - 2.5, width: 5, height: 5)).fill()
+            case .numbered:
+                let text = "\(numbers[block.id] ?? 1)." as NSString
+                let attrs: [NSAttributedString.Key: Any] = [.font: style.font(for: .numbered), .foregroundColor: style.muted]
+                text.draw(at: NSPoint(x: rect.minX, y: rect.minY - 1), withAttributes: attrs)
+            case .toggle:
+                let triangle = NSBezierPath()
+                if block.isCollapsed {
+                    triangle.move(to: NSPoint(x: rect.minX + 4, y: rect.minY + 3))
+                    triangle.line(to: NSPoint(x: rect.minX + 11, y: rect.midY))
+                    triangle.line(to: NSPoint(x: rect.minX + 4, y: rect.maxY - 3))
+                } else {
+                    triangle.move(to: NSPoint(x: rect.minX + 3, y: rect.minY + 4))
+                    triangle.line(to: NSPoint(x: rect.minX + 11, y: rect.minY + 4))
+                    triangle.line(to: NSPoint(x: rect.midX, y: rect.maxY - 3))
+                }
+                triangle.close()
+                style.muted.setFill()
+                triangle.fill()
+            case .callout:
+                let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 15), .foregroundColor: style.accent]
+                ("✦" as NSString).draw(at: NSPoint(x: rect.minX + 14, y: rect.minY - 2), withAttributes: attrs)
+            default: break
+            }
+        }
+    }
+
+    private func drawCheckbox(_ rect: NSRect, checked: Bool) {
+        let path = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 3.5, yRadius: 3.5)
+        if checked {
+            style.accent.setFill()
+            path.fill()
+            let tick = NSBezierPath()
+            tick.move(to: NSPoint(x: rect.minX + 3.2, y: rect.midY + 0.3))
+            tick.line(to: NSPoint(x: rect.minX + 6, y: rect.maxY - 3.6))
+            tick.line(to: NSPoint(x: rect.maxX - 3, y: rect.minY + 3.8))
+            tick.lineWidth = 1.7
+            tick.lineCapStyle = .round
+            NSColor.white.setStroke()
+            tick.stroke()
+        } else {
+            style.muted.withAlphaComponent(0.6).setStroke()
+            path.stroke()
+        }
+    }
+
+    private func visibleSpanRange(in dirty: NSRect) -> (Int, Int)? {
+        guard let manager = textView.layoutManager, let container = textView.textContainer, !spans.isEmpty else { return nil }
         let glyphs = manager.glyphRange(forBoundingRect: dirty, in: container)
         let characters = manager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
-        var i = spanIndex(at: characters.location)
-        while i < spans.count, spans[i].location <= characters.location + characters.length {
-            if let block = document.block(spans[i].id), block.type == .task, let rect = checkboxRect(for: spans[i]) {
-                let path = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 3.5, yRadius: 3.5)
-                if block.content?.checked == true {
-                    style.accent.setFill()
-                    path.fill()
-                    let tick = NSBezierPath()
-                    tick.move(to: NSPoint(x: rect.minX + 3.2, y: rect.midY + 0.3))
-                    tick.line(to: NSPoint(x: rect.minX + 6, y: rect.maxY - 3.6))
-                    tick.line(to: NSPoint(x: rect.maxX - 3, y: rect.minY + 3.8))
-                    tick.lineWidth = 1.7
-                    tick.lineCapStyle = .round
-                    NSColor.white.setStroke()
-                    tick.stroke()
-                } else {
-                    style.muted.withAlphaComponent(0.6).setStroke()
-                    path.stroke()
-                }
-            }
-            i += 1
-        }
+        let first = spanIndex(at: characters.location)
+        let last = spanIndex(at: characters.location + characters.length)
+        // Последняя пустая строка не имеет символов.
+        return (first, min(max(first, last), spans.count - 1))
     }
 
     func containerWidthChanged(_ width: CGFloat) {
@@ -543,7 +939,7 @@ final class BlockTextView: NSTextView {
     override func changeFont(_ sender: Any?) {}
     override func changeAttributes(_ sender: Any?) {}
 
-    // Перетаскивание появится вместе с блоками (M4): штатное удаляет источник по устаревшему диапазону.
+    // Перетаскивание текста отключено: штатное удаляет источник по устаревшему диапазону.
     override var acceptableDragTypes: [NSPasteboard.PasteboardType] { [] }
     override func dragSelection(with event: NSEvent, offset mouseOffset: NSSize, slideBack: Bool) -> Bool { false }
 
@@ -563,9 +959,14 @@ final class BlockTextView: NSTextView {
         run { $0.containerWidthChanged(newSize.width) }
     }
 
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        run { $0.drawBackgrounds(in: rect) }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        run { $0.drawCheckboxes(in: dirtyRect) }
+        run { $0.drawMarkers(in: dirtyRect) }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -575,34 +976,52 @@ final class BlockTextView: NSTextView {
         if !handled { super.mouseDown(with: event) }
     }
 
+    // MARK: Единое меню
+
+    /// Правый клик: те же действия, что в меню «Формат».
     override func menu(for event: NSEvent) -> NSMenu? {
         // Действия меню относятся к блоку под курсором мыши.
         let index = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
         let selected = selectedRange()
         if index < selected.location || index > selected.location + selected.length { setSelectedRange(NSRange(location: index, length: 0)) }
         let menu = super.menu(for: event) ?? NSMenu()
-        let convert = NSMenu()
-        for (type, title) in [(BlockType.paragraph, "Текст"), (.heading1, "Заголовок 1"), (.heading2, "Заголовок 2"), (.heading3, "Заголовок 3"), (.task, "Задача")] {
-            let item = NSMenuItem(title: NSLocalizedString(title, comment: ""), action: #selector(convertBlock(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = type.rawValue
-            convert.addItem(item)
+        var at = 0
+        func add(_ item: NSMenuItem) {
+            menu.insertItem(item, at: at)
+            at += 1
         }
-        let head = NSMenuItem(title: NSLocalizedString("Преобразовать", comment: ""), action: nil, keyEquivalent: "")
-        head.submenu = convert
-        let remove = NSMenuItem(title: NSLocalizedString("Удалить блок", comment: ""), action: #selector(removeBlock(_:)), keyEquivalent: "")
-        remove.target = self
-        menu.insertItem(.separator(), at: 0)
-        menu.insertItem(remove, at: 0)
-        menu.insertItem(head, at: 0)
-        // Системные пункты письма и ИИ не показываются: продукт без ИИ.
+        func sub(_ title: String, _ items: [EditorAction.Item]) -> NSMenuItem {
+            let head = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            let m = NSMenu()
+            for it in items { m.addItem(menuItem(it)) }
+            head.submenu = m
+            return head
+        }
+        let t: (String) -> String = { NSLocalizedString($0, comment: "") }
+        add(sub(t("Преобразовать"), EditorAction.blockTypes))
+        add(sub(t("Начертание"), EditorAction.marks))
+        add(sub(t("Цвет текста"), EditorAction.colors))
+        add(sub(t("Цветной маркер"), EditorAction.highlights))
+        add(sub(t("Вставить блок"), EditorAction.inserts))
+        for item in EditorAction.blockActions { add(menuItem(item)) }
+        add(.separator())
         return menu
     }
 
-    @objc private func convertBlock(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String else { return }
-        run { $0.changeBlockType(BlockType(rawValue: raw)) }
+    private func menuItem(_ item: EditorAction.Item) -> NSMenuItem {
+        let m = NSMenuItem(title: item.title, action: #selector(performMenuAction(_:)), keyEquivalent: "")
+        m.target = self
+        m.representedObject = EditorActionBox(item.action)
+        return m
     }
 
-    @objc private func removeBlock(_ sender: NSMenuItem) { run { $0.deleteCurrentBlock() } }
+    @objc private func performMenuAction(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? EditorActionBox else { return }
+        run { $0.run(box.action) }
+    }
+}
+
+final class EditorActionBox: NSObject {
+    let action: EditorAction
+    init(_ action: EditorAction) { self.action = action }
 }

@@ -35,9 +35,9 @@ struct PageScreen: View {
                     .foregroundColor(Tokens.muted)
                     .padding(.bottom, 24)
                 HStack(spacing: 9) {
-                    Menu {
-                        ForEach(BlockKind.all, id: \.type) { kind in
-                            Button(kind.title) { editor.insert(kind.type) }
+            Menu {
+                        ForEach(Array(EditorAction.slashItems.enumerated()), id: \.offset) { _, item in
+                            Button(item.title) { editor.controller.run(item.action) }
                         }
                     } label: { Label("Блок", systemImage: "plus") }
                     .menuStyle(.borderlessButton)

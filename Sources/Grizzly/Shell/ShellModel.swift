@@ -187,7 +187,7 @@ final class ShellModel: ObservableObject {
     }
 
     private func installEditor(_ editorSession: EditorSession, id: UUID) {
-        let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS)
+        let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS, soft: Tokens.softNS)
         editor = PageEditorModel(session: editorSession, style: style) { [weak self] in self?.errorMessage = $0 }
         section = .page(id)
         UserDefaults.standard.set(id.uuidString, forKey: lastPageKey)

@@ -19,6 +19,7 @@ enum Tokens {
     static let mutedNS = dynamic(0x666D60, 0xB6C0B0)
     static let accentNS = dynamic(0x395740, 0xABD1A1)
     static let lineNS = dynamic(0xE3E5D9, 0x3B463A)
+    static let softNS = dynamic(0xE6ECDF, 0x364735)
 
     static let paper = Color(paperNS)
     static let side = Color(dynamic(0xF4F4ED, 0x202720))
@@ -26,7 +27,7 @@ enum Tokens {
     static let muted = Color(mutedNS)
     static let line = Color(lineNS)
     static let accent = Color(accentNS)
-    static let soft = Color(dynamic(0xE6ECDF, 0x364735))
+    static let soft = Color(softNS)
     static let card = Color(dynamic(0xFFFEFB, 0x2D372D))
     static let primary = Color(rgb(0x3C5A40))
     static let logo = Color(rgb(0x3D5941))

@@ -43,10 +43,21 @@ struct BlockType: RawRepresentable, Hashable {
     static let heading2 = BlockType(rawValue: "heading2")
     static let heading3 = BlockType(rawValue: "heading3")
     static let task = BlockType(rawValue: "task")
+    static let bullet = BlockType(rawValue: "bullet")
+    static let numbered = BlockType(rawValue: "numbered")
+    static let quote = BlockType(rawValue: "quote")
+    static let callout = BlockType(rawValue: "callout")
+    static let toggle = BlockType(rawValue: "toggle")
+    static let code = BlockType(rawValue: "code")
+    static let divider = BlockType(rawValue: "divider")
 
-    /// Типы, которые понимает эта версия. Расширяется вместе с редактором.
-    static let known: Set<BlockType> = [.paragraph, .heading1, .heading2, .heading3, .task]
+    /// Текстовые типы этой версии. Всё остальное хранится непрозрачно и показывается одним неделимым символом.
+    static let known: Set<BlockType> = [.paragraph, .heading1, .heading2, .heading3, .task, .bullet, .numbered, .quote, .callout, .toggle, .code]
     var isKnown: Bool { Self.known.contains(self) }
+    /// Известные неделимые блоки: у них нет текста, данные лежат в JSON.
+    static let atoms: Set<BlockType> = [.divider]
+    var isAtom: Bool { Self.atoms.contains(self) }
+    var isHeading: Bool { self == .heading1 || self == .heading2 || self == .heading3 }
 }
 
 /// Содержимое понятного блока: отрезки, отметка задачи и неизвестные поля без потерь.
@@ -128,6 +139,12 @@ struct Block: Equatable, Identifiable {
         updatedAt = createdAt
     }
 
+    /// Неделимый блок, например разделитель.
+    init(atom type: BlockType, id: UUID, pageID: UUID, parentID: UUID?, sortKey: String, createdAt: Int64) {
+        self.init(id: id, pageID: pageID, parentID: parentID, sortKey: sortKey, type: type, contentVersion: 1,
+                  contentJSON: "{}", plainText: "", createdAt: createdAt, updatedAt: createdAt)
+    }
+
     /// Восстановление из хранилища: всё непонятное остаётся непрозрачным.
     init(id: UUID, pageID: UUID, parentID: UUID?, sortKey: String, type: BlockType, contentVersion: Int,
          contentJSON: String, plainText: String, createdAt: Int64, updatedAt: Int64) {
@@ -153,6 +170,12 @@ struct Block: Equatable, Identifiable {
     }
 
     var isEditable: Bool { content != nil }
+
+    /// Свёрнутый блок скрывает потомков.
+    var isCollapsed: Bool {
+        if case .bool(true)? = content?.extra["collapsed"] { return true }
+        return false
+    }
 
     func contentJSON() throws -> String {
         switch payload {

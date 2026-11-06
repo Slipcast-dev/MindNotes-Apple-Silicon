@@ -78,6 +78,25 @@ enum RichText {
         return (left, right)
     }
 
+    /// Меняет метки в диапазоне; текст не меняется.
+    static func mapMarks(_ runs: [TextRun], range: Range<Int>, _ transform: ([String]) -> [String]) -> [TextRun] {
+        let (left, rest) = split(runs, at: range.lowerBound)
+        let (middle, right) = split(rest, at: range.count)
+        let changed = middle.map { run -> TextRun in
+            var r = run
+            r.marks = transform(run.marks)
+            return r
+        }
+        return normalized(left + changed + right)
+    }
+
+    /// Весь текст диапазона несёт метку.
+    static func hasMark(_ runs: [TextRun], range: Range<Int>, _ mark: String) -> Bool {
+        let (_, rest) = split(runs, at: range.lowerBound)
+        let (middle, _) = split(rest, at: range.count)
+        return !middle.isEmpty && middle.allSatisfy { $0.marks.contains(mark) }
+    }
+
     /// Склеивает соседние отрезки с одинаковыми метками и убирает пустые.
     static func normalized(_ runs: [TextRun]) -> [TextRun] {
         var out: [TextRun] = []

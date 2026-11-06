@@ -16,16 +16,36 @@ enum MarkdownImport {
             out.append(BlockFragment(type: type, content: BlockContent(runs: inline(body), checked: checked)))
         }
 
+        var codeLines: [String]?
         for rawLine in text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("```") {
+                if let body = codeLines {
+                    out.append(BlockFragment(type: .code, content: BlockContent(text: body.joined(separator: "\n"))))
+                    codeLines = nil
+                } else {
+                    flush()
+                    codeLines = []
+                }
+                continue
+            }
+            if codeLines != nil { codeLines?.append(rawLine); continue }
             if line.isEmpty { flush(); continue }
             if line.hasPrefix("### ") { add(.heading3, String(line.dropFirst(4))) }
             else if line.hasPrefix("## ") { add(.heading2, String(line.dropFirst(3))) }
             else if line.hasPrefix("# ") { add(.heading1, String(line.dropFirst(2))) }
             else if line.lowercased().hasPrefix("- [x] ") { add(.task, String(line.dropFirst(6)), checked: true) }
             else if line.hasPrefix("- [ ] ") { add(.task, String(line.dropFirst(6))) }
+            else if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ") { add(.bullet, String(line.dropFirst(2))) }
+            else if let dot = line.range(of: ". "), !line[..<dot.lowerBound].isEmpty, line[..<dot.lowerBound].allSatisfy(\.isNumber) { add(.numbered, String(line[dot.upperBound...])) }
+            else if line.hasPrefix("> ") { add(.quote, String(line.dropFirst(2))) }
+            else if line == "---" || line == "***" || line == "___" {
+                flush()
+                out.append(BlockFragment(type: BlockType.divider.rawValue, contentVersion: 1, json: "{}", plain: ""))
+            }
             else { paragraph.append(rawLine) }
         }
+        if let body = codeLines { out.append(BlockFragment(type: .code, content: BlockContent(text: body.joined(separator: "\n")))) }
         flush()
         return out
     }

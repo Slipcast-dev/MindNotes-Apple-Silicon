@@ -126,6 +126,11 @@ final class EditorSession {
             case .heading2: lines.append("## \(b.plainText)")
             case .heading3: lines.append("### \(b.plainText)")
             case .task: lines.append("- [\(b.content?.checked == true ? "x" : " ")] \(b.plainText)")
+            case .bullet: lines.append("- \(b.plainText)")
+            case .numbered: lines.append("1. \(b.plainText)")
+            case .quote, .callout: lines.append("> \(b.plainText)")
+            case .code: lines.append("```\n\(b.plainText)\n```")
+            case .divider: lines.append("---")
             default: lines.append(b.plainText)
             }
         }

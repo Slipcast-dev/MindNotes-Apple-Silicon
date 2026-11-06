@@ -21,6 +21,13 @@ struct BlockFragment: Codable, Equatable {
         plain = block.plainText
     }
 
+    init(type: String, contentVersion: Int, json: String, plain: String) {
+        self.type = type
+        self.contentVersion = contentVersion
+        self.json = json
+        self.plain = plain
+    }
+
     /// Понятное содержимое; nil у неизвестного типа и более новой версии.
     var content: BlockContent? {
         guard BlockType(rawValue: type).isKnown, contentVersion <= BlockContent.currentVersion else { return nil }
