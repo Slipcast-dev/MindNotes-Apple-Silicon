@@ -7,6 +7,8 @@ final class PageEditorModel: ObservableObject {
     private let session: EditorSession
     let controller: BlockEditorController
     @Published private(set) var contentHeight: CGFloat = 60
+    /// Открытая в редакторе таблица.
+    @Published var editingTable: EditingTable?
     private let panels: EditorPanels
 
     var pageID: UUID { session.pageID }
@@ -18,6 +20,9 @@ final class PageEditorModel: ObservableObject {
         controller.onError = onError
         controller.onHeightChange = { [weak self] in self?.contentHeight = $0 }
         controller.updateHeight(force: true)
+        controller.onEditTable = { [weak self] block in
+            self?.editingTable = EditingTable(id: block.id, rows: AtomData.rows(of: block))
+        }
     }
 
     func insert(_ type: BlockType) {
@@ -28,6 +33,76 @@ final class PageEditorModel: ObservableObject {
     func emergencyText(title: String) -> String { session.emergencyText(title: title) }
 
     func closePanels() { panels.close() }
+}
+
+struct EditingTable: Identifiable {
+    let id: UUID
+    var rows: [[String]]
+}
+
+/// Редактор простой таблицы: строки и столбцы, первая строка — заголовок.
+struct TableEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State var rows: [[String]]
+    let save: ([[String]]) -> Void
+
+    private var columns: Int { rows.map(\.count).max() ?? 1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Таблица").font(Tokens.titleFont(26))
+            ScrollView([.vertical, .horizontal]) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(rows.indices, id: \.self) { r in
+                        HStack(spacing: 4) {
+                            ForEach(0..<columns, id: \.self) { c in
+                                TextField("", text: cell(r, c))
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 13, weight: r == 0 ? .semibold : .regular))
+                                    .frame(width: 150)
+                            }
+                            Button { rows.remove(at: r) } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(.plain)
+                                .disabled(rows.count <= 1)
+                                .help(L("Удалить строку"))
+                        }
+                    }
+                    HStack(spacing: 4) {
+                        ForEach(0..<columns, id: \.self) { c in
+                            Button { rows.indices.forEach { if rows[$0].count > c { rows[$0].remove(at: c) } } } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(.plain)
+                                .disabled(columns <= 1)
+                                .frame(width: 150)
+                                .help(L("Удалить столбец"))
+                        }
+                    }
+                }
+            }
+            HStack {
+                Button(L("Добавить строку")) { rows.append(Array(repeating: "", count: columns)) }.buttonStyle(NotesButtonStyle())
+                Button(L("Добавить столбец")) { rows.indices.forEach { rows[$0].append("") } }.buttonStyle(NotesButtonStyle())
+                Spacer()
+                Button(L("Отмена")) { dismiss() }.buttonStyle(NotesButtonStyle()).keyboardShortcut(.cancelAction)
+                Button(L("Готово")) {
+                    save(rows)
+                    dismiss()
+                }
+                .buttonStyle(NotesButtonStyle(kind: .primary))
+            }
+        }
+        .padding(23)
+        .frame(width: 720, height: 460)
+        .background(Tokens.paper)
+    }
+
+    private func cell(_ r: Int, _ c: Int) -> Binding<String> {
+        Binding(get: { rows.indices.contains(r) && rows[r].indices.contains(c) ? rows[r][c] : "" },
+                set: { value in
+                    guard rows.indices.contains(r) else { return }
+                    while rows[r].count <= c { rows[r].append("") }
+                    rows[r][c] = value
+                })
+    }
 }
 
 /// Единый текстовый вид страницы.

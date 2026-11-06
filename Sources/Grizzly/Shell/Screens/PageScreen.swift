@@ -92,6 +92,20 @@ struct PageScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                if let cover = page?.coverAssetID, let image = shell.image(for: cover) {
+                    Color.clear
+                        .frame(height: 180)
+                        .overlay(Image(nsImage: image).resizable().scaledToFill())
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(alignment: .topTrailing) {
+                            HStack(spacing: 6) {
+                                Button(L("Сменить")) { shell.pickPageCover(editor.pageID) }.buttonStyle(NotesButtonStyle())
+                                Button(L("Убрать")) { shell.setPageCover(editor.pageID, asset: nil) }.buttonStyle(NotesButtonStyle())
+                            }
+                            .padding(10)
+                        }
+                        .padding(.bottom, 14)
+                }
                 let path = shell.path(of: editor.pageID).map(\.title)
                 Eyebrow(text: path.isEmpty ? (page?.isFolder == true ? L("Папка") : L("Страница")) : path.joined(separator: " / "))
                 iconButton
@@ -114,6 +128,10 @@ struct PageScreen: View {
                             .contextMenu { Button("Снять тег") { shell.toggleTag(tag.id, on: editor.pageID) } }
                     }
                     TagPickerButton(page: editor.pageID)
+                    if page?.coverAssetID == nil {
+                        Button { shell.pickPageCover(editor.pageID) } label: { Label("Обложка", systemImage: "photo") }
+                            .buttonStyle(NotesButtonStyle(kind: .plain))
+                    }
                     Button {
                         shell.reloadBacklinks(for: editor.pageID)
                         showsBacklinks = true
@@ -132,7 +150,14 @@ struct PageScreen: View {
                         .buttonStyle(NotesButtonStyle(kind: .plain))
                 }
                 Rectangle().fill(Tokens.line).frame(height: 1).padding(.vertical, 18)
-                NativeBlockEditor(editor: editor).frame(height: editor.contentHeight)
+                NativeBlockEditor(editor: editor)
+                    .frame(height: editor.contentHeight)
+                    .padding(.horizontal, -BlockEditorController.gutter) // Ручка блока в левом поле, текст по колонке.
+                    .sheet(item: $editor.editingTable) { table in
+                        TableEditorSheet(rows: table.rows) { rows in
+                            editor.controller.perform(.setAtomData(block: table.id, json: AtomData.tableJSON(rows), plain: AtomData.tablePlain(rows)))
+                        }
+                    }
                 let kids = shell.children(of: editor.pageID)
                 if !kids.isEmpty {
                     Text("Подстраницы").font(.system(size: 17, weight: .semibold)).padding(.top, 24).padding(.bottom, 10)
@@ -148,6 +173,9 @@ struct PageScreen: View {
             .padding(.top, 32)
             .padding(.bottom, 42)
         }
-        .onAppear { title = page?.title ?? "" }
+        .onAppear {
+            title = page?.title ?? ""
+            if let page { shell.loadCover(for: page) }
+        }
     }
 }

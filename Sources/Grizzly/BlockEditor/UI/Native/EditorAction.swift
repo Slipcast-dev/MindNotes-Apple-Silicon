@@ -17,6 +17,12 @@ enum EditorAction: Equatable {
     case linkPage(UUID, String)
     /// Начинает набор ссылки: вводит «[[».
     case beginPageLink
+    /// Запрашивает изображение или файл у пользователя.
+    case attach(BlockType)
+    case insertTable
+    case copyBlockLink
+    case moveBlockUp
+    case moveBlockDown
 
     struct Item {
         let title: String
@@ -50,7 +56,10 @@ enum EditorAction: Equatable {
 
     static var inserts: [Item] {
         [Item(title: t("Разделитель"), action: .insert(.divider), aliases: ["линия", "divider", "черта"]),
-         Item(title: t("Ссылка на страницу"), action: .beginPageLink, aliases: ["link", "страница"])]
+         Item(title: t("Ссылка на страницу"), action: .beginPageLink, aliases: ["link", "страница"]),
+         Item(title: t("Изображение"), action: .attach(.image), aliases: ["картинка", "фото", "image"]),
+         Item(title: t("Файл"), action: .attach(.file), aliases: ["вложение", "документ", "file"]),
+         Item(title: t("Таблица"), action: .insertTable, aliases: ["table", "сетка"])]
     }
 
     static var marks: [Item] {
@@ -74,7 +83,10 @@ enum EditorAction: Equatable {
     static var blockActions: [Item] {
         [Item(title: t("Увеличить вложенность"), action: .indent),
          Item(title: t("Уменьшить вложенность"), action: .outdent),
+         Item(title: t("Переместить вверх"), action: .moveBlockUp),
+         Item(title: t("Переместить вниз"), action: .moveBlockDown),
          Item(title: t("Дублировать блок"), action: .duplicateBlock, key: "d"),
+         Item(title: t("Копировать ссылку на блок"), action: .copyBlockLink),
          Item(title: t("Удалить блок"), action: .deleteBlock)]
     }
 

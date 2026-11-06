@@ -1,4 +1,6 @@
 import AppKit
+import ImageIO
+import UniformTypeIdentifiers
 
 /// Связывает единый NSTextView с документом страницы.
 ///
@@ -25,6 +27,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     static let pasteboardType = NSPasteboard.PasteboardType("local.personal.GrizzlyNotes.blocks")
+    /// Левое поле вида: ручка блока находится вне колонки текста.
+    static let gutter: CGFloat = 26
 
     let session: EditorSession
     let textView: BlockTextView
@@ -40,8 +44,17 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     var requestLink: ((String?, @escaping (String?) -> Void) -> Void)?
     /// Страницы для «[[»: запрос → найденные.
     var pageSearch: ((String) -> [(id: UUID, title: String)])?
-    /// Нажата внутренняя ссылка.
-    var onOpenPage: ((UUID) -> Void)?
+    /// Нажата внутренняя ссылка: страница и, возможно, блок.
+    var onOpenLink: ((UUID, UUID?) -> Void)?
+    /// Копирует файл в пространство; ошибки показывает вызывающий.
+    var addAttachment: ((URL) async throws -> AssetRecord)?
+    /// Адрес вложения на диске.
+    var assetURL: ((UUID) -> URL?)?
+    /// Выбор файла пользователем.
+    var pickFile: ((BlockType) -> URL?)?
+    /// Открыть таблицу в редакторе.
+    var onEditTable: ((Block) -> Void)?
+    private var imageCache: [UUID: NSImage] = [:]
 
     private(set) var spans: [Span] = []
     private(set) var visible: [Block] = []
@@ -73,6 +86,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         layout.addTextContainer(container)
         textView = BlockTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 100), textContainer: container)
         super.init()
+        self.style.atomCell = { [weak self] in self?.cell(for: $0) }
         textView.controller = self
         textView.delegate = self
         textView.drawsBackground = false
@@ -84,7 +98,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.smartInsertDeleteEnabled = false
-        textView.textContainerInset = .zero
+        textView.textContainerInset = NSSize(width: Self.gutter, height: 0) // Поле для ручки перетаскивания.
         textView.isVerticallyResizable = false
         textView.isHorizontallyResizable = false
         textView.linkTextAttributes = [.cursor: NSCursor.pointingHand]
@@ -333,7 +347,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             guard range.length > 0 else { return }
             requestLink?(currentLink(in: range)) { [weak self] url in
                 guard let self else { return }
-                let value = url?.trimmingCharacters(in: .whitespaces)
+                let value = url.flatMap { Self.encodedAddress($0.trimmingCharacters(in: .whitespaces)) }
                 self.perform(.formatText(sel, .setValue(prefix: "a:", value: value?.isEmpty == false ? value : nil)))
             }
         case .clearFormat:
@@ -351,6 +365,16 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             if case .beginPageLink = action {
                 textView.insertText("[[", replacementRange: range)
             }
+        case .attach(let type):
+            guard let url = pickFile?(type) else { return }
+            insertFiles([url], type: type)
+        case .insertTable:
+            insertFragments([AtomData.table([["", "", ""], ["", "", ""]])])
+        case .copyBlockLink:
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(PageLink.url(page: document.pageID, block: id), forType: .string)
+        case .moveBlockUp, .moveBlockDown:
+            moveCurrentBlock(down: action == .moveBlockDown)
         case .duplicateBlock:
             let fragments = topSelectedBlockIDs().compactMap { document.block($0) }.map { b in
                 b.content.map { BlockFragment(type: b.type, content: $0) } ?? BlockFragment(opaque: b)
@@ -358,6 +382,120 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             guard let last = topSelectedBlockIDs().last, let tail = document.block(last) else { return }
             perform(.insertBlock(after: tail.id, type: .paragraph))
             if let s = session.selection { perform(.replaceRange(s, fragments)) }
+        }
+    }
+
+    /// Неделимые блоки встают на место выделения; ниже всегда остаётся строка для ввода.
+    func insertFragments(_ fragments: [BlockFragment]) {
+        perform(.replaceRange(selection(for: textView.selectedRange()), fragments))
+        ensureTextAfterAtom()
+    }
+
+    /// Копирует файлы в пространство и вставляет блоки: сначала файл, затем ссылка (FR-08).
+    func insertFiles(_ urls: [URL], type: BlockType? = nil) {
+        guard let add = addAttachment else { return }
+        Task { @MainActor in
+            var fragments: [BlockFragment] = []
+            for url in urls {
+                do {
+                    let asset = try await add(url)
+                    let isImage = type == .image || (type == nil && UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true)
+                    fragments.append(AtomData.attachment(type: isImage ? .image : .file, asset: asset))
+                } catch {
+                    self.onError?((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+                }
+            }
+            if !fragments.isEmpty { self.insertFragments(fragments) }
+        }
+    }
+
+    /// Плашка неделимого блока.
+    private func cell(for block: Block) -> NSTextAttachmentCell? {
+        switch block.type {
+        case .image:
+            return ImageBlockCell(picture: picture(for: block), name: AtomData.name(of: block), ink: style.muted, line: style.line)
+        case .file:
+            let size = ByteCountFormatter.string(fromByteCount: AtomData.size(of: block), countStyle: .file)
+            return FileBlockCell(name: AtomData.name(of: block), detail: size, ink: style.ink, muted: style.muted, line: style.line)
+        case .table:
+            return TableBlockCell(rows: AtomData.rows(of: block), ink: style.ink, line: style.line, soft: style.soft)
+        default:
+            return nil
+        }
+    }
+
+    private func picture(for block: Block) -> NSImage? {
+        guard let id = block.assetID else { return nil }
+        if let cached = imageCache[id] { return cached }
+        guard let url = assetURL?(id), let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 1800]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        let picture = NSImage(cgImage: image, size: NSSize(width: CGFloat(image.width) / 2, height: CGFloat(image.height) / 2))
+        imageCache[id] = picture
+        return picture
+    }
+
+    private func moveCurrentBlock(down: Bool) {
+        guard let id = topSelectedBlockIDs().first, let block = document.block(id) else { return }
+        let siblings = document.blocks.filter { $0.parentID == block.parentID }
+        guard let i = siblings.firstIndex(where: { $0.id == id }) else { return }
+        if down {
+            guard i + 1 < siblings.count else { return }
+            perform(.moveBlock(id, parent: block.parentID, after: siblings[i + 1].id))
+        } else {
+            guard i > 0 else { return }
+            perform(.moveBlock(id, parent: block.parentID, after: i >= 2 ? siblings[i - 2].id : nil))
+        }
+        // Курсор остаётся внутри перемещённого блока.
+        restoreCaret(block: id, offset: 0)
+    }
+
+    // MARK: Перетаскивание блоков
+
+    /// Куда встанет блок при отпускании в точке: выше или ниже блока под ней.
+    func dropTarget(at point: NSPoint) -> (after: UUID?, parent: UUID?, y: CGFloat)? {
+        guard !spans.isEmpty else { return nil }
+        var best: (span: Span, rect: NSRect)?
+        for span in spans {
+            guard let rect = blockRect(for: span) else { continue }
+            best = (span, rect)
+            if point.y < rect.maxY { break }
+        }
+        guard let (span, rect) = best, let block = document.block(span.id) else { return nil }
+        if point.y < rect.midY {
+            let siblings = document.blocks.filter { $0.parentID == block.parentID }
+            let i = siblings.firstIndex { $0.id == block.id } ?? 0
+            return (i > 0 ? siblings[i - 1].id : nil, block.parentID, rect.minY)
+        }
+        return (block.id, block.parentID, rect.maxY)
+    }
+
+    func finishDrag(_ id: UUID, at point: NSPoint) {
+        guard let target = dropTarget(at: point), target.after != id else { return }
+        perform(.moveBlock(id, parent: target.parent, after: target.after))
+    }
+
+    /// Ручка блока в левом поле.
+    func handleRect(for span: Span) -> NSRect? {
+        guard let line = firstLineRect(for: span), let block = document.block(span.id) else { return nil }
+        let x = textView.textContainerOrigin.x + CGFloat(depths[block.id] ?? 0) * BlockTextStyle.nestIndent - 20
+        return NSRect(x: x, y: line.minY, width: 16, height: 18)
+    }
+
+    func block(atY y: CGFloat) -> Span? {
+        for span in spans {
+            if let rect = blockRect(for: span), y >= rect.minY - 4, y <= rect.maxY + 4 { return span }
+        }
+        return nil
+    }
+
+    func drawHandle(for span: Span) {
+        guard let rect = handleRect(for: span) else { return }
+        style.muted.setFill()
+        for row in 0..<3 {
+            for column in 0..<2 {
+                NSBezierPath(ovalIn: NSRect(x: rect.minX + 4 + CGFloat(column) * 5, y: rect.minY + 3 + CGFloat(row) * 5, width: 2.5, height: 2.5)).fill()
+            }
         }
     }
 
@@ -705,7 +843,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     func textView(_ view: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
         let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
         guard let url, let page = PageLink.page(from: url) else { return false }
-        onOpenPage?(page)
+        onOpenLink?(page, PageLink.block(from: url))
         return true
     }
 
@@ -793,6 +931,13 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         }
     }
 
+    /// Адрес с кириллицей кодируется: иначе URL не разберётся и ссылка не откроется.
+    static func encodedAddress(_ text: String) -> String? {
+        if text.isEmpty { return "" }
+        if URL(string: text) != nil { return text }
+        return text.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed.union(.urlPathAllowed).union(CharacterSet(charactersIn: ":?#")))
+    }
+
     // MARK: Буфер обмена
 
     func copy(to pasteboard: NSPasteboard) {
@@ -812,6 +957,33 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     func paste(from pasteboard: NSPasteboard) {
+        // Файлы и картинки из буфера становятся вложениями.
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            return insertFiles(urls)
+        }
+        if pasteboard.data(forType: Self.pasteboardType) == nil, pasteboard.string(forType: .string) == nil,
+           let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff) {
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
+            let png = NSBitmapImageRep(data: data)?.representation(using: .png, properties: [:]) ?? data
+            if (try? png.write(to: tmp)) != nil {
+                insertFiles([tmp], type: .image)
+                return
+            }
+        }
+        if pasteboard.data(forType: Self.pasteboardType) == nil, let text = pasteboard.string(forType: .string) {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let url = URL(string: trimmed), let page = PageLink.page(from: url) {
+                // Ссылка на блок: подпись — заголовок страницы.
+                let title = pageSearch?("").first { $0.id == page }?.title ?? NSLocalizedString("Ссылка", comment: "")
+                let mark = "a:\(trimmed)"
+                return replaceCurrentSelection(with: [BlockFragment(type: .paragraph, content: BlockContent(runs: [TextRun(title, marks: [mark])]))])
+            }
+            // Адрес поверх выделенного текста делает его ссылкой.
+            if textView.selectedRange().length > 0, let address = Self.encodedAddress(trimmed), let scheme = URL(string: address)?.scheme, ["http", "https", "mailto"].contains(scheme) {
+                perform(.formatText(selection(for: textView.selectedRange()), .setValue(prefix: "a:", value: address)))
+                return
+            }
+        }
         if let data = pasteboard.data(forType: Self.pasteboardType),
            let fragments = try? JSONDecoder().decode([BlockFragment].self, from: data), !fragments.isEmpty {
             replaceCurrentSelection(with: fragments)
@@ -857,7 +1029,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     /// Нажатие на отметку или треугольник; true — нажатие обработано.
-    func handleClick(at point: NSPoint) -> Bool {
+    func handleClick(at point: NSPoint, clickCount: Int = 1) -> Bool {
         guard let manager = textView.layoutManager, let container = textView.textContainer, !spans.isEmpty else { return false }
         let glyphRange = manager.glyphRange(forBoundingRect: NSRect(x: 0, y: point.y - 2, width: textView.bounds.width, height: 4), in: container)
         let index: Int
@@ -867,7 +1039,24 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             index = spanIndex(at: manager.characterIndexForGlyph(at: glyphRange.location))
         }
         let span = spans[index]
-        guard let block = document.block(span.id), let rect = markerRect(for: span), rect.insetBy(dx: -4, dy: -4).contains(point) else { return false }
+        guard let block = document.block(span.id), true else { return false }
+        if block.content == nil {
+            guard let rect = blockRect(for: span), rect.contains(point) else { return false }
+            switch block.type {
+            case .file:
+                if let id = block.assetID, let url = assetURL?(id) { NSWorkspace.shared.open(url) }
+                return true
+            case .image:
+                if clickCount >= 2, let id = block.assetID, let url = assetURL?(id) { NSWorkspace.shared.open(url); return true }
+                return false
+            case .table:
+                onEditTable?(block)
+                return true
+            default:
+                return false
+            }
+        }
+        guard let rect = markerRect(for: span), rect.insetBy(dx: -4, dy: -4).contains(point) else { return false }
         if block.type == .task {
             perform(.setChecked(block: block.id, checked: block.content?.checked != true))
             return true
@@ -966,8 +1155,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     func containerWidthChanged(_ width: CGFloat) {
-        guard let container = textView.textContainer, width > 0, abs(container.size.width - width) > 0.5 else { return }
-        container.size = NSSize(width: width, height: 10_000_000)
+        guard let container = textView.textContainer, width > 0, abs(container.size.width - (width - Self.gutter * 2)) > 0.5 else { return }
+        container.size = NSSize(width: max(40, width - Self.gutter * 2), height: 10_000_000)
         updateHeight()
     }
 }
@@ -1009,8 +1198,17 @@ final class BlockTextView: NSTextView {
     override func changeFont(_ sender: Any?) {}
     override func changeAttributes(_ sender: Any?) {}
 
-    // Перетаскивание текста отключено: штатное удаляет источник по устаревшему диапазону.
-    override var acceptableDragTypes: [NSPasteboard.PasteboardType] { [] }
+    // Текст не перетаскивается: штатное удаляет источник по устаревшему диапазону. Принимаются только файлы.
+    override var acceptableDragTypes: [NSPasteboard.PasteboardType] { [.fileURL] }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty else { return false }
+        run { $0.insertFiles(urls) }
+        return true
+    }
     override func dragSelection(with event: NSEvent, offset mouseOffset: NSSize, slideBack: Bool) -> Bool { false }
 
     override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
@@ -1037,13 +1235,64 @@ final class BlockTextView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         run { $0.drawMarkers(in: dirtyRect) }
+        if let span = hoveredSpan { run { $0.drawHandle(for: span) } }
+        if let y = dropLine {
+            NSColor.controlAccentColor.setFill()
+            NSRect(x: textContainerOrigin.x, y: y, width: bounds.width - textContainerOrigin.x, height: 2).fill()
+        }
+    }
+
+    private var hoveredSpan: BlockEditorController.Span? {
+        didSet { if oldValue?.id != hoveredSpan?.id { needsDisplay = true } }
+    }
+    private var dropLine: CGFloat? {
+        didSet { needsDisplay = true }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let at = convert(event.locationInWindow, from: nil)
+        run { self.hoveredSpan = $0.block(atY: at.y) }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hoveredSpan = nil
     }
 
     override func mouseDown(with event: NSEvent) {
         let at = convert(event.locationInWindow, from: nil)
+        var grabbed: BlockEditorController.Span?
+        run { c in
+            if let span = c.block(atY: at.y), let rect = c.handleRect(for: span), rect.insetBy(dx: -3, dy: -3).contains(at) { grabbed = span }
+        }
+        if let span = grabbed {
+            trackDrag(of: span)
+            return
+        }
         var handled = false
-        run { handled = $0.handleClick(at: at) }
+        run { handled = $0.handleClick(at: at, clickCount: event.clickCount) }
         if !handled { super.mouseDown(with: event) }
+    }
+
+    /// Перетаскивание блока за ручку: линия показывает место, отпускание выполняет одну команду.
+    private func trackDrag(of span: BlockEditorController.Span) {
+        guard let window else { return }
+        var last = NSPoint.zero
+        while let event = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            last = convert(event.locationInWindow, from: nil)
+            if event.type == .leftMouseUp { break }
+            run { dropLine = $0.dropTarget(at: last)?.y }
+            autoscroll(with: event)
+        }
+        dropLine = nil
+        run { $0.finishDrag(span.id, at: last) }
     }
 
     // MARK: Единое меню

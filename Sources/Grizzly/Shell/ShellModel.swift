@@ -438,7 +438,23 @@ final class ShellModel: ObservableObject {
         let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS, soft: Tokens.softNS)
         editor = PageEditorModel(session: editorSession, style: style) { [weak self] in self?.errorMessage = $0 }
         editor?.controller.pageSearch = { [weak self] in self?.linkCandidates($0) ?? [] }
-        editor?.controller.onOpenPage = { [weak self] in self?.followLink(to: $0) }
+        editor?.controller.onOpenLink = { [weak self] page, block in self?.followLink(to: page, block: block) }
+        editor?.controller.addAttachment = { [weak self] url in
+            guard let store = self?.store else { throw WorkspaceError.storage(code: 0, detail: "пространство закрыто") }
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            guard size <= 512 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
+            return try await store.addAsset(copying: url, now: SystemClock().nowMillis())
+        }
+        editor?.controller.assetURL = { [weak self] id in self?.assetFileURL(id) }
+        editor?.controller.pickFile = { type in
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = true
+            panel.canChooseDirectories = false
+            if type == .image { panel.allowedContentTypes = [.image] }
+            panel.prompt = L("Выбрать")
+            return panel.runModal() == .OK ? panel.url : nil
+        }
+        editor?.controller.renderAll()
         backlinks = []
         section = .page(id)
         UserDefaults.standard.set(id.uuidString, forKey: lastPageKey)
@@ -511,9 +527,9 @@ final class ShellModel: ObservableObject {
     }
 
     /// Переход по ссылке. Страница в корзине не подменяется другой (FR-04).
-    func followLink(to id: UUID) {
+    func followLink(to id: UUID, block: UUID? = nil) {
         if pages.contains(where: { $0.id == id }) {
-            openPage(id)
+            openPage(id, block: block)
         } else {
             notice = L("Страница, на которую ведёт ссылка, в корзине или удалена.")
         }
@@ -544,6 +560,43 @@ final class ShellModel: ObservableObject {
             try await store.setPageIcon(id, icon: icon)
             try await session.refreshPages()
             self.pages = session.pages
+        }
+    }
+
+    /// Путь файла вложения. Имя составлено при добавлении и проверено на границы пространства.
+    func assetFileURL(_ id: UUID) -> URL? {
+        guard let store else { return nil }
+        return try? store.assetFileURLSync(id)
+    }
+
+    /// Обложка страницы: файл хранится в пространстве и входит в архив.
+    func setPageCover(_ id: UUID, asset: UUID?) {
+        enqueue {
+            guard let store = self.store, let session = self.session else { return }
+            try await store.setPageCover(id, asset: asset)
+            try await session.refreshPages()
+            self.pages = session.pages
+            if let asset, self.imageCache[asset] == nil, let url = try await store.assetURL(asset) {
+                self.imageCache[asset] = await Self.loadImage(url)
+                self.objectWillChange.send()
+            }
+        }
+    }
+
+    func pickPageCover(_ id: UUID) {
+        pickImage { [weak self] asset in
+            if let asset { self?.setPageCover(id, asset: asset) }
+        }
+    }
+
+    /// Обложки страниц, ещё не загруженные в память.
+    func loadCover(for page: Page) {
+        guard let asset = page.coverAssetID, imageCache[asset] == nil, let store else { return }
+        Task {
+            if let url = try? await store.assetURL(asset) {
+                self.imageCache[asset] = await Self.loadImage(url)
+                self.objectWillChange.send()
+            }
         }
     }
 

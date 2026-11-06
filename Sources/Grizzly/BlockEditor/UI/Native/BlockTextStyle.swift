@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// Оформление редактора. Цвета передаёт оболочка: слой редактора не зависит от неё.
 struct BlockTextStyle {
@@ -7,6 +8,8 @@ struct BlockTextStyle {
     var accent: NSColor = .controlAccentColor
     var line: NSColor = .separatorColor
     var soft: NSColor = .quaternaryLabelColor
+    /// Плашка неделимого блока, которую строит контроллер: изображение, файл, таблица.
+    var atomCell: ((Block) -> NSTextAttachmentCell?)?
 
     static let markerIndent: CGFloat = 24
     static let nestIndent: CGFloat = 24
@@ -117,7 +120,9 @@ struct BlockTextStyle {
     /// Неделимый блок — один символ: показывается, не правится посимвольно и не теряется (FR-05).
     private func atom(_ block: Block, depth: Int) -> NSAttributedString {
         let attachment = NSTextAttachment()
-        if block.type == .divider {
+        if let cell = atomCell?(block) {
+            attachment.attachmentCell = cell
+        } else if block.type == .divider {
             attachment.attachmentCell = DividerCell(line: line)
         } else {
             let title = NSLocalizedString("Блок не поддерживается этой версией", comment: "")
@@ -148,6 +153,128 @@ final class DividerCell: NSTextAttachmentCell {
     override func draw(withFrame frame: NSRect, in view: NSView?) {
         line.setFill()
         NSRect(x: frame.minX, y: frame.midY, width: frame.width, height: 1).fill()
+    }
+}
+
+/// Изображение на ширину текста.
+final class ImageBlockCell: NSTextAttachmentCell {
+    private let picture: NSImage?
+    private let name: String
+    private let ink: NSColor
+    private let line: NSColor
+
+    init(picture: NSImage?, name: String, ink: NSColor, line: NSColor) {
+        self.picture = picture
+        self.name = name
+        self.ink = ink
+        self.line = line
+        super.init(textCell: "")
+    }
+
+    required init(coder: NSCoder) { fatalError("не используется") }
+
+    override func cellFrame(for textContainer: NSTextContainer, proposedLineFragment lineFrag: NSRect, glyphPosition position: NSPoint, characterIndex charIndex: Int) -> NSRect {
+        let available = max(40, lineFrag.width - position.x - 1)
+        guard let picture, picture.size.width > 0 else { return NSRect(x: 0, y: -8, width: min(available, 420), height: 40) }
+        let width = min(available, picture.size.width)
+        return NSRect(x: 0, y: 0, width: width, height: width * picture.size.height / picture.size.width)
+    }
+
+    override func draw(withFrame frame: NSRect, in view: NSView?) {
+        guard let picture else {
+            line.setStroke()
+            NSBezierPath(roundedRect: frame.insetBy(dx: 0.5, dy: 0.5), xRadius: 9, yRadius: 9).stroke()
+            let text = String(format: NSLocalizedString("Изображение недоступно: %@", comment: ""), name) as NSString
+            text.draw(at: NSPoint(x: frame.minX + 12, y: frame.midY - 8), withAttributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: ink])
+            return
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: frame, xRadius: 6, yRadius: 6).addClip()
+        picture.draw(in: frame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
+/// Файл: значок, имя и размер; нажатие открывает его системным приложением.
+final class FileBlockCell: NSTextAttachmentCell {
+    private let name: String
+    private let detail: String
+    private let ink: NSColor
+    private let muted: NSColor
+    private let line: NSColor
+
+    init(name: String, detail: String, ink: NSColor, muted: NSColor, line: NSColor) {
+        self.name = name
+        self.detail = detail
+        self.ink = ink
+        self.muted = muted
+        self.line = line
+        super.init(textCell: "")
+    }
+
+    required init(coder: NSCoder) { fatalError("не используется") }
+
+    override func cellSize() -> NSSize { NSSize(width: 420, height: 44) }
+    override func cellBaselineOffset() -> NSPoint { NSPoint(x: 0, y: -14) }
+
+    override func draw(withFrame frame: NSRect, in view: NSView?) {
+        line.setStroke()
+        NSBezierPath(roundedRect: frame.insetBy(dx: 0.5, dy: 0.5), xRadius: 9, yRadius: 9).stroke()
+        let icon = NSWorkspace.shared.icon(for: .data)
+        icon.draw(in: NSRect(x: frame.minX + 10, y: frame.minY + 8, width: 28, height: 28), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        (name as NSString).draw(in: NSRect(x: frame.minX + 46, y: frame.minY + 6, width: frame.width - 56, height: 17),
+                                withAttributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: ink])
+        (detail as NSString).draw(at: NSPoint(x: frame.minX + 46, y: frame.minY + 23), withAttributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: muted])
+    }
+}
+
+/// Простая таблица; нажатие открывает редактор.
+final class TableBlockCell: NSTextAttachmentCell {
+    static let rowHeight: CGFloat = 30
+    private let rows: [[String]]
+    private let ink: NSColor
+    private let line: NSColor
+    private let soft: NSColor
+
+    init(rows: [[String]], ink: NSColor, line: NSColor, soft: NSColor) {
+        self.rows = rows
+        self.ink = ink
+        self.line = line
+        self.soft = soft
+        super.init(textCell: "")
+    }
+
+    required init(coder: NSCoder) { fatalError("не используется") }
+
+    override func cellFrame(for textContainer: NSTextContainer, proposedLineFragment lineFrag: NSRect, glyphPosition position: NSPoint, characterIndex charIndex: Int) -> NSRect {
+        NSRect(x: 0, y: 0, width: max(40, lineFrag.width - position.x - 1), height: CGFloat(max(rows.count, 1)) * Self.rowHeight + 1)
+    }
+
+    override func draw(withFrame frame: NSRect, in view: NSView?) {
+        let columns = max(rows.map(\.count).max() ?? 1, 1)
+        let width = (frame.width - 1) / CGFloat(columns)
+        if !rows.isEmpty {
+            soft.setFill()
+            NSRect(x: frame.minX, y: frame.minY, width: frame.width, height: Self.rowHeight).fill()
+        }
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: ink]
+        for (r, row) in rows.enumerated() {
+            for (c, text) in row.enumerated() {
+                let box = NSRect(x: frame.minX + CGFloat(c) * width + 8, y: frame.minY + CGFloat(r) * Self.rowHeight + 7, width: width - 16, height: Self.rowHeight - 10)
+                (text as NSString).draw(in: box, withAttributes: attrs)
+            }
+        }
+        line.setStroke()
+        let grid = NSBezierPath(rect: NSRect(x: frame.minX + 0.5, y: frame.minY + 0.5, width: frame.width - 1, height: frame.height - 1))
+        for c in 1..<max(columns, 1) where columns > 1 {
+            grid.move(to: NSPoint(x: frame.minX + CGFloat(c) * width + 0.5, y: frame.minY))
+            grid.line(to: NSPoint(x: frame.minX + CGFloat(c) * width + 0.5, y: frame.maxY))
+        }
+        for r in 1..<max(rows.count, 1) where rows.count > 1 {
+            grid.move(to: NSPoint(x: frame.minX, y: frame.minY + CGFloat(r) * Self.rowHeight + 0.5))
+            grid.line(to: NSPoint(x: frame.maxX, y: frame.minY + CGFloat(r) * Self.rowHeight + 0.5))
+        }
+        grid.stroke()
     }
 }
 

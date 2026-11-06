@@ -52,12 +52,15 @@ struct BlockType: RawRepresentable, Hashable {
     static let toggle = BlockType(rawValue: "toggle")
     static let code = BlockType(rawValue: "code")
     static let divider = BlockType(rawValue: "divider")
+    static let image = BlockType(rawValue: "image")
+    static let file = BlockType(rawValue: "file")
+    static let table = BlockType(rawValue: "table")
 
     /// Текстовые типы этой версии. Всё остальное хранится непрозрачно и показывается одним неделимым символом.
     static let known: Set<BlockType> = [.paragraph, .heading1, .heading2, .heading3, .task, .bullet, .numbered, .quote, .callout, .toggle, .code]
     var isKnown: Bool { Self.known.contains(self) }
     /// Известные неделимые блоки: у них нет текста, данные лежат в JSON.
-    static let atoms: Set<BlockType> = [.divider]
+    static let atoms: Set<BlockType> = [.divider, .image, .file, .table]
     var isAtom: Bool { Self.atoms.contains(self) }
     var isHeading: Bool { self == .heading1 || self == .heading2 || self == .heading3 }
 }
@@ -172,6 +175,19 @@ struct Block: Equatable, Identifiable {
     }
 
     var isEditable: Bool { content != nil }
+
+    /// Данные неделимого блока (изображение, файл, таблица).
+    var atomJSON: [String: JSONValue] {
+        guard case .opaque(let raw) = payload, let data = raw.data(using: .utf8),
+              case .object(let o)? = try? JSONDecoder().decode(JSONValue.self, from: data) else { return [:] }
+        return o
+    }
+
+    /// Вложение изображения или файла.
+    var assetID: UUID? {
+        guard type == .image || type == .file, case .string(let s)? = atomJSON["asset"] else { return nil }
+        return UUID(uuidString: s)
+    }
 
     /// Свёрнутый блок скрывает потомков.
     var isCollapsed: Bool {

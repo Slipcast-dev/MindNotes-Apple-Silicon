@@ -67,3 +67,12 @@ struct Backlink: Equatable, Identifiable {
     var text: String
     var id: UUID { blockID }
 }
+
+extension PageLink {
+    /// Адрес блока: страница и якорь. Заголовки и тексты в адрес не входят.
+    static func url(page: UUID, block: UUID) -> String { "\(prefix)\(page.uuidString.lowercased())#\(block.uuidString.lowercased())" }
+
+    static func block(from url: URL) -> UUID? {
+        url.fragment.flatMap(UUID.init(uuidString:))
+    }
+}

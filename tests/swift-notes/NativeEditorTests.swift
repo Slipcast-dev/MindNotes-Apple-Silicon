@@ -388,7 +388,7 @@ func runNativeEditorReviewTests() async {
             let many = [NSValue(range: NSRange(location: 0, length: 1)), NSValue(range: NSRange(location: 7, length: 1))]
             check(!r.controller.textView(r.tv, shouldChangeTextInRanges: many, replacementStrings: ["x", "y"]), "правка в двух местах отклонена")
             check(!r.controller.textView(r.tv, shouldChangeTextIn: NSRange(location: 0, length: 2), replacementString: nil), "только атрибуты")
-            check(r.tv.acceptableDragTypes.isEmpty, "перетаскивание выключено")
+            checkEqual(r.tv.acceptableDragTypes, [.fileURL], "текст не перетаскивается, файлы принимаются")
             checkEqual(r.doc, before)
             r.checkSync()
             try await r.close()
@@ -858,7 +858,7 @@ func runPageLinkTests() async {
             var shown: [[String]] = []
             r.controller.onSlashChange = { s, items, _ in if s != nil { shown.append(items.map(\.title)) } }
             var opened: UUID?
-            r.controller.onOpenPage = { opened = $0 }
+            r.controller.onOpenLink = { page, _ in opened = page }
             r.caret(0, 4)
             r.type("[")
             check(r.controller.slash == nil, "одна скобка не открывает")
@@ -913,5 +913,144 @@ func runPageLinkTests() async {
         let s = SearchText.snippet(long, query: "цель")
         check(s.contains("цель") && s.hasPrefix("…") && s.hasSuffix("…"), "вокруг совпадения: \(s)")
         checkEqual(PageLink.page(fromMark: "a:https://example.com"), nil)
+    }
+}
+
+@MainActor
+func runAttachmentTests() async {
+    _ = NSApplication.shared
+    await test("Изображение и файл: копия в пространстве, блок, связь, архив, отмена") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "до"), (.paragraph, "после")])
+            r.controller.addAttachment = { url in try await r.ws.addAsset(copying: url, now: 1) }
+            r.controller.assetURL = { try? r.ws.assetFileURLSync($0) }
+            let png = dir.appendingPathComponent("картинка.png")
+            let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 8, pixelsHigh: 4, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+            try rep.representation(using: .png, properties: [:])!.write(to: png)
+            let doc = dir.appendingPathComponent("отчёт.pdf")
+            try Data("pdf".utf8).write(to: doc)
+            let before = r.doc
+            r.caret(0, 2)
+            r.controller.insertFiles([png, doc])
+            for _ in 0..<40 where r.doc.blocks.count < 4 { try await Task.sleep(nanoseconds: 50_000_000) }
+            checkEqual(r.doc.blocks.map(\.type.rawValue), ["paragraph", "image", "file", "paragraph"], "типы блоков")
+            r.checkSync("вставка")
+            let image = r.doc.blocks.first { $0.type == .image }!, file = r.doc.blocks.first { $0.type == .file }!
+            checkEqual(AtomData.name(of: file), "отчёт.pdf", "исходное имя")
+            let url = try r.ws.assetFileURLSync(image.assetID!)
+            check(url?.path.contains("/assets/") == true, "файл в пространстве")
+            try FileManager.default.removeItem(at: png)
+            check(FileManager.default.fileExists(atPath: url!.path), "копия не зависит от оригинала")
+            try await r.session.coordinator.flush()
+            let links = try r.ws.maintenanceWrite { try $0.scalarInt("SELECT count(*) FROM block_assets") }
+            checkEqual(links, 2, "блоки ссылаются на вложения")
+            let found = try await r.ws.search("отчёт")
+            checkEqual(found.first?.blockID, file.id, "файл находится по имени")
+            let archive = dir.appendingPathComponent("a.grizzlybackup")
+            let backup = try BackupService.create(workspaceRoot: r.ws.layout.root, snapshotter: r.ws, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 1)
+            checkEqual(backup.manifest.files.count, 3, "база и два вложения")
+            check(backup.isComplete, "копия полна")
+            r.tv.undo(nil)
+            checkEqual(r.doc.blocks.map(\.plainText).filter { !$0.isEmpty }, before.blocks.map(\.plainText), "отмена убирает блоки")
+            r.checkSync("отмена")
+            // Удалённый блок не трогает файл: его ещё может вернуть отмена или история.
+            check(FileManager.default.fileExists(atPath: url!.path), "файл остаётся")
+            try await r.close()
+        }
+    }
+
+    await test("Таблица: вставка, правка данных, поиск, отмена, нажатие открывает редактор") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "")])
+            r.caret(0, 0)
+            r.controller.run(.insertTable)
+            checkEqual(r.doc.blocks[0].type, .table, "пустая строка стала таблицей")
+            checkEqual(AtomData.rows(of: r.doc.blocks[0]), [["", "", ""], ["", "", ""]])
+            checkEqual(r.types.last, .paragraph, "ниже строка для ввода")
+            r.checkSync("вставка")
+            let id = r.doc.blocks[0].id
+            let rows = [["Имя", "Город"], ["Ёж", "Лес"]]
+            r.controller.perform(.setAtomData(block: id, json: AtomData.tableJSON(rows), plain: AtomData.tablePlain(rows)))
+            checkEqual(AtomData.rows(of: r.doc.block(id)!), rows)
+            r.checkSync("правка")
+            try await r.session.coordinator.flush()
+            let hit = try await r.ws.search("город")
+            checkEqual(hit.first?.blockID, id, "поиск по таблице")
+            var opened: UUID?
+            r.controller.onEditTable = { opened = $0.id }
+            r.tv.layoutManager?.ensureLayout(for: r.tv.textContainer!)
+            check(r.controller.handleClick(at: NSPoint(x: 60, y: 12)), "нажатие по таблице")
+            checkEqual(opened, id)
+            r.tv.undo(nil)
+            checkEqual(AtomData.rows(of: r.doc.block(id)!), [["", "", ""], ["", "", ""]], "отмена правки")
+            r.checkSync("отмена")
+            try await r.close()
+        }
+    }
+
+    await test("Перемещение блоков: команда, потомки, запрет цикла, клавиши, бросок") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "а"), (.paragraph, "б"), (.paragraph, "в"), (.paragraph, "г")])
+            let a = r.doc.blocks[0].id, b = r.doc.blocks[1].id, c = r.doc.blocks[2].id, d = r.doc.blocks[3].id
+            r.controller.perform(.indent(c))
+            checkEqual(r.doc.block(c)?.parentID, b)
+            let before = r.doc
+            r.controller.perform(.moveBlock(b, parent: nil, after: d))
+            checkEqual(r.texts, ["а", "г", "б", "в"], "блок идёт с потомками")
+            r.checkSync("перенос")
+            r.tv.undo(nil)
+            checkEqual(r.doc, before, "отмена")
+            check(!r.controller.perform(.moveBlock(b, parent: c, after: nil)), "в собственного потомка нельзя")
+            check(!r.controller.perform(.moveBlock(b, parent: b, after: nil)), "в себя нельзя")
+            checkEqual(r.doc, before)
+            r.controller.perform(.moveBlock(d, parent: nil, after: nil))
+            checkEqual(r.texts, ["г", "а", "б", "в"], "в начало")
+            r.tv.undo(nil)
+            r.caret(0, 0)
+            r.controller.run(.moveBlockDown)
+            checkEqual(r.texts, ["б", "в", "а", "г"], "вниз через соседа с потомками")
+            r.controller.run(.moveBlockUp)
+            checkEqual(r.texts, ["а", "б", "в", "г"], "обратно")
+            r.tv.layoutManager?.ensureLayout(for: r.tv.textContainer!)
+            let lastSpan = r.controller.spans[3]
+            let y = r.controller.handleRect(for: lastSpan)!.maxY + 40
+            r.controller.finishDrag(a, at: NSPoint(x: 30, y: y))
+            checkEqual(r.texts, ["б", "в", "г", "а"], "бросок ниже последнего")
+            r.checkSync("бросок")
+            r.controller.finishDrag(a, at: NSPoint(x: 30, y: y))
+            checkEqual(r.texts.last, "а", "бросок на себя ничего не меняет")
+            try await r.close()
+        }
+    }
+
+    await test("Ссылка на блок и адрес на выделение") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "текст"), (.paragraph, "цель")])
+            let page = r.editor.pageID, block = r.doc.blocks[1].id
+            r.controller.pageSearch = { _ in [(page, "Моя страница")] }
+            var got: (UUID, UUID?)?
+            r.controller.onOpenLink = { got = ($0, $1) }
+            let board = NSPasteboard(name: NSPasteboard.Name("notes.test.\(UUID().uuidString)"))
+            board.clearContents()
+            board.setString(PageLink.url(page: page, block: block), forType: .string)
+            r.caret(0, 5)
+            r.controller.paste(from: board)
+            checkEqual(r.texts[0], "текстМоя страница")
+            let url = r.tv.textStorage?.attribute(.link, at: 6, effectiveRange: nil) as? URL
+            _ = r.controller.textView(r.tv, clickedOnLink: url!, at: 6)
+            checkEqual(got?.0, page)
+            checkEqual(got?.1, block, "ссылка ведёт на блок")
+            board.clearContents()
+            board.setString("https://example.com/путь", forType: .string)
+            r.select(1, 0, 1, 4)
+            r.controller.paste(from: board)
+            checkEqual(r.texts[1], "цель", "текст не заменён")
+            board.clearContents()
+            board.setString("https://example.com/", forType: .string)
+            r.select(1, 0, 1, 4)
+            r.controller.paste(from: board)
+            check(r.doc.blocks[1].content!.runs[0].marks.contains("a:https://example.com/"), "адрес на выделенный текст: \(r.doc.blocks[1].content!.runs[0].marks)")
+            try await r.close()
+        }
     }
 }

@@ -604,3 +604,9 @@
 "На эту страницу пока никто не ссылается." = "No pages link here yet.";
 "Переход" = "Go";
 "Страница, на которую ведёт ссылка, в корзине или удалена." = "The page this link points to is in the Trash or deleted.";
+"Файл" = "File";
+"Изображение недоступно: %@" = "Image unavailable: %@";
+"Переместить вверх" = "Move Up";
+"Переместить вниз" = "Move Down";
+"Копировать ссылку на блок" = "Copy Link to Block";
+"Сменить" = "Change";

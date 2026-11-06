@@ -354,6 +354,9 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
                     """, [SQLValue(b.id), SQLValue(b.pageID), SQLValue(b.parentID), .text(b.sortKey), .text(b.type.rawValue),
                           .int(Int64(b.contentVersion)), .text(json), .text(b.plainText), .int(b.createdAt), .int(b.updatedAt)])
                     if indexed { try SearchIndex.updateBlock(db, id: b.id, page: b.pageID, text: b.plainText, targets: PageLink.targets(of: b)) }
+                    // Вложение со ссылкой не удаляется уборкой (FR-04).
+                    try db.run("DELETE FROM block_assets WHERE owner_id=?", [SQLValue(b.id)])
+                    if let asset = b.assetID { try db.run("INSERT OR IGNORE INTO block_assets(owner_id, asset_id) SELECT ?, id FROM assets WHERE id=?", [SQLValue(b.id), SQLValue(asset)]) }
                 }
                 for (id, title) in batch.titles {
                     try db.run("UPDATE pages SET title=?, updated_at=? WHERE id=?", [.text(title), .int(now), SQLValue(id)])

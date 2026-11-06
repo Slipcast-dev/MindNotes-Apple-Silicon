@@ -123,6 +123,10 @@ extension SQLiteWorkspace {
         try await writer.run { try $0.run("UPDATE pages SET icon=? WHERE id=?", [SQLValue(icon), SQLValue(id)]) }
     }
 
+    func setPageCover(_ id: UUID, asset: UUID?) async throws {
+        try await writer.run { try $0.run("UPDATE pages SET cover_asset_id=? WHERE id=?", [SQLValue(asset), SQLValue(id)]) }
+    }
+
     func setPageFullWidth(_ id: UUID, _ value: Bool) async throws {
         try await writer.run { try $0.run("UPDATE pages SET full_width=? WHERE id=?", [.int(value ? 1 : 0), SQLValue(id)]) }
     }
@@ -182,6 +186,7 @@ extension SQLiteWorkspace {
                         """, [SQLValue(nb), SQLValue(newID), SQLValue(b.parent.flatMap { blockMap[$0] }), .text(b.key), .text(b.type), .int(b.v), .text(json), .text(b.text), .int(now), .int(now)])
                         let copy = Block(id: nb, pageID: newID, parentID: nil, sortKey: b.key, type: BlockType(rawValue: b.type), contentVersion: Int(b.v), contentJSON: json, plainText: b.text, createdAt: now, updatedAt: now)
                         try SearchIndex.updateBlock(db, id: nb, page: newID, text: b.text, targets: PageLink.targets(of: copy))
+                        try db.run("INSERT OR IGNORE INTO block_assets(owner_id, asset_id) SELECT ?, asset_id FROM block_assets WHERE owner_id=?", [SQLValue(nb), SQLValue(bid)])
                     }
                 }
                 guard let root = pageMap[id] else { throw WorkspaceError.pageNotFound(id) }

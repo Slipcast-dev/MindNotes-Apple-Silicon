@@ -19,6 +19,7 @@ func runAllNotesTests() async {
     await runNotionEditorTests()
     await runNotionReviewTests()
     await runPageLinkTests()
+    await runAttachmentTests()
     await runBackupTests()
     await runVerticalScenario()
     await runGapTests()

@@ -18,6 +18,10 @@ enum EditCommand: Equatable {
     case formatText(BlockSelection, MarkEdit)
     /// Метки только что набранного текста; склеивается с набором в один шаг отмены.
     case typedMarks(BlockSelection, add: [String], remove: [String])
+    /// Заменяет данные неделимого блока: правка таблицы.
+    case setAtomData(block: UUID, json: String, plain: String)
+    /// Перемещает блок с потомками: родитель и сосед, после которого встать (nil — первым).
+    case moveBlock(UUID, parent: UUID?, after: UUID?)
     case indent(UUID)
     case outdent(UUID)
     case setCollapsed(block: UUID, collapsed: Bool)
@@ -353,6 +357,36 @@ enum BlockEditing {
                 marks.filter { !remove.contains($0) } + add.filter { !marks.contains($0) }
             }
             return result([.upsert(updated(b, n))], selection: nil, key: "text:\(b.id)")
+
+        case let .setAtomData(id, json, plain):
+            guard let b = document.block(id), b.content == nil else { throw EditError.blockNotFound(id) }
+            var n = Block(id: b.id, pageID: b.pageID, parentID: b.parentID, sortKey: b.sortKey, type: b.type, contentVersion: b.contentVersion,
+                          contentJSON: json, plainText: plain, createdAt: b.createdAt, updatedAt: now)
+            n.updatedAt = now
+            return result([.upsert(n)], selection: nil)
+
+        case let .moveBlock(id, parent, after):
+            guard let b = document.block(id) else { throw EditError.blockNotFound(id) }
+            // Блок нельзя переместить в самого себя или в своего потомка.
+            let own = Set(document.descendants(of: id).map(\.id)).union([id])
+            if let parent, own.contains(parent) || document.block(parent) == nil {
+                return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
+            }
+            let siblings = document.blocks.filter { $0.parentID == parent && $0.id != id }
+            var position = 0
+            if let after {
+                guard let i = siblings.firstIndex(where: { $0.id == after }) else {
+                    return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
+                }
+                position = i + 1
+            }
+            let before = position > 0 ? siblings[position - 1].sortKey : nil
+            let next = position < siblings.count ? siblings[position].sortKey : nil
+            var n = b
+            n.parentID = parent
+            n.sortKey = SortKey.between(before, next)
+            n.updatedAt = now
+            return result([.upsert(n)], selection: nil)
 
         case let .indent(id):
             guard let b = document.block(id) else { throw EditError.blockNotFound(id) }
