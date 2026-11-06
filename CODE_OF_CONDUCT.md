@@ -20,7 +20,7 @@ Maintainers may edit or remove comments, commits, issues and other contributions
 and may temporarily or permanently ban contributors for behavior they deem inappropriate.
 
 Report violations privately through GitHub: use the **Report content** option on the item, or open a private
-security advisory at <https://github.com/Slipcast-dev/Grizzly/security/advisories/new> and mark it as a conduct report.
+security advisory at <https://github.com/Slipcast-dev> and mark it as a conduct report.
 Reports are handled confidentially.
 
 ## Attribution

@@ -1,16 +1,10 @@
-## What and why
+## Что и зачем
 
-<!-- Describe the change and the problem it solves. Link the issue: Fixes #123 -->
+<!-- Что меняется и какую задачу решает. Issue: Fixes #123 -->
 
-## Platforms touched
+## Проверки
 
-- [ ] macOS (`Sources/`)
-- [ ] Windows (`electron/`)
-- [ ] Docs / scripts only
-
-## Checklist
-
-- [ ] Tried it with the files in `samples/`
-- [ ] Updated docs and `CHANGELOG.md` if behavior changed
-- [ ] No secrets, personal paths or build output committed
-- [ ] No new network access (beyond the GitHub update check) or runtime dependency
+- [ ] `./scripts/test.sh` проходит
+- [ ] Обновлены `docs/personal-ru/STATUS.md` и `TEST_REPORT.md`
+- [ ] Нет секретов, личных путей и результатов сборки
+- [ ] Нет новых сетевых обращений и зависимостей
