@@ -19,8 +19,7 @@ sexualized language or imagery, and other conduct that would reasonably be consi
 Maintainers may edit or remove comments, commits, issues and other contributions that violate this Code of Conduct,
 and may temporarily or permanently ban contributors for behavior they deem inappropriate.
 
-Report violations privately through GitHub: use the **Report content** option on the item, or open a private
-security advisory at <https://github.com/Slipcast-dev> and mark it as a conduct report.
+Report violations privately to the owner: <https://github.com/Slipcast-dev>.
 Reports are handled confidentially.
 
 ## Attribution
