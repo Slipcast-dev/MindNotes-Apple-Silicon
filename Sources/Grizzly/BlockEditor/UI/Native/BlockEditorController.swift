@@ -269,7 +269,14 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
         guard !applying, let index = pendingIndex ?? editingIndex, spans.indices.contains(index) else { return }
         pendingIndex = nil
-        // Длина блока меняется и при составном вводе, поэтому считается по фактическому тексту вида.
+        adjustSpans(at: index)
+        if !textView.hasMarkedText() { commitText(at: index) }
+        applyTypingAttributes()
+        updateHeight()
+    }
+
+    /// Длина блока считается по фактическому тексту вида: при составном вводе модель ещё не менялась.
+    private func adjustSpans(at index: Int) {
         let total = textView.textStorage?.length ?? 0
         let others = spans.enumerated().reduce(0) { $0 + ($1.offset == index ? 0 : $1.element.length) } + max(0, spans.count - 1)
         spans[index].length = max(0, total - others)
@@ -278,8 +285,13 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             spans[i].location = location
             location += spans[i].length + 1
         }
-        if !textView.hasMarkedText() { commitText(at: index) }
-        applyTypingAttributes()
+    }
+
+    /// AppKit не сообщает об изменении текста при составном вводе.
+    func markedTextChanged() {
+        guard !applying, let index = pendingIndex ?? editingIndex, spans.indices.contains(index) else { return }
+        pendingIndex = nil
+        adjustSpans(at: index)
         updateHeight()
     }
 
@@ -512,6 +524,7 @@ final class BlockTextView: NSTextView {
     override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
         run { $0.prepareForMarkedText() }
         super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        run { $0.markedTextChanged() }
     }
 
     override func unmarkText() {

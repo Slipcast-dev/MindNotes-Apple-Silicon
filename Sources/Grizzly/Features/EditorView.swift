@@ -155,6 +155,7 @@ private struct EditorTextView: NSViewRepresentable {
         view.delegate = context.coordinator
         view.isRichText = false
         view.allowsUndo = true
+        SystemAI.disableWritingTools(on: view) // Без ИИ и в файловом режиме (FR-16).
         view.isAutomaticQuoteSubstitutionEnabled = false
         view.isAutomaticDashSubstitutionEnabled = false
         view.isAutomaticTextReplacementEnabled = false
