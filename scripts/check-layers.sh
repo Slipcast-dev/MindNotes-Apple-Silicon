@@ -3,7 +3,7 @@
 # запрещённые импорты и символы ищутся grep, а ссылка на верхний слой даёт ошибку typecheck подмножества.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-S=Sources/Grizzly
+S=Sources/MinervaNoema
 fail=0
 
 swiftfiles() { for d in "$@"; do [[ -d "$d" ]] && find "$d" -name '*.swift'; done; return 0; }

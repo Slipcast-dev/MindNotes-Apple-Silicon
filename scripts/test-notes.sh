@@ -2,7 +2,7 @@
 # Тесты слоёв рабочего пространства без UI. Сборка -Onone, чтобы прогон занимал секунды, а не минуты.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-S=Sources/Grizzly
+S=Sources/MinervaNoema
 OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
 FILES=("${(@f)$(for d in $S/Workspace $S/Persistence $S/BlockEditor/Commands $S/BlockEditor/UI/Native $S/Backup $S/ImportExport tests/swift-notes; do [[ -d $d ]] && find $d -name '*.swift'; done)}")

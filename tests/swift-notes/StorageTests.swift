@@ -284,7 +284,7 @@ func runTagAndLookTests() async {
             try c.run("INSERT INTO pages(id, sort_key, title, created_at, updated_at) VALUES(?, 'a0', 'Страница v1', 1, 1)", [SQLValue(page)])
             c.close()
             var options = SQLiteWorkspace.Options()
-            let copy = dir.appendingPathComponent("pre.grizzlybackup")
+            let copy = dir.appendingPathComponent("pre.minervabackup")
             options.beforeMigration = { snapshotter, root in
                 try BackupService.create(workspaceRoot: root, snapshotter: snapshotter, inspector: SQLiteSnapshotInspector(), destination: copy, appVersion: "t", now: 1)
             }
@@ -387,7 +387,7 @@ func runTagAndLookTests() async {
             checkEqual(reread, look, "после перезапуска")
             let name = try await ws.workspaceName()
             checkEqual(name, "Новое имя")
-            let archive = dir.appendingPathComponent("a.grizzlybackup")
+            let archive = dir.appendingPathComponent("a.minervabackup")
             let r = try BackupService.create(workspaceRoot: w, snapshotter: ws, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 1)
             check(r.isComplete, "обложка в архиве")
             ws.close()

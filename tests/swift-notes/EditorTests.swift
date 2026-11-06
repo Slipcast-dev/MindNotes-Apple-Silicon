@@ -196,7 +196,7 @@ func runReviewFixTests() async {
         try await withTempDir { dir in
             let w = dir.appendingPathComponent("w")
             let ws = try SQLiteWorkspace.create(at: w, name: "A")
-            let archive = dir.appendingPathComponent("a.grizzlybackup")
+            let archive = dir.appendingPathComponent("a.minervabackup")
             try BackupService.create(workspaceRoot: w, snapshotter: ws, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 1)
             let before = try fileHash(archive)
             struct Broken: DatabaseSnapshotter {

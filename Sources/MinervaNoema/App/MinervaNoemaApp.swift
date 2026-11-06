@@ -1,0 +1,100 @@
+import SwiftUI
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Сборка зависимостей принадлежит делегату: завершение и интерфейс видят один объект.
+    /// Свойства создаются по порядку: перенос с прежнего имени должен быть раньше первого чтения настроек.
+    private let migrated: Void = AppEdition.migrateFromPreviousName()
+    let shell = ShellModel()
+    let preferences = AppPreferences()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        preferences.apply()
+        shell.loadKnownWorkspaces()
+        shell.restoreLastWorkspace()
+        let paths = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
+        for path in paths where FileManager.default.fileExists(atPath: path) { shell.previewFile(URL(fileURLWithPath: path)) }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard shell.isOpen else { return .terminateNow }
+        // Запись пространства асинхронна: приложение ждёт её подтверждения.
+        shell.prepareToTerminate { NSApp.reply(toApplicationShouldTerminate: $0) }
+        return .terminateLater
+    }
+
+    /// Файл из Finder только показывается: импорт — отдельное действие (FR-01).
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { shell.previewFile(url) }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { true }
+}
+
+@main
+struct MinervaNoemaApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+
+    init() {
+        AppEdition.migrateFromPreviousName()
+        AppLanguage.applyFirstRunDefault()
+    }
+
+    var body: some Scene {
+        Window(AppEdition.displayName, id: "main") {
+            RootView()
+                .environmentObject(delegate.shell)
+                .environmentObject(delegate.preferences)
+                .frame(minWidth: 720, minHeight: 460)
+        }
+        .defaultSize(width: 1240, height: 820)
+        .windowToolbarStyle(.unified)
+        .commands {
+            FormatCommands()
+            CommandMenu(L("Переход")) {
+                Button("Поиск…") { delegate.shell.showsSearch = true }
+                    .keyboardShortcut("k")
+                    .disabled(!delegate.shell.isOpen)
+                Button("Назад") { delegate.shell.goBack() }
+                    .keyboardShortcut("[")
+                Button("Вперёд") { delegate.shell.goForward() }
+                    .keyboardShortcut("]")
+                Divider()
+                Button("Главная") { delegate.shell.goHome() }
+                    .keyboardShortcut("h", modifiers: [.command, .shift])
+            }
+            CommandGroup(replacing: .appSettings) {
+                Button("Настройки…") { delegate.shell.goSettings() }
+                    .keyboardShortcut(",")
+            }
+            CommandGroup(replacing: .newItem) {
+                Button("Новая страница") { delegate.shell.createPage() }
+                    .keyboardShortcut("n")
+                    .disabled(!delegate.shell.isOpen)
+                Button("Новая папка") { delegate.shell.createFolder() }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    .disabled(!delegate.shell.isOpen)
+                Divider()
+                Button("Открыть файл…") { delegate.shell.presentOpenFile() }
+                    .keyboardShortcut("o")
+            }
+        }
+    }
+}
+
+/// Запоминает размер и положение окна между запусками.
+struct WindowFrameSaver: NSViewRepresentable {
+    let name: String
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { view.window?.setFrameAutosaveName(name) }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {}
+}

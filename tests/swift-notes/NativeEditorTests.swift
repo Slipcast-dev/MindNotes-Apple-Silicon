@@ -946,7 +946,7 @@ func runAttachmentTests() async {
             checkEqual(links, 2, "блоки ссылаются на вложения")
             let found = try await r.ws.search("отчёт")
             checkEqual(found.first?.blockID, file.id, "файл находится по имени")
-            let archive = dir.appendingPathComponent("a.grizzlybackup")
+            let archive = dir.appendingPathComponent("a.minervabackup")
             let backup = try BackupService.create(workspaceRoot: r.ws.layout.root, snapshotter: r.ws, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 1)
             checkEqual(backup.manifest.files.count, 3, "база и два вложения")
             check(backup.isComplete, "копия полна")

@@ -62,7 +62,7 @@ func runBackupTests() async {
                     try await ws.commit(b)
                 }
             }
-            let archive = dir.appendingPathComponent("copy.grizzlybackup")
+            let archive = dir.appendingPathComponent("copy.minervabackup")
             let r = try BackupService.create(workspaceRoot: w, snapshotter: ws, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 1000)
             try await task.value
             check(r.isComplete, "копия полна")
@@ -85,7 +85,7 @@ func runBackupTests() async {
                 try db.run("INSERT INTO assets(id, rel_path, original_name, byte_size, sha256, created_at) VALUES(?,?,?,?,?,?)",
                            [SQLValue(ghost), .text(lost), .text("Нет.bin"), .int(1), .text("00"), .int(1)])
             }
-            let partial = try BackupService.create(workspaceRoot: w, snapshotter: ws, inspector: SQLiteSnapshotInspector(), destination: dir.appendingPathComponent("p.grizzlybackup"), appVersion: "t", now: 2000)
+            let partial = try BackupService.create(workspaceRoot: w, snapshotter: ws, inspector: SQLiteSnapshotInspector(), destination: dir.appendingPathComponent("p.minervabackup"), appVersion: "t", now: 2000)
             check(!partial.isComplete, "отсутствующее вложение отмечено")
             checkEqual(partial.manifest.missing.count, 1)
 
@@ -137,7 +137,7 @@ func runBackupTests() async {
         try await withTempDir { dir in
             let w = dir.appendingPathComponent("w")
             let ws = try SQLiteWorkspace.create(at: w, name: "A")
-            let archive = dir.appendingPathComponent("a.grizzlybackup")
+            let archive = dir.appendingPathComponent("a.minervabackup")
             try BackupService.create(workspaceRoot: w, snapshotter: ws, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 1)
             ws.close()
             let bytes = try Data(contentsOf: archive)

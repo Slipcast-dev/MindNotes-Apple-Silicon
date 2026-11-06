@@ -68,7 +68,7 @@ func runVerticalScenario() async {
             try await session.closeEditor()
 
             let expected = try await dumpWorkspace(reopened)
-            let archive = dir.appendingPathComponent("Копия.grizzlybackup")
+            let archive = dir.appendingPathComponent("Копия.minervabackup")
             let result = try BackupService.create(workspaceRoot: w, snapshotter: reopened, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "тест", now: 1)
             check(result.isComplete, "полная копия")
             try await session.close()

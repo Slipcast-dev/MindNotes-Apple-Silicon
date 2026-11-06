@@ -1,4 +1,4 @@
-# Архитектура Grizzly Notes
+# Архитектура Minerva Noema
 
 Статус: проект для M1–M2 с заделом на M3–M7. Реализованные части отмечаются в `STATUS.md`. Решения, требующие прототипа, оформляются отдельными ADR в `adr/`.
 
@@ -7,7 +7,7 @@
 ## 1. Модули и границы
 
 ```text
-Sources/Grizzly/
+Sources/MinervaNoema/
   Core/AppEdition.swift      # id, каталог данных, updatesEnabled
   Workspace/Domain/          # Page, Block, RichText, Asset, Revision, SortKey, WorkspaceError, порты
   Workspace/Services/        # WorkspaceSession, PageService, SaveCoordinator, AssetService, RevisionPolicy
@@ -53,7 +53,12 @@ UUID — TEXT в нижнем регистре, время — INTEGER (мс UTC
 
 - Содержимое блока — `{"runs":[{"t":"Привет","m":["b"]}], ...}`. Неизвестные поля сохраняются; неизвестный `type` или более новый `content_v` хранятся непрозрачно.
 - Вид пространства (логотип, обложка) — JSON в `workspace_meta.look`; изображения — управляемые файлы `assets/`.
-- Позже миграциями: M4 — `page_links`, `blocks_fts`; M5 — `databases`, `property_definitions`, типизированные `property_values`, `database_views`, `pages.database_id`; M6 — `templates`.
+- Схема v3: `search_index` (FTS5), `page_links`. Схема v4: `databases`, `property_definitions`, `property_options`, типизированные `property_values`, `property_value_options`, `database_views`, `pages.database_id`. Позже миграцией: M6 — `templates`.
+- База — страница (`databases.page_id`), запись — страница с `database_id` и родителем-страницей базы: дерево, корзина, поиск, архив и редактор общие. Записи скрыты из боковой панели, пока их база не в корзине.
+- Дата без времени — строка `ГГГГ-ММ-ДД`, в момент не преобразуется. Момент — `value_ts` (мс UTC), `value_tz` и настенное время в `value_date` для сравнения.
+- Запрос (`DatabaseQuerySQL`): операции из белого списка `FilterOp.available(for:)`, значения и ID свойств только параметрами. Неполное или неизвестное правило пропускается. Сравнение текста — функция `grizzly_norm` на читающем соединении, в схеме не используется.
+- Смена типа: значение → текст → новый тип. Один расчёт для просмотра и применения; неудача сохраняется в `property_values.unconverted`.
+- Состояние представления — JSON в `database_views.state_json`; неизвестные поля и операции сохраняются. Удаление свойства или варианта и смена типа чистят правила в той же транзакции.
 - Ключ порядка — дробная строка base-62, сравнение BINARY, разрешение ничьей по `id`; длина больше 48 символов — перенумерация соседей в той же транзакции.
 - Корзина: поддерево получает общий `trash_batch_id`. Перемещение: `BEGIN IMMEDIATE`, проверка цикла рекурсивным CTE, обновление.
 
@@ -72,7 +77,7 @@ UUID — TEXT в нижнем регистре, время — INTEGER (мс UTC
 
 ## 4. Резервная копия
 
-Формат: один файл `.grizzlybackup`, несжатый ustar (см. `adr/0003-backup-format.md`).
+Формат: один файл `.minervabackup`, несжатый ustar (см. `adr/0003-backup-format.md`).
 
 Создание: `sqlite3_backup` во временный файл → `integrity_check`, `foreign_key_check` на копии → список вложений из копии → потоковая запись в `.partial` с SHA-256 и сверкой с `assets.sha256` → `manifest.json` и `manifest.sha256` последними → `fsync`, `rename`. Нет манифеста — архив обрезан. Отсутствующие файлы попадают в `missing`, и копия не считается полной.
 

@@ -1,17 +1,17 @@
 #!/bin/zsh
-# Builds a release binary and wraps it in Grizzly Notes.app (ad-hoc signed, for local use).
+# Builds a release binary and wraps it in Minerva Noema.app (ad-hoc signed, for local use).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # swiftc is used directly because `swift build` needs a full Xcode install (PlatformPath lookup fails with Command Line Tools only).
 # ARCH (arm64 | x86_64) and OUT override the defaults: the host architecture and build/.
 ARCH="${ARCH:-$(uname -m)}"
-APP="${OUT:-build}/Grizzly Notes.app"
+APP="${OUT:-build}/Minerva Noema.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # SWIFT_OPT=-Onone: быстрая отладочная сборка главного бинарника.
 swiftc "${SWIFT_OPT:--O}" -parse-as-library -target "$ARCH-apple-macos13.0" \
-    -o "$APP/Contents/MacOS/GrizzlyNotes" $(find Sources -name '*.swift')
+    -o "$APP/Contents/MacOS/MinervaNoema" $(find Sources -name '*.swift')
 
 # Icon and translations (resources/en.lproj, resources/ru.lproj).
 cp resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
@@ -27,14 +27,14 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Grizzly Notes</string>
-  <key>CFBundleDisplayName</key><string>Grizzly Notes</string>
-  <key>CFBundleIdentifier</key><string>local.personal.GrizzlyNotes</string>
+  <key>CFBundleName</key><string>Minerva Noema</string>
+  <key>CFBundleDisplayName</key><string>Minerva Noema</string>
+  <key>CFBundleIdentifier</key><string>local.personal.MinervaNoema</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>LSMultipleInstancesProhibited</key><true/>
   <key>CFBundleLocalizations</key><array><string>ru</string><string>en</string></array>
-  <key>CFBundleExecutable</key><string>GrizzlyNotes</string>
+  <key>CFBundleExecutable</key><string>MinervaNoema</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$(tr -d "[:space:]" < VERSION)</string>
   <key>CFBundleVersion</key><string>1</string>
