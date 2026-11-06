@@ -1,0 +1,14 @@
+/* Card layout */
+:root {
+  --accent: #0a64d6;
+}
+
+.card > h2:hover {
+  color: var(--accent);
+  margin: 0 auto 1.5rem;
+  font: 600 16px/1.4 "Inter", sans-serif !important;
+}
+
+@media (max-width: 600px) {
+  .card { padding: 8px; }
+}

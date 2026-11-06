@@ -1,0 +1,14 @@
+.DS_Store
+node_modules/
+dist/
+build/
+*.log
+.env
+.env.*
+# third-party reference screenshot, not part of the project
+docs/reference-style.webp
+*.dmg
+*.exe
+# the project website lives in its own repository
+website/
+.build/

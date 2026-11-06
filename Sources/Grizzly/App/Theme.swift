@@ -1,0 +1,106 @@
+import SwiftUI
+
+struct Theme {
+    let isDark: Bool
+    let background: Color
+    let text: Color
+    let secondary: Color
+    let accent: Color
+    let heading: Color
+    let codeText: Color
+    let codeBackground: Color
+    let gutter: Color
+    let rule: Color
+    let match: Color
+    let currentMatch: Color
+    let bookmark: Color
+    // Syntax colors
+    let key: Color
+    let string: Color
+    let number: Color
+    let keyword: Color
+    let comment: Color
+    let error: Color
+    let warning: Color
+    let success: Color
+
+    /// Palette order: background, text, secondary, accent, heading, code text, code background, gutter, rule,
+    /// then syntax: key, string, number, keyword, comment, error, warning, success.
+    init(dark: Bool, _ p: [UInt32]) {
+        isDark = dark
+        background = Color(hex: p[0]); text = Color(hex: p[1]); secondary = Color(hex: p[2])
+        accent = Color(hex: p[3]); heading = Color(hex: p[4]); codeText = Color(hex: p[5])
+        codeBackground = Color(hex: p[6]); gutter = Color(hex: p[7]); rule = Color(hex: p[8])
+        key = Color(hex: p[9]); string = Color(hex: p[10]); number = Color(hex: p[11])
+        keyword = Color(hex: p[12]); comment = Color(hex: p[13])
+        error = Color(hex: p[14]); warning = Color(hex: p[15]); success = Color(hex: p[16])
+        match = Color(hex: 0xFFD60A).opacity(dark ? 0.38 : 0.5)
+        currentMatch = Color(hex: 0xFF9F0A)
+        bookmark = Color(hex: 0xFF9F0A)
+    }
+}
+
+/// A named theme. Themes without a light variant stay dark in light mode.
+struct ThemeSet: Identifiable {
+    let id: String
+    let name: String
+    let light: Theme?
+    let dark: Theme
+
+    func variant(dark wantsDark: Bool) -> Theme { wantsDark ? dark : (light ?? dark) }
+
+    static let all: [ThemeSet] = [
+        ThemeSet(id: "xcode", name: "Xcode",
+                 light: Theme(dark: false, [0xFFFFFF, 0x24292F, 0x6E7781, 0x0A64D6, 0x0B7A6B, 0xB3361E, 0xF1F1F3, 0xB0B5BB, 0xD0D4D9,
+                                            0x0550AE, 0xA3410F, 0x6F42C1, 0xC2185B, 0x6E7781, 0xCF222E, 0x9A6700, 0x1A7F37]),
+                 dark: Theme(dark: true, [0x1E1F22, 0xD8D8D8, 0x8A8A8E, 0x4A9EFF, 0x7FD4C1, 0xE0A3A3, 0x2B2B2D, 0x5C5C60, 0x4A4A4E,
+                                          0x6CB6FF, 0xE59F7B, 0xC9B6F5, 0xFF7AB2, 0x7F8C98, 0xFF6B6B, 0xFFB454, 0x6FCF97])),
+        ThemeSet(id: "github", name: "GitHub",
+                 light: Theme(dark: false, [0xFFFFFF, 0x1F2328, 0x57606A, 0x0969DA, 0x0550AE, 0x953800, 0xF6F8FA, 0x8C959F, 0xD0D7DE,
+                                            0x0550AE, 0x0A3069, 0x8250DF, 0xCF222E, 0x6E7781, 0xCF222E, 0x9A6700, 0x1A7F37]),
+                 dark: Theme(dark: true, [0x0D1117, 0xC9D1D9, 0x8B949E, 0x58A6FF, 0x79C0FF, 0xFFA657, 0x161B22, 0x484F58, 0x30363D,
+                                          0x79C0FF, 0xA5D6FF, 0xD2A8FF, 0xFF7B72, 0x8B949E, 0xFF7B72, 0xD29922, 0x3FB950])),
+        ThemeSet(id: "solarized", name: "Solarized",
+                 light: Theme(dark: false, [0xFDF6E3, 0x586E75, 0x93A1A1, 0x268BD2, 0xCB4B16, 0x2AA198, 0xEEE8D5, 0x93A1A1, 0xD6CFB8,
+                                            0x268BD2, 0x2AA198, 0xD33682, 0x859900, 0x93A1A1, 0xDC322F, 0xB58900, 0x859900]),
+                 dark: Theme(dark: true, [0x002B36, 0x93A1A1, 0x657B83, 0x268BD2, 0xCB4B16, 0x2AA198, 0x073642, 0x586E75, 0x094352,
+                                          0x268BD2, 0x2AA198, 0xD33682, 0x859900, 0x586E75, 0xDC322F, 0xB58900, 0x859900])),
+        ThemeSet(id: "dracula", name: "Dracula", light: nil,
+                 dark: Theme(dark: true, [0x282A36, 0xF8F8F2, 0x6272A4, 0xBD93F9, 0xBD93F9, 0xFF79C6, 0x343746, 0x6272A4, 0x44475A,
+                                          0x8BE9FD, 0xF1FA8C, 0xBD93F9, 0xFF79C6, 0x6272A4, 0xFF5555, 0xFFB86C, 0x50FA7B])),
+        ThemeSet(id: "monokai", name: "Monokai", light: nil,
+                 dark: Theme(dark: true, [0x272822, 0xF8F8F2, 0x90908A, 0x66D9EF, 0xA6E22E, 0xE6DB74, 0x33342C, 0x75715E, 0x49483E,
+                                          0xA6E22E, 0xE6DB74, 0xAE81FF, 0xF92672, 0x75715E, 0xF92672, 0xFD971F, 0xA6E22E])),
+        ThemeSet(id: "nord", name: "Nord",
+                 light: Theme(dark: false, [0xECEFF4, 0x2E3440, 0x4C566A, 0x5E81AC, 0x5E81AC, 0xD08770, 0xE5E9F0, 0x9AA3B5, 0xD8DEE9,
+                                            0x5E81AC, 0x6A8F4E, 0x8C5E8F, 0x4C6F9E, 0x7B88A1, 0xBF616A, 0xC79A2E, 0x6A8F4E]),
+                 dark: Theme(dark: true, [0x2E3440, 0xD8DEE9, 0x7B88A1, 0x88C0D0, 0x88C0D0, 0xEBCB8B, 0x3B4252, 0x616E88, 0x434C5E,
+                                          0x8FBCBB, 0xA3BE8C, 0xB48EAD, 0x81A1C1, 0x616E88, 0xBF616A, 0xEBCB8B, 0xA3BE8C])),
+        ThemeSet(id: "onedark", name: "One Dark",
+                 light: Theme(dark: false, [0xFAFAFA, 0x383A42, 0x696C77, 0x4078F2, 0xE45649, 0xC18401, 0xF0F0F1, 0x9D9D9F, 0xDBDBDC,
+                                            0xE45649, 0x50A14F, 0xC18401, 0xA626A4, 0xA0A1A7, 0xE45649, 0xC18401, 0x50A14F]),
+                 dark: Theme(dark: true, [0x282C34, 0xABB2BF, 0x7F848E, 0x61AFEF, 0xE06C75, 0xD19A66, 0x21252B, 0x4B5263, 0x3E4451,
+                                          0xE06C75, 0x98C379, 0xD19A66, 0xC678DD, 0x5C6370, 0xE06C75, 0xE5C07B, 0x98C379])),
+    ]
+
+    static func find(_ id: String) -> ThemeSet { all.first { $0.id == id } ?? all[0] }
+}
+
+extension Color {
+    init(hex: UInt32) {
+        self.init(.sRGB,
+                  red: Double((hex >> 16) & 0xFF) / 255,
+                  green: Double((hex >> 8) & 0xFF) / 255,
+                  blue: Double(hex & 0xFF) / 255,
+                  opacity: 1)
+    }
+}
+
+private struct ThemeKey: EnvironmentKey { static let defaultValue = ThemeSet.all[0].dark }
+
+extension EnvironmentValues {
+    var theme: Theme {
+        get { self[ThemeKey.self] }
+        set { self[ThemeKey.self] = newValue }
+    }
+}

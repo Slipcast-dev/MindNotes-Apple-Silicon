@@ -1,0 +1,9 @@
+# настройки
+name: demo
+debug: true
+port: 8080
+tags:
+  - alpha
+  - "beta"
+db:
+  host: 'localhost'

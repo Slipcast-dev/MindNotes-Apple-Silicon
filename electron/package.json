@@ -1,0 +1,48 @@
+{
+  "name": "grizzly",
+  "productName": "Grizzly",
+  "version": "1.4.2",
+  "description": "Reader for Markdown and text files (Windows/Electron port of Grizzly)",
+  "main": "main.js",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "Slipcast-dev",
+  "copyright": "Copyright © 2026 Slipcast-dev. All rights reserved.",
+  "scripts": {
+    "start": "electron .",
+    "strings": "node scripts/gen-strings.js",
+    "dist": "electron-builder --win portable --x64"
+  },
+  "build": {
+    "appId": "app.grizzly.windows",
+    "productName": "Grizzly",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "updater.js",
+      "strings-en.json",
+      "renderer/**/*",
+      "assets/icon.png"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "artifactName": "Grizzly-${version}-portable.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  }
+}

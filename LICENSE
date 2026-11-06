@@ -1,0 +1,82 @@
+Grizzly Proprietary License
+Copyright (c) 2026 Slipcast-dev. All rights reserved.
+
+1. Ownership. Grizzly (the application, its source code, documentation, icons
+   and all other materials in this repository, together the "Software") is the
+   exclusive property of Slipcast-dev (the "Author"). No rights are granted
+   except those expressly stated below.
+
+2. Permitted use. You may download and run the official builds of the Software
+   for your personal or internal use, and view the source code in this
+   repository for reference.
+
+3. Prohibited without the Author's prior written consent. You may NOT:
+   - modify, adapt, translate, decompile or create derivative works of the
+     Software or any part of it;
+   - copy, redistribute, publish, sublicense, sell, rent or otherwise make
+     the Software, or any modified version of it, available to third parties,
+     in source or binary form, including re-uploading installers or forks
+     intended for distribution;
+   - remove or alter this license or any copyright notice.
+
+4. Contributions. Submitting a pull request or other contribution grants the
+   Author a perpetual, irrevocable, worldwide, royalty-free right to use,
+   modify and distribute it as part of the Software. You may modify a copy of
+   the Software solely to prepare such a contribution.
+
+5. Third-party components. Bundled fonts are licensed under the SIL Open Font
+   License 1.1 (see resources/fonts/*/OFL.txt). This license does not change
+   their terms.
+
+6. Termination. Any breach of this license terminates your rights under it
+   automatically.
+
+7. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+   KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+   NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR ITS
+   USE.
+
+To request permission, contact the Author via https://github.com/Slipcast-dev.
+
+-------------------------------------------------------------------------------
+Русский перевод (справочный; при расхождениях действует английский текст)
+
+Проприетарная лицензия Grizzly
+Copyright (c) 2026 Slipcast-dev. Все права защищены.
+
+1. Право собственности. Grizzly (приложение, исходный код, документация,
+   иконки и все прочие материалы репозитория — «Программа») принадлежит
+   Slipcast-dev («Автор»). Никакие права не передаются, кроме прямо указанных
+   ниже.
+
+2. Разрешённое использование. Вы можете скачивать и запускать официальные
+   сборки Программы для личного или внутреннего использования, а также
+   просматривать исходный код в этом репозитории для ознакомления.
+
+3. Запрещено без предварительного письменного согласия Автора:
+   - изменять, адаптировать, переводить, декомпилировать Программу или её
+     части и создавать производные произведения;
+   - копировать, распространять, публиковать, сублицензировать, продавать,
+     сдавать в аренду или иным способом передавать третьим лицам Программу
+     или её изменённые версии в исходном или бинарном виде, включая повторную
+     загрузку установщиков и форки, предназначенные для распространения;
+   - удалять или изменять эту лицензию и уведомления об авторских правах.
+
+4. Вклад в проект. Отправляя pull request или иной вклад, вы предоставляете
+   Автору бессрочное, безотзывное, всемирное, безвозмездное право
+   использовать, изменять и распространять его в составе Программы. Копию
+   Программы можно изменять только для подготовки такого вклада.
+
+5. Сторонние компоненты. Встроенные шрифты распространяются по лицензии
+   SIL Open Font License 1.1 (см. resources/fonts/*/OFL.txt); эта лицензия их
+   условия не меняет.
+
+6. Прекращение. Любое нарушение лицензии автоматически прекращает ваши права.
+
+7. Отсутствие гарантий. ПРОГРАММА ПРЕДОСТАВЛЯЕТСЯ «КАК ЕСТЬ», БЕЗ КАКИХ-ЛИБО
+   ГАРАНТИЙ. АВТОР НЕ НЕСЁТ ОТВЕТСТВЕННОСТИ ЗА ЛЮБЫЕ ПРЕТЕНЗИИ, УБЫТКИ ИЛИ
+   ИНУЮ ОТВЕТСТВЕННОСТЬ, ВОЗНИКШИЕ В СВЯЗИ С ПРОГРАММОЙ ИЛИ ЕЁ ИСПОЛЬЗОВАНИЕМ.
+
+Для получения разрешения свяжитесь с Автором: https://github.com/Slipcast-dev.

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grizzly</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar"></aside>
+    <div id="resizer"></div>
+    <section id="detail">
+      <header id="toolbar"></header>
+      <div id="main"></div>
+    </section>
+  </div>
+  <div id="overlay-root"></div>
+  <div id="drop-hint" hidden></div>
+  <script src="strings-en.js"></script>
+  <script src="core.js"></script>
+  <script src="base.js"></script>
+  <script src="state.js"></script>
+  <script src="ui.js"></script>
+  <script src="boot.js"></script>
+</body>
+</html>
