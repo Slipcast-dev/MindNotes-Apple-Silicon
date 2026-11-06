@@ -49,7 +49,11 @@ final class PageEditorModel: ObservableObject {
     }
     func setChecked(_ id: UUID, _ value: Bool) { run(.setChecked(block: id, checked: value), moveFocus: false) }
     func changeType(_ id: UUID, _ type: BlockType) { run(.changeType(block: id, type: type), moveFocus: false) }
-    func delete(_ id: UUID) { run(.deleteBlock(id)) }
+    func delete(_ id: UUID) {
+        run(.deleteBlock(id))
+        // На странице всегда есть поле для ввода.
+        if blocks.isEmpty { run(.insertBlock(after: nil, type: .paragraph)) }
+    }
     func insert(_ type: BlockType) { run(.insertBlock(after: focusedBlockAnchor, type: type)) }
 
     private var focusedBlockAnchor: UUID? { focus?.focus.blockID ?? blocks.last?.id }
@@ -222,6 +226,12 @@ struct BlockTextField: NSViewRepresentable {
             guard let view = notification.object as? NSTextView, !view.hasMarkedText() else { return }
             parent.editor.setText(parent.block.id, view.string)
             view.invalidateIntrinsicContentSize()
+        }
+
+        /// Составной ввод мог завершиться без textDidChange; уход из поля не должен потерять текст.
+        func textDidEndEditing(_ notification: Notification) {
+            guard let view = notification.object as? NSTextView, !view.hasMarkedText() else { return }
+            parent.editor.setText(parent.block.id, view.string)
         }
 
         func textDidBeginEditing(_ notification: Notification) { noteFocus(notification) }

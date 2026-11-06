@@ -55,6 +55,7 @@ final class WorkspaceSession {
     /// Открывает страницу. Предыдущая сначала записывается, чтобы новая не прочитала устаревшие данные.
     func open(_ id: UUID) async throws -> EditorSession {
         try await editor?.close()
+        try await coordinator.flush() // Чтение ниже должно видеть все подтверждённые правки.
         let session = try await EditorSession.open(pageID: id, store: store, coordinator: coordinator, clock: clock, ids: ids)
         // Пустой абзац новой страницы — не правка пользователя и не входит в отмену.
         if session.document.blocks.isEmpty { try session.perform(.insertBlock(after: nil, type: .paragraph), recordUndo: false) }
@@ -65,8 +66,10 @@ final class WorkspaceSession {
     }
 
     func closeEditor() async throws {
-        try await editor?.close()
-        editor = nil
+        let closing = editor
+        try await closing?.close()
+        // За время записи могла открыться другая страница; её сессию не затираем.
+        if editor === closing { editor = nil }
     }
 
     /// Закрытие пространства: всё записано, затем освобождается блокировка.

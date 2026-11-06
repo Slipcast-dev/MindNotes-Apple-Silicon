@@ -100,12 +100,16 @@ enum Migrations {
 
 enum Migrator {
     /// Применяет недостающие миграции, каждую в своей транзакции. При ошибке всё откатывается.
-    static func migrate(_ db: SQLiteConnection, migrations: [Migration], appVersion: String, now: Int64) throws {
+    static func migrate(_ db: SQLiteConnection, migrations: [Migration], appVersion: String, now: Int64,
+                        initialize: ((SQLiteConnection) throws -> Void)? = nil) throws {
         let current = Int(try db.scalarInt("PRAGMA user_version") ?? 0)
+        let first = migrations.map(\.version).min()
         for migration in migrations.sorted(by: { $0.version < $1.version }) where migration.version > current {
             do {
                 try db.transaction(.exclusive) {
                     try migration.apply(db)
+                    // Метаданные нового пространства — в той же транзакции: половинчатой базы быть не может.
+                    if current == 0 && migration.version == first { try initialize?(db) }
                     let violations = try db.query("PRAGMA foreign_key_check") { $0.text(0) }
                     if !violations.isEmpty { throw WorkspaceError.corrupted("нарушены связи: \(violations.count)") }
                     try db.execute("PRAGMA user_version=\(migration.version)")

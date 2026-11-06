@@ -86,11 +86,12 @@ enum BackupService {
         try out.synchronize()
         try out.close()
 
-        try? fm.removeItem(at: destination)
-        try fm.moveItem(at: partial, to: destination)
+        // «Копия создана» означает, что она читается и совпадает с манифестом. Проверка до замены: прежний архив не теряется.
+        _ = try RestoreService.verify(archive: partial)
+        guard rename(partial.path, destination.path) == 0 else {
+            throw WorkspaceError.storage(code: errno, detail: String(cString: strerror(errno)))
+        }
         keepPartial = true
-        // «Копия создана» означает, что она реально читается и совпадает с манифестом.
-        _ = try RestoreService.verify(archive: destination)
         return BackupResult(url: destination, manifest: manifest)
     }
 

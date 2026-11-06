@@ -94,9 +94,15 @@ final class EditorSession {
     func snapshot(reason: String) async throws {
         try await coordinator.flush()
         let now = clock.nowMillis()
-        _ = try await store.saveRevision(pageID: document.pageID, reason: reason, blocks: document.blocks, id: ids.next(), now: now)
-        lastSnapshotAt = now
+        // Флаг снимается до записи: правка во время снимка снова его поднимет.
         dirtySinceSnapshot = false
+        do {
+            _ = try await store.saveRevision(pageID: document.pageID, reason: reason, blocks: document.blocks, id: ids.next(), now: now)
+        } catch {
+            dirtySinceSnapshot = true
+            throw error
+        }
+        lastSnapshotAt = now
     }
 
     /// Уход со страницы: правки записаны, снимок сделан, если страница менялась.

@@ -39,18 +39,26 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
 
         let layout = WorkspaceLayout(root: dir)
         let lock = try WorkspaceLock(url: layout.lock)
-        try fm.createDirectory(at: layout.assets, withIntermediateDirectories: true)
-        try fm.createDirectory(at: layout.tmp, withIntermediateDirectories: true)
-        let db = try SQLiteConnection(path: layout.database.path, create: true)
-        try configureWriter(db)
-        let now = options.clock.nowMillis()
-        try Migrator.migrate(db, migrations: options.migrations, appVersion: options.appVersion, now: now)
-        try db.transaction {
+        do {
+            try fm.createDirectory(at: layout.assets, withIntermediateDirectories: true)
+            try fm.createDirectory(at: layout.tmp, withIntermediateDirectories: true)
+            let db = try SQLiteConnection(path: layout.database.path, create: true)
+            try configureWriter(db)
+            let now = options.clock.nowMillis()
+            try Migrator.migrate(db, migrations: options.migrations, appVersion: options.appVersion, now: now) { db in
             for (k, v) in [("workspace_id", id.lowercasedString), ("name", name), ("created_at", String(now)), ("created_by_app", options.appVersion)] {
                 try db.run("INSERT INTO workspace_meta(key, value) VALUES(?,?)", [.text(k), .text(v)])
             }
+            }
+            return try SQLiteWorkspace(layout: layout, lock: lock, writerConnection: db, clock: options.clock)
+        } catch {
+            // Папка была пустой: убираем только то, что создали сами, чтобы создание можно было повторить.
+            lock.release()
+            for name in ["workspace.sqlite", "workspace.sqlite-wal", "workspace.sqlite-shm", ".workspace.lock", "assets", "tmp"] {
+                try? fm.removeItem(at: dir.appendingPathComponent(name))
+            }
+            throw error
         }
-        return try SQLiteWorkspace(layout: layout, lock: lock, writerConnection: db, clock: options.clock)
     }
 
     /// Открывает пространство. Порядок важен: новая схема отклоняется раньше первой записи.

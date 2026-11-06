@@ -5,6 +5,8 @@ func runAllNotesTests() async {
     await runSaveTests()
     await runCrashTests()
     await runEditorTests()
+    await runReviewFixTests()
     await runBackupTests()
     await runVerticalScenario()
+    await runGapTests()
 }

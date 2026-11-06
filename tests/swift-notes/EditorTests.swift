@@ -138,3 +138,80 @@ extension EditorSession {
     /// Команда в тестах, где ошибка не ожидается.
     func perform_(_ c: EditCommand) { _ = try? perform(c) }
 }
+
+func runReviewFixTests() async {
+    await test("Ключи блоков: перенумерация при многократной вставке в одну точку") {
+        let page = UUID(), first = UUID(), last = UUID()
+        var doc = BlockDocument(pageID: page, blocks: [
+            Block(id: first, pageID: page, sortKey: "a0", content: BlockContent(text: "первый"), createdAt: 1),
+            Block(id: last, pageID: page, sortKey: "a1", content: BlockContent(text: "последний"), createdAt: 1)])
+        let ids = SeqIDs()
+        var maxLength = 0
+        for i in 0..<300 {
+            let r = try BlockEditing.apply(.insertBlock(after: first, type: .paragraph), to: doc, ids: ids, now: Int64(i))
+            var back = r.document
+            back.apply(r.inverse)
+            checkEqual(back, doc, "обратимость при перенумерации")
+            doc = r.document
+            maxLength = max(maxLength, doc.blocks.map(\.sortKey.utf8.count).max() ?? 0)
+            checkEqual(doc.blocks.first?.id, first)
+            checkEqual(doc.blocks.last?.id, last)
+            checkEqual(doc.blocks[1].id, r.selection?.anchor.blockID, "новый блок сразу после якоря")
+        }
+        check(maxLength <= SortKey.maxLength, "длина ключа ограничена: \(maxLength)")
+        var splitDoc = doc
+        for _ in 0..<100 {
+            let r = try BlockEditing.apply(.splitBlock(BlockPoint(blockID: first, offset: 0)), to: splitDoc, ids: ids, now: 1)
+            splitDoc = r.document
+            checkEqual(splitDoc.blocks.first?.id, first, "разделение сохраняет порядок")
+            checkEqual(splitDoc.blocks[1].plainText, "первый", "текст перешёл в новый блок один раз")
+            var clear = splitDoc
+            let id = splitDoc.blocks[1].id
+            clear.apply([.delete(id)])
+            splitDoc = clear
+            splitDoc.apply([.upsert(Block(id: first, pageID: page, sortKey: splitDoc.block(first)!.sortKey, content: BlockContent(text: "первый"), createdAt: 1))])
+        }
+    }
+
+    await test("Создание: метаданные не отделены от схемы, сбой можно повторить") {
+        try await withTempDir { dir in
+            let w = dir.appendingPathComponent("w")
+            var bad = SQLiteWorkspace.Options()
+            bad.migrations = [Migration(version: 1, name: "сбой") { db in
+                try db.execute("PRAGMA application_id=\(Migrations.applicationID)")
+                try db.execute(Migrations.schemaV1)
+                try db.execute("NOT SQL")
+            }]
+            await checkThrows("сбой создания") { try SQLiteWorkspace.create(at: w, name: "A", options: bad) }
+            let left = (try? FileManager.default.contentsOfDirectory(atPath: w.path)) ?? []
+            checkEqual(left, [], "папка снова пуста: \(left)")
+            let ws = try SQLiteWorkspace.create(at: w, name: "A")
+            let id = try await ws.workspaceID()
+            check(id.uuidString.count == 36, "идентификатор есть")
+            ws.close()
+        }
+    }
+
+    await test("Backup: неудача не трогает прежний архив") {
+        try await withTempDir { dir in
+            let w = dir.appendingPathComponent("w")
+            let ws = try SQLiteWorkspace.create(at: w, name: "A")
+            let archive = dir.appendingPathComponent("a.grizzlybackup")
+            try BackupService.create(workspaceRoot: w, snapshotter: ws, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 1)
+            let before = try fileHash(archive)
+            struct Broken: DatabaseSnapshotter {
+                func snapshotDatabase(to url: URL) throws { throw WorkspaceError.diskFull }
+            }
+            await checkThrows("снимок не удался") { try BackupService.create(workspaceRoot: w, snapshotter: Broken(), inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 2) }
+            checkEqual(try fileHash(archive), before, "прежний архив цел")
+            ws.close()
+        }
+    }
+
+    await test("RichText.diff: форма нормализации не теряется") {
+        let nfc = "ё", nfd = "е\u{308}"
+        let d = RichText.diff(old: nfc, new: nfd)
+        check(d != nil, "NFC и NFD различаются для поля и модели")
+        checkEqual(d?.text.unicodeScalars.count, 2)
+    }
+}

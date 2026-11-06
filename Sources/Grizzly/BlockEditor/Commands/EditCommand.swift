@@ -48,6 +48,21 @@ enum BlockEditing {
             }
             return EditResult(document: d, changes: changes, inverse: Array(inverse), selection: selection, coalesceKey: key)
         }
+        /// Ключ между соседями; слишком длинный ключ перенумеровывает соседей той же операцией.
+        func place(parent: UUID?, after anchor: Block?, upper: String?, id: UUID) -> (key: String, renumbered: [BlockChange]) {
+            let key = SortKey.between(anchor?.sortKey, upper)
+            guard key.utf8.count > SortKey.maxLength else { return (key, []) }
+            let siblings = document.blocks.filter { $0.parentID == parent }
+            let at = anchor.flatMap { a in siblings.firstIndex { $0.id == a.id } }.map { $0 + 1 } ?? 0
+            let keys = SortKey.keys(after: nil, before: nil, count: siblings.count + 1)
+            var changes: [BlockChange] = []
+            for (i, sibling) in siblings.enumerated() {
+                var moved = sibling
+                moved.sortKey = keys[i < at ? i : i + 1]
+                changes.append(.upsert(moved))
+            }
+            return (keys[at], changes)
+        }
         func updated(_ b: Block, _ c: BlockContent) -> Block {
             var n = b
             n.setContent(c)
@@ -79,12 +94,17 @@ enum BlockEditing {
             var first = c
             first.runs = RichText.normalized(left)
             let newType: BlockType = b.type == .task ? .task : .paragraph
-            let next = document.nextSibling(of: b)
-            var new = Block(id: ids.next(), pageID: b.pageID, parentID: b.parentID,
-                            sortKey: SortKey.between(b.sortKey, next?.sortKey), type: newType,
+            let newID = ids.next()
+            let placed = place(parent: b.parentID, after: b, upper: document.nextSibling(of: b)?.sortKey, id: newID)
+            var new = Block(id: newID, pageID: b.pageID, parentID: b.parentID,
+                            sortKey: placed.key, type: newType,
                             content: BlockContent(runs: RichText.normalized(right)), createdAt: now)
             new.updatedAt = now
-            return result([.upsert(updated(b, first)), .upsert(new)], selection: BlockSelection(block: new.id, offset: 0))
+            // Перенумерация первой: её запись блока b заменяется версией с новым текстом ниже.
+            var head = updated(b, first)
+            for case .upsert(let moved) in placed.renumbered where moved.id == b.id { head.sortKey = moved.sortKey }
+            let others = placed.renumbered.filter { if case .upsert(let m) = $0 { return m.id != b.id } else { return true } }
+            return result(others + [.upsert(head), .upsert(new)], selection: BlockSelection(block: new.id, offset: 0))
 
         case let .mergeBackward(id):
             let (b, c) = try editable(id)
@@ -113,10 +133,12 @@ enum BlockEditing {
             let parent = anchor?.parentID
             let upper = anchor.flatMap { document.nextSibling(of: $0) }?.sortKey
                 ?? (anchor == nil ? document.blocks.first { $0.parentID == nil }?.sortKey : nil)
-            var new = Block(id: ids.next(), pageID: document.pageID, parentID: parent,
-                            sortKey: SortKey.between(anchor?.sortKey, upper), type: type, createdAt: now)
+            let newID = ids.next()
+            let placed = place(parent: parent, after: anchor, upper: upper, id: newID)
+            var new = Block(id: newID, pageID: document.pageID, parentID: parent,
+                            sortKey: placed.key, type: type, createdAt: now)
             new.updatedAt = now
-            return result([.upsert(new)], selection: BlockSelection(block: new.id, offset: 0))
+            return result(placed.renumbered + [.upsert(new)], selection: BlockSelection(block: new.id, offset: 0))
 
         case let .deleteBlock(id):
             guard let i = document.index(of: id) else { throw EditError.blockNotFound(id) }

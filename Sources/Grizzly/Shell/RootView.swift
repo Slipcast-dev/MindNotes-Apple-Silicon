@@ -152,7 +152,8 @@ struct CrumbBar: View {
                 .fontWeight(.semibold)
                 .lineLimit(1)
             Spacer()
-            if case .page = shell.section { saveIndicator }
+            // Ошибка записи видна на любом экране: уход со страницы не отменяет её.
+            if case .page = shell.section { saveIndicator } else if case .failed = shell.saveStatus { saveIndicator }
             Button("Настройки") { SettingsOpener.show() }
                 .buttonStyle(.plain)
                 .foregroundColor(Tokens.muted)

@@ -104,12 +104,14 @@ enum RichText {
 
     /// Минимальная замена, превращающая `old` в `new`: сохраняет форматирование неизменённых частей.
     static func diff(old: String, new: String) -> (range: Range<Int>, text: String)? {
-        if old == new { return nil }
+        // Сравнение по скалярам: канонически равные NFC и NFD иначе дали бы расхождение поля и модели.
+        func same(_ x: Character, _ y: Character) -> Bool { x.unicodeScalars.elementsEqual(y.unicodeScalars) }
+        if old.unicodeScalars.elementsEqual(new.unicodeScalars) { return nil }
         let a = Array(old), b = Array(new)
         var p = 0
-        while p < a.count && p < b.count && a[p] == b[p] { p += 1 }
+        while p < a.count && p < b.count && same(a[p], b[p]) { p += 1 }
         var s = 0
-        while s < a.count - p && s < b.count - p && a[a.count - 1 - s] == b[b.count - 1 - s] { s += 1 }
+        while s < a.count - p && s < b.count - p && same(a[a.count - 1 - s], b[b.count - 1 - s]) { s += 1 }
         let lower = String(a[0..<p]).utf16.count
         let removed = String(a[p..<(a.count - s)]).utf16.count
         return (lower..<(lower + removed), String(b[p..<(b.count - s)]))

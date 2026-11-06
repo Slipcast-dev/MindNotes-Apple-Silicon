@@ -25,6 +25,7 @@ final class ShellModel: ObservableObject {
 
     private var session: WorkspaceSession?
     private var store: SQLiteWorkspace?
+    private var navigation: Task<Void, Never>?
     private let lastWorkspaceKey = "lastWorkspacePath"
     private let lastPageKey = "lastPageID"
 
@@ -65,7 +66,9 @@ final class ShellModel: ObservableObject {
         panel.message = L("Выберите пустую папку на локальном диске. Не используйте папки облачной синхронизации.")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         act {
-            let store = try SQLiteWorkspace.create(at: url, name: L("Моё пространство"))
+            let name = L("Моё пространство")
+            // Не на главном потоке: проверка базы и миграция могут быть долгими.
+            let store = try await Task.detached(priority: .userInitiated) { try SQLiteWorkspace.create(at: url, name: name) }.value
             try await self.adopt(store)
         }
     }
@@ -91,7 +94,8 @@ final class ShellModel: ObservableObject {
                                          destination: root.appendingPathComponent("\(dir.lastPathComponent)-\(stamp).grizzlybackup"),
                                          appVersion: options.appVersion, now: options.clock.nowMillis())
             }
-            let store = try SQLiteWorkspace.open(at: url, options: options)
+            let opts = options
+            let store = try await Task.detached(priority: .userInitiated) { try SQLiteWorkspace.open(at: url, options: opts) }.value
             try await self.adopt(store)
         }
     }
@@ -117,7 +121,7 @@ final class ShellModel: ObservableObject {
     }
 
     func closeWorkspace() {
-        act {
+        enqueue {
             try await self.closeSession()
             UserDefaults.standard.removeObject(forKey: self.lastWorkspaceKey)
             self.section = .welcome
@@ -125,8 +129,9 @@ final class ShellModel: ObservableObject {
     }
 
     private func closeSession() async throws {
-        editor = nil
+        // Модель редактора живёт до подтверждённой записи: при отказе нужен аварийный экспорт.
         if let session { try await session.close() }
+        editor = nil
         session = nil
         store = nil
         pages = []
@@ -136,7 +141,7 @@ final class ShellModel: ObservableObject {
     // MARK: Страницы
 
     func createPage(parent: UUID? = nil) {
-        act {
+        enqueue {
             guard let session = self.session else { return }
             let page = try await session.createPage(parent: parent, title: L("Без названия"))
             self.pages = session.pages
@@ -145,7 +150,17 @@ final class ShellModel: ObservableObject {
     }
 
     func openPage(_ id: UUID) {
-        act { try await self.show(id) }
+        enqueue { try await self.show(id) }
+    }
+
+    /// Навигация последовательна: двойной клик или быстрая смена страниц не должны открыть две сессии разом.
+    private func enqueue(_ body: @escaping @MainActor () async throws -> Void) {
+        let previous = navigation
+        navigation = Task { @MainActor in
+            await previous?.value
+            do { try await body() }
+            catch { self.errorMessage = Self.describe(error) }
+        }
     }
 
     private func show(_ id: UUID) async throws {
@@ -184,10 +199,10 @@ final class ShellModel: ObservableObject {
     private func leavePage(_ then: @escaping () -> Void) {
         then()
         guard let session, session.editor != nil else { return }
-        editor = nil
-        Task {
-            do { try await session.closeEditor(); self.pages = session.pages }
-            catch { self.errorMessage = Self.describe(error) }
+        enqueue {
+            try await session.closeEditor()
+            self.editor = nil
+            self.pages = session.pages
         }
     }
 
@@ -327,17 +342,21 @@ final class ShellModel: ObservableObject {
     }
 
     private static func finishes(within seconds: UInt64, _ work: @escaping @MainActor () async throws -> Void) async -> Bool {
-        await withTaskGroup(of: Bool.self) { group in
-            group.addTask { @MainActor in
-                do { try await work(); return true } catch { return false }
+        // Группа задач ждала бы проигравшую ветку, поэтому гонка без неё: зависшая запись не блокирует диалог.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            var finished = false
+            let finish: @MainActor (Bool) -> Void = { value in
+                guard !finished else { return }
+                finished = true
+                continuation.resume(returning: value)
             }
-            group.addTask {
+            Task { @MainActor in
+                do { try await work(); finish(true) } catch { finish(false) }
+            }
+            Task { @MainActor in
                 try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-                return false
+                finish(false)
             }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
         }
     }
 
