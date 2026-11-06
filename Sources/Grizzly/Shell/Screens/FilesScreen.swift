@@ -33,6 +33,9 @@ struct FilesScreen: View {
                                 if shell.isOpen {
                                     Button("Импортировать") { shell.importFile(url) }.buttonStyle(NotesButtonStyle())
                                 }
+                                Button("Убрать из списка") { shell.forgetFile(url) }
+                                    .buttonStyle(NotesButtonStyle(kind: .plain))
+                                    .help("Файл на диске не удаляется")
                             }
                             .padding(.vertical, 11)
                         }

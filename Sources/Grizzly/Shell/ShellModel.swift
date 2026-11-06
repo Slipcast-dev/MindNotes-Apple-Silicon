@@ -565,6 +565,14 @@ final class ShellModel: ObservableObject {
         loadRecentFiles()
     }
 
+    /// Убирает строку из списка; файл на диске не трогается.
+    func forgetFile(_ url: URL) {
+        var paths = UserDefaults.standard.stringArray(forKey: recentFilesKey) ?? []
+        paths.removeAll { $0 == url.path }
+        UserDefaults.standard.set(paths, forKey: recentFilesKey)
+        loadRecentFiles()
+    }
+
     func loadRecentFiles() {
         recentFiles = (UserDefaults.standard.stringArray(forKey: recentFilesKey) ?? [])
             .filter { FileManager.default.fileExists(atPath: $0) }
