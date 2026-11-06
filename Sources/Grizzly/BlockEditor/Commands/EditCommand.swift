@@ -166,9 +166,11 @@ enum BlockEditing {
             // Непонятный блок занимает в тексте один символ и входит в правку, только если покрыт целиком.
             let firstCovered = first.content == nil && start.offset == 0 && (si < ei || end.offset >= 1)
             let lastCovered = last.content == nil && end.offset >= 1 && (si < ei || start.offset == 0)
-            let host = first.content != nil ? first : (last.content != nil ? last : nil)
             let head = first.content.map { RichText.split($0.runs, at: start.offset).left } ?? []
             let tail = last.content.map { RichText.split($0.runs, at: end.offset).right } ?? []
+            // Выделена строка целиком (тройной клик): остаётся следующий блок со своим типом и отметкой.
+            let wholeLine = fragments.isEmpty && si < ei && head.isEmpty && !tail.isEmpty && last.content != nil
+            let host = wholeLine ? last : (first.content != nil ? first : (last.content != nil ? last : nil))
 
             // Что будет на месте правки.
             struct Piece { var fragment: BlockFragment?; var type: BlockType; var content: BlockContent }
@@ -212,7 +214,7 @@ enum BlockEditing {
             var removed: [UUID] = []
             if si < ei { removed += document.blocks[(si + 1)..<ei].map(\.id) }
             if si < ei, last.id != host?.id, last.content != nil || lastCovered { removed.append(last.id) }
-            if first.id != host?.id, firstCovered { removed.append(first.id) }
+            if first.id != host?.id, firstCovered || first.content != nil { removed.append(first.id) }
             let removedSet = Set(removed)
 
             let anchorIndex = host.flatMap { document.index(of: $0.id) } ?? (firstCovered ? si - 1 : si)

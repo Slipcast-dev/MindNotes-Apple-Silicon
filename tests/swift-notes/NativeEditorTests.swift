@@ -370,3 +370,89 @@ func benchEditor() async throws {
         try await r.close()
     }
 }
+
+@MainActor
+func runNativeEditorReviewTests() async {
+    _ = NSApplication.shared
+    await test("M3 ревью: несколько диапазонов и атрибуты в обход модели отклоняются") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "первый"), (.paragraph, "второй")])
+            let before = r.doc
+            let many = [NSValue(range: NSRange(location: 0, length: 1)), NSValue(range: NSRange(location: 7, length: 1))]
+            check(!r.controller.textView(r.tv, shouldChangeTextInRanges: many, replacementStrings: ["x", "y"]), "правка в двух местах отклонена")
+            check(!r.controller.textView(r.tv, shouldChangeTextIn: NSRange(location: 0, length: 2), replacementString: nil), "только атрибуты")
+            check(r.tv.acceptableDragTypes.isEmpty, "перетаскивание выключено")
+            checkEqual(r.doc, before)
+            r.checkSync()
+            try await r.close()
+        }
+    }
+    await test("M3 ревью: Shift+Enter поверх выделения не делит блок, \\r\\n делит") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "первый"), (.paragraph, "второй")])
+            r.select(0, 3, 1, 3)
+            r.key(#selector(NSResponder.insertLineBreak(_:)))
+            checkEqual(r.texts, ["пер\nрой"], "перенос внутри одного блока")
+            r.checkSync("перенос")
+            r.caret(0, 7)
+            r.type("a\r\nb")
+            checkEqual(r.texts, ["пер\nройa", "b"], "CRLF не попадает в текст блока")
+            r.checkSync("CRLF")
+            try await r.close()
+        }
+    }
+    await test("M3 ревью: строка целиком сохраняет тип следующего блока") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "строка"), (.task, "задача"), (.paragraph, "хвост")], checked: [1])
+            let before = r.doc
+            r.tv.setSelectedRange(NSRange(location: 0, length: r.controller.spans[1].location))
+            r.tv.deleteBackward(nil)
+            checkEqual(r.texts, ["задача", "хвост"])
+            checkEqual(r.types[0], .task, "тип сохранён")
+            checkEqual(r.doc.blocks[0].content?.checked, true, "отметка сохранена")
+            checkEqual(r.tv.selectedRange().location, 0)
+            r.checkSync()
+            r.tv.undo(nil)
+            checkEqual(r.doc, before)
+            try await r.close()
+        }
+    }
+    await test("M3 ревью: составной ввод с коротким итогом и нажатия рядом с непонятным блоком") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "до"), (.paragraph, "кон")])
+            r.caret(1, 3)
+            r.tv.setMarkedText("nihao", selectedRange: NSRange(location: 5, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+            r.type("你好")
+            checkEqual(r.texts, ["до", "кон你好"], "итог короче составного в конце документа")
+            r.checkSync()
+            let page = r.editor.pageID
+            var b = SaveBatch()
+            let tableID = UUID()
+            b.upserts[tableID] = Block(id: tableID, pageID: page, parentID: nil, sortKey: SortKey.between(r.doc.blocks[0].sortKey, r.doc.blocks[1].sortKey),
+                                       type: BlockType(rawValue: "table"), contentVersion: 1, contentJSON: "{}", plainText: "", createdAt: 1, updatedAt: 1)
+            try await r.session.coordinator.flush()
+            try await r.ws.commit(b)
+            let second = try await r.session.open(page)
+            let c = BlockEditorController(session: second)
+            var errors: [String] = []
+            c.onError = { errors.append($0) }
+            c.textView.setSelectedRange(NSRange(location: 2, length: 0))
+            c.textView.doCommand(by: #selector(NSResponder.deleteForward(_:)))
+            check(c.document.block(tableID) != nil, "Delete перед непонятным блоком не удаляет его")
+            c.textView.setSelectedRange(NSRange(location: 3, length: 0))
+            c.markedTextEnded()
+            check(errors.isEmpty, "нет ложной ошибки: \(errors)")
+            try await r.close()
+        }
+    }
+    await test("M3 ревью: набор продолжает оформление слева") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.heading2, "Заголовок"), (.paragraph, "текст")])
+            r.caret(0, 3)
+            checkEqual((r.tv.typingAttributes[.font] as? NSFont)?.pointSize, 21)
+            r.caret(1, 0)
+            checkEqual((r.tv.typingAttributes[.font] as? NSFont)?.pointSize, 14, "у начала блока — оформление блока")
+            try await r.close()
+        }
+    }
+}

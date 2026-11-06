@@ -27,10 +27,20 @@ struct BlockFragment: Codable, Equatable {
         return BlockContent(json: json)
     }
 
-    /// Обычный текст: строка — абзац.
+    /// Разделитель блоков в обычном тексте. U+2028 — перенос внутри блока, им блок не делится.
+    private static let separators = CharacterSet(charactersIn: "\n\r\u{2029}\u{85}")
+
+    /// Проверка по скалярам: "\r\n" — один Character.
+    static func containsLineSeparator(_ text: String) -> Bool {
+        text.unicodeScalars.contains { separators.contains($0) }
+    }
+
+    /// Обычный текст: строка — абзац; U+2028 становится переносом внутри блока.
     static func lines(_ text: String) -> [BlockFragment] {
-        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-        return normalized.components(separatedBy: "\n").map { BlockFragment(type: .paragraph, content: BlockContent(text: $0)) }
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        return normalized.components(separatedBy: separators).map {
+            BlockFragment(type: .paragraph, content: BlockContent(text: $0.replacingOccurrences(of: "\u{2028}", with: "\n")))
+        }
     }
 
     static func plainText(_ fragments: [BlockFragment]) -> String {

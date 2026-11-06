@@ -10,6 +10,7 @@ func runAllNotesTests() async {
     await runFolderTests()
     await runRangeTests()
     await runNativeEditorTests()
+    await runNativeEditorReviewTests()
     await runBackupTests()
     await runVerticalScenario()
     await runGapTests()

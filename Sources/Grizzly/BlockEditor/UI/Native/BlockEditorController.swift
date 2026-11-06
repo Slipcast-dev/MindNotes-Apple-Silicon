@@ -46,7 +46,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         textView.controller = self
         textView.delegate = self
         textView.drawsBackground = false
-        textView.isRichText = true // Атрибуты блоков; вставка идёт только через команды.
+        textView.isRichText = false // Оформление задаёт модель: панель шрифтов и ⌘B не должны менять только вид.
         textView.importsGraphics = false
         textView.allowsUndo = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
@@ -131,13 +131,14 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         updateHeight()
     }
 
-    func updateHeight() {
+    /// `force`: сообщить высоту, даже если она не менялась (подписчик появился позже первого расчёта).
+    func updateHeight(force: Bool = false) {
         guard let manager = textView.layoutManager, let container = textView.textContainer else { return }
         manager.ensureLayout(for: container)
         var height = manager.usedRect(for: container).height
         if height == 0 { height = manager.defaultLineHeight(for: style.font(for: .paragraph)) }
         height = ceil(height) + 4
-        if height != lastHeight {
+        if height != lastHeight || force {
             lastHeight = height
             onHeightChange?(height)
         }
@@ -237,23 +238,30 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     func deleteCurrentBlock() {
         let id = point(at: textView.selectedRange().location).blockID
-        guard let i = spans.firstIndex(where: { $0.id == id }) else { return }
-        perform(.replaceRange(selection(for: NSRange(location: spans[i].location, length: spans[i].length)), []))
-        if let block = document.block(id), block.plainText.isEmpty, document.blocks.count > 1 { perform(.deleteBlock(id)) }
+        perform(.deleteBlock(id))
+        if document.blocks.isEmpty { perform(.insertBlock(after: nil, type: .paragraph)) }
     }
 
     // MARK: Правка текста внутри блока
 
+    /// Несколько диапазонов одной правкой (прямоугольное выделение, поиск): разбиение на блоки так не обновить.
+    func textView(_ view: NSTextView, shouldChangeTextInRanges ranges: [NSValue], replacementStrings: [String]?) -> Bool {
+        guard ranges.count == 1 else { return applying }
+        return self.textView(view, shouldChangeTextIn: ranges[0].rangeValue, replacementString: replacementStrings?.first)
+    }
+
     func textView(_ view: NSTextView, shouldChangeTextIn range: NSRange, replacementString: String?) -> Bool {
         if applying { return true }
-        guard let text = replacementString else { return true } // Только атрибуты.
+        guard let text = replacementString else { return false } // Только атрибуты: их источник — модель.
         let start = spanIndex(at: range.location)
         pendingIndex = start
         editingIndex = start
+        // Если AppKit не сообщит об изменении (правка оказалась пустой), выделение не должно замолчать.
+        DispatchQueue.main.async { [weak self] in self?.pendingIndex = nil }
         if view.hasMarkedText() { return true }
         let endIndex = spanIndex(at: range.location + range.length)
         let block = document.block(spans[start].id)
-        if start == endIndex, block?.isEditable == true, !text.contains("\n"), !text.contains("\r") { return true }
+        if start == endIndex, block?.isEditable == true, !BlockFragment.containsLineSeparator(text) { return true }
         // Граница блока или непонятный блок: штатная правка испортила бы структуру.
         pendingIndex = nil
         replaceWithCommand(range: range, text: text)
@@ -261,8 +269,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     private func replaceWithCommand(range: NSRange, text: String) {
-        let fragments = text.isEmpty ? [] : BlockFragment.lines(BlockTextMapping.toModel(text))
-        // Перевод строки из U+2028 — это перенос внутри абзаца; lines делит только по "\n" в исходном тексте.
+        let fragments = text.isEmpty ? [] : BlockFragment.lines(text)
         perform(.replaceRange(selection(for: range), fragments))
     }
 
@@ -299,6 +306,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     private func commitText(at index: Int) {
         guard spans.indices.contains(index), let storage = textView.textStorage else { return }
         let span = spans[index]
+        guard document.block(span.id)?.isEditable == true, span.end <= storage.length else { return }
         let text = (storage.string as NSString).substring(with: NSRange(location: span.location, length: span.length))
         do {
             try session.perform(.setPlainText(block: span.id, text: BlockTextMapping.toModel(text)))
@@ -311,7 +319,10 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     /// Составной ввод завершился без обычного изменения текста.
     func markedTextEnded() {
         guard !applying else { return }
-        commitText(at: editingIndex ?? spanIndex(at: textView.selectedRange().location))
+        let index = editingIndex ?? spanIndex(at: textView.selectedRange().location)
+        guard spans.indices.contains(index) else { return }
+        adjustSpans(at: index) // Итоговый текст может быть короче составного.
+        commitText(at: index)
     }
 
     /// Составной ввод поверх выделения через блоки: сначала выделение удаляется командой.
@@ -335,7 +346,14 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     private func applyTypingAttributes() {
         guard !textView.hasMarkedText(), !spans.isEmpty,
               let block = document.block(spans[spanIndex(at: textView.selectedRange().location)].id) else { return }
-        textView.typingAttributes = style.attributes(for: block.type)
+        // Набор продолжает оформление символа слева, как и правка в модели.
+        let location = textView.selectedRange().location
+        let span = spans[spanIndex(at: location)]
+        if location > span.location, block.isEditable, let storage = textView.textStorage, location <= storage.length {
+            textView.typingAttributes = storage.attributes(at: location - 1, effectiveRange: nil)
+        } else {
+            textView.typingAttributes = style.attributes(for: block.type)
+        }
     }
 
     func textDidEndEditing(_ notification: Notification) {
@@ -379,6 +397,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         case #selector(NSResponder.deleteForward(_:)):
             guard range.length == 0, let i = spans.firstIndex(where: { $0.id == here.blockID }),
                   here.offset == spans[i].length, i + 1 < spans.count, block?.isEditable == true else { return false }
+            // Со следующим непонятным блоком не объединяем: его данные важнее.
+            guard document.block(spans[i + 1].id)?.isEditable == true else { return true }
             perform(.mergeBackward(block: spans[i + 1].id))
             restoreCaret(block: here.blockID, offset: here.offset)
             return true
@@ -496,15 +516,13 @@ enum SystemAI {
 }
 
 /// Текстовый вид страницы: системные действия с текстом направляются в команды.
+@MainActor
 final class BlockTextView: NSTextView {
     weak var controller: BlockEditorController?
 
-    private func run(_ body: @MainActor (BlockEditorController) -> Void) {
+    private func run(_ body: (BlockEditorController) -> Void) {
         guard let controller else { return }
-        withoutActuallyEscaping(body) { b in
-            let call = unsafeBitCast(b, to: ((BlockEditorController) -> Void).self)
-            call(controller)
-        }
+        body(controller)
     }
 
     @objc func undo(_ sender: Any?) { run { $0.undo() } }
@@ -520,6 +538,14 @@ final class BlockTextView: NSTextView {
         if item.action == #selector(redo(_:)) { var ok = false; run { ok = $0.canRedo }; return ok }
         return super.validateUserInterfaceItem(item)
     }
+
+    // Панель шрифтов не меняет вид в обход модели.
+    override func changeFont(_ sender: Any?) {}
+    override func changeAttributes(_ sender: Any?) {}
+
+    // Перетаскивание появится вместе с блоками (M4): штатное удаляет источник по устаревшему диапазону.
+    override var acceptableDragTypes: [NSPasteboard.PasteboardType] { [] }
+    override func dragSelection(with event: NSEvent, offset mouseOffset: NSSize, slideBack: Bool) -> Bool { false }
 
     override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
         run { $0.prepareForMarkedText() }
@@ -550,6 +576,10 @@ final class BlockTextView: NSTextView {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
+        // Действия меню относятся к блоку под курсором мыши.
+        let index = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
+        let selected = selectedRange()
+        if index < selected.location || index > selected.location + selected.length { setSelectedRange(NSRange(location: index, length: 0)) }
         let menu = super.menu(for: event) ?? NSMenu()
         let convert = NSMenu()
         for (type, title) in [(BlockType.paragraph, "Текст"), (.heading1, "Заголовок 1"), (.heading2, "Заголовок 2"), (.heading3, "Заголовок 3"), (.task, "Задача")] {

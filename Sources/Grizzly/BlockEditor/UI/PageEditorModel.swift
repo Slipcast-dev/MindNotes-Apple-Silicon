@@ -25,7 +25,7 @@ final class PageEditorModel: ObservableObject {
         controller = BlockEditorController(session: session, style: style)
         controller.onError = onError
         controller.onHeightChange = { [weak self] in self?.contentHeight = $0 }
-        controller.updateHeight()
+        controller.updateHeight(force: true)
     }
 
     func insert(_ type: BlockType) {
