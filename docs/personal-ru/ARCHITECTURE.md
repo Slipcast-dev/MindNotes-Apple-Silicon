@@ -98,11 +98,11 @@ UUID — TEXT в нижнем регистре, время — INTEGER (мс UTC
 
 ## 7. Редактор
 
-Рекомендация для прототипа M3: единый `NSTextView` на страницу, TextKit 1. Окончательное решение — ADR после прототипа. Критерий отказа: страница из 500 блоков не даёт p95 ≤ 50 мс или неустранимо ломается IME/Undo. Запасной вариант — сегментация страницы на несколько текстовых видов.
+Единый `NSTextView` на страницу, TextKit 1: см. `adr/0005-block-editor.md`.
 
 Команды — чистая функция `apply(EditCommand, BlockDocument, BlockSelection, IDGenerator) -> EditResult`: `changes` идут в `SaveCoordinator`, `inverse` в `UndoStack`.
 
-В M2 — временный `InterimPageEditor` с реальным путём данных; в M3 удаляется только `BlockEditor/UI/Interim/`.
+Вид: `BlockEditor/UI/Native/` (`BlockEditorController`, `BlockTextView`); проверяется автотестами без оболочки.
 
 ## 8. Правила
 
