@@ -12,6 +12,8 @@ enum EditCommand: Equatable {
     case deleteBlock(UUID)
     case changeType(block: UUID, type: BlockType)
     case setChecked(block: UUID, checked: Bool)
+    /// Заменяет выделение (возможно, через несколько блоков) фрагментами; пустой список — удаление.
+    case replaceRange(BlockSelection, [BlockFragment])
 }
 
 enum EditError: Error, Equatable {
@@ -93,7 +95,9 @@ enum BlockEditing {
             let (left, right) = RichText.split(c.runs, at: point.offset)
             var first = c
             first.runs = RichText.normalized(left)
-            let newType: BlockType = b.type == .task ? .task : .paragraph
+            // Enter в начале заголовка: заголовок сдвигается вниз, над ним появляется пустой абзац.
+            let headingStart = left.isEmpty && !right.isEmpty && b.type != .paragraph && b.type != .task
+            let newType: BlockType = headingStart ? b.type : (b.type == .task ? .task : .paragraph)
             let newID = ids.next()
             let placed = place(parent: b.parentID, after: b, upper: document.nextSibling(of: b)?.sortKey, id: newID)
             var new = Block(id: newID, pageID: b.pageID, parentID: b.parentID,
@@ -102,6 +106,7 @@ enum BlockEditing {
             new.updatedAt = now
             // Перенумерация первой: её запись блока b заменяется версией с новым текстом ниже.
             var head = updated(b, first)
+            if headingStart { head.type = .paragraph }
             for case .upsert(let moved) in placed.renumbered where moved.id == b.id { head.sortKey = moved.sortKey }
             let others = placed.renumbered.filter { if case .upsert(let m) = $0 { return m.id != b.id } else { return true } }
             return result(others + [.upsert(head), .upsert(new)], selection: BlockSelection(block: new.id, offset: 0))
@@ -152,6 +157,134 @@ enum BlockEditing {
             var n = updated(b, c)
             n.type = type
             return result([.upsert(n)], selection: nil)
+
+        case let .replaceRange(selection, fragments):
+            guard let (start, end) = document.ordered(selection), let si = document.index(of: start.blockID), let ei = document.index(of: end.blockID) else {
+                throw EditError.blockNotFound(selection.anchor.blockID)
+            }
+            let first = document.blocks[si], last = document.blocks[ei]
+            // Непонятный блок занимает в тексте один символ и входит в правку, только если покрыт целиком.
+            let firstCovered = first.content == nil && start.offset == 0 && (si < ei || end.offset >= 1)
+            let lastCovered = last.content == nil && end.offset >= 1 && (si < ei || start.offset == 0)
+            let host = first.content != nil ? first : (last.content != nil ? last : nil)
+            let head = first.content.map { RichText.split($0.runs, at: start.offset).left } ?? []
+            let tail = last.content.map { RichText.split($0.runs, at: end.offset).right } ?? []
+
+            // Что будет на месте правки.
+            struct Piece { var fragment: BlockFragment?; var type: BlockType; var content: BlockContent }
+            var pieces: [Piece] = []
+            let hostType = host?.type ?? .paragraph
+            let hostChecked = host?.content?.checked ?? false
+            let hostExtra = host?.content?.extra ?? [:]
+            func merged(_ runs: [TextRun]) -> BlockContent { BlockContent(runs: runs, checked: hostChecked, extra: hostExtra) }
+            if fragments.isEmpty {
+                if host != nil { pieces.append(Piece(type: hostType, content: merged(head + tail))) }
+            } else {
+                let edited = fragments.map(\.content)
+                var openHead = host != nil ? head : []
+                var useHostFirst = host != nil
+                for (i, fragment) in fragments.enumerated() {
+                    guard let c = edited[i] else {
+                        if useHostFirst, !openHead.isEmpty { pieces.append(Piece(type: hostType, content: merged(openHead))) }
+                        useHostFirst = false
+                        openHead = []
+                        pieces.append(Piece(fragment: fragment, type: BlockType(rawValue: fragment.type), content: BlockContent()))
+                        continue
+                    }
+                    var runs = c.runs
+                    if i == 0 { runs = openHead + runs }
+                    if i == fragments.count - 1 { runs += tail }
+                    if i == 0 && useHostFirst {
+                        // В непустое начало блока фрагмент вливается; в пустое блок принимает его тип.
+                        let keepHost = !head.isEmpty || fragments.count == 1
+                        pieces.append(Piece(type: keepHost ? hostType : BlockType(rawValue: fragment.type),
+                                            content: BlockContent(runs: runs, checked: keepHost ? hostChecked : c.checked, extra: keepHost ? hostExtra : c.extra)))
+                    } else {
+                        pieces.append(Piece(type: BlockType(rawValue: fragment.type), content: BlockContent(runs: runs, checked: c.checked, extra: c.extra)))
+                    }
+                }
+                if edited.last.flatMap({ $0 }) == nil, !tail.isEmpty {
+                    pieces.append(Piece(type: .paragraph, content: BlockContent(runs: tail)))
+                }
+            }
+
+            // Удаляемые блоки: всё между границами и покрытые края, кроме блока-хозяина.
+            var removed: [UUID] = []
+            if si < ei { removed += document.blocks[(si + 1)..<ei].map(\.id) }
+            if si < ei, last.id != host?.id, last.content != nil || lastCovered { removed.append(last.id) }
+            if first.id != host?.id, firstCovered { removed.append(first.id) }
+            let removedSet = Set(removed)
+
+            let anchorIndex = host.flatMap { document.index(of: $0.id) } ?? (firstCovered ? si - 1 : si)
+            let anchor = anchorIndex >= 0 && document.blocks.indices.contains(anchorIndex) && !removedSet.contains(document.blocks[anchorIndex].id) ? document.blocks[anchorIndex] : nil
+            let parent = host?.parentID ?? first.parentID
+            let upper = document.blocks.dropFirst(ei + 1).first { $0.parentID == parent && !removedSet.contains($0.id) }?.sortKey
+            var keys = SortKey.keys(after: host?.sortKey ?? anchor?.sortKey, before: upper, count: max(pieces.count, 1))
+
+            var changes: [BlockChange] = []
+            var created: [Block] = []
+            for (i, piece) in pieces.enumerated() {
+                if i == 0, let host, piece.fragment == nil {
+                    var b = host
+                    b.type = piece.type
+                    b.setContent(piece.content)
+                    b.updatedAt = now
+                    created.append(b)
+                    keys.insert(host.sortKey, at: 0)
+                    continue
+                }
+                let key = keys[min(i, keys.count - 1)]
+                var b: Block
+                if let f = piece.fragment {
+                    b = Block(id: ids.next(), pageID: document.pageID, parentID: parent, sortKey: key, type: piece.type,
+                              contentVersion: f.contentVersion, contentJSON: f.json, plainText: f.plain, createdAt: now, updatedAt: now)
+                } else {
+                    b = Block(id: ids.next(), pageID: document.pageID, parentID: parent, sortKey: key, type: piece.type, content: piece.content, createdAt: now)
+                    b.updatedAt = now
+                }
+                created.append(b)
+            }
+            // Хозяин заменён фрагментом с непонятным содержимым: его запись уходит вместе с остальными.
+            if let host, !created.contains(where: { $0.id == host.id }), !removed.contains(host.id) { changes.append(.delete(host.id)) }
+            changes += created.map { .upsert($0) }
+
+            // Страница не остаётся без поля для ввода.
+            let remaining = document.blocks.filter { !removedSet.contains($0.id) && $0.id != host?.id }.count
+            if created.isEmpty && remaining == 0 {
+                var empty = Block(id: ids.next(), pageID: document.pageID, sortKey: SortKey.between(nil, nil), createdAt: now)
+                empty.updatedAt = now
+                created.append(empty)
+                changes.append(.upsert(empty))
+            }
+            // Потомки удаляемых блоков, оставшиеся за границей правки, переходят к хозяину.
+            let newParent = created.last?.id ?? parent
+            for b in document.blocks.dropFirst(ei + 1) where b.parentID.map({ removedSet.contains($0) }) == true && !removedSet.contains(b.id) {
+                var moved = b
+                moved.parentID = newParent
+                moved.updatedAt = now
+                changes.append(.upsert(moved))
+            }
+            for id in removed.reversed() { changes.append(.delete(id)) }
+
+            let caret: BlockSelection?
+            if let target = created.last {
+                if let c = target.content {
+                    let tailLength = fragments.last?.content == nil && !fragments.isEmpty ? 0 : RichText.length(tail)
+                    caret = BlockSelection(block: target.id, offset: max(0, RichText.length(c.runs) - tailLength))
+                } else {
+                    caret = BlockSelection(block: target.id, offset: 1)
+                }
+            } else if !firstCovered, si == ei || !lastCovered {
+                caret = BlockSelection(block: first.id, offset: min(start.offset, 1))
+            } else {
+                let next = document.blocks.dropFirst(ei + 1).first { !removedSet.contains($0.id) }
+                let previous = document.blocks.prefix(si).last
+                caret = next.map { BlockSelection(block: $0.id, offset: 0) } ?? previous.map { BlockSelection(block: $0.id, offset: $0.content.map { RichText.length($0.runs) } ?? 1) }
+            }
+            guard !changes.isEmpty else {
+                return EditResult(document: document, changes: [], inverse: [], selection: caret, coalesceKey: nil)
+            }
+            return result(changes, selection: caret)
 
         case let .setChecked(id, checked):
             let (b, c) = try editable(id)

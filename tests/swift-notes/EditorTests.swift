@@ -320,3 +320,119 @@ func runFolderTests() async {
         }
     }
 }
+
+func runRangeTests() async {
+    let page = UUID()
+    let a = UUID(), b = UUID(), c = UUID(), u = UUID(), d = UUID()
+    func sample() -> BlockDocument {
+        BlockDocument(pageID: page, blocks: [
+            Block(id: a, pageID: page, sortKey: "a0", type: .heading1, content: BlockContent(runs: [TextRun("Заголовок")]), createdAt: 1),
+            Block(id: b, pageID: page, sortKey: "a1", type: .task, content: BlockContent(runs: [TextRun("Ёлка 🎄 "), TextRun("жирно", marks: ["b"])], checked: true), createdAt: 1),
+            Block(id: c, pageID: page, sortKey: "a2", content: BlockContent(text: "Абзац три"), createdAt: 1),
+            Block(id: u, pageID: page, parentID: nil, sortKey: "a3", type: BlockType(rawValue: "table"), contentVersion: 1, contentJSON: #"{"rows":1}"#, plainText: "ячейка", createdAt: 1, updatedAt: 1),
+            Block(id: d, pageID: page, sortKey: "a4", content: BlockContent(text: "Конец"), createdAt: 1),
+        ])
+    }
+    func range(_ x: UUID, _ i: Int, _ y: UUID, _ j: Int) -> BlockSelection {
+        var s = BlockSelection(block: x, offset: i)
+        s.focus = BlockPoint(blockID: y, offset: j)
+        return s
+    }
+    func texts(_ doc: BlockDocument) -> [String] { doc.blocks.map(\.plainText) }
+    func apply(_ s: BlockSelection, _ f: [BlockFragment], on doc: BlockDocument, file: StaticString = #fileID, line: UInt = #line) throws -> EditResult {
+        let r = try BlockEditing.apply(.replaceRange(s, f), to: doc, ids: SeqIDs(), now: 5)
+        var back = r.document
+        back.apply(r.inverse)
+        checkEqual(back, doc, "обратимость", file: file, line: line)
+        return r
+    }
+
+    await test("replaceRange: удаление через блоки объединяет края и отменяется целиком") {
+        let doc = sample()
+        let r = try apply(range(a, 3, c, 5), [], on: doc)
+        checkEqual(texts(r.document), ["Заг три", "ячейка", "Конец"])
+        checkEqual(r.document.blocks[0].type, .heading1, "тип первого блока сохраняется")
+        checkEqual(r.selection, BlockSelection(block: a, offset: 3))
+        let reversed = try apply(range(c, 5, a, 3), [], on: doc)
+        checkEqual(texts(reversed.document), ["Заг три", "ячейка", "Конец"], "направление выделения не важно")
+    }
+
+    await test("replaceRange: ввод вместо выделения и многострочная вставка") {
+        let doc = sample()
+        let typed = try apply(range(a, 3, c, 5), BlockFragment.lines("ё"), on: doc)
+        checkEqual(texts(typed.document)[0], "Загё три")
+        checkEqual(typed.selection, BlockSelection(block: a, offset: 4), "курсор после вставки")
+        let multi = try apply(BlockSelection(block: c, offset: 2), BlockFragment.lines("раз\nдва\nтри"), on: doc)
+        checkEqual(Array(texts(multi.document)[2...4]), ["Абраз", "два", "тризац три"])
+        checkEqual(multi.selection?.anchor.offset, 3, "курсор в начале хвоста последней строки")
+        let keys = multi.document.blocks.map(\.sortKey)
+        checkEqual(keys, keys.sorted(), "порядок ключей")
+        checkEqual(multi.document.blocks.last?.id, d)
+    }
+
+    await test("replaceRange: собственный формат сохраняет типы, отметки и метки") {
+        let doc = sample()
+        let copied = doc.fragments(in: range(a, 3, c, 5))
+        checkEqual(copied.map(\.plain), ["оловок", "Ёлка 🎄 жирно", "Абзац"], "границы обрезаны")
+        checkEqual(copied[1].type, BlockType.task.rawValue)
+        check(copied[1].content?.checked == true, "отметка в копии")
+        check(copied[1].content?.runs.contains { $0.marks == ["b"] } == true, "метки в копии")
+        checkEqual(BlockFragment.plainText(copied), "оловок\nЁлка 🎄 жирно\nАбзац")
+        let pasted = try apply(BlockSelection(block: d, offset: 5), copied, on: doc)
+        checkEqual(texts(pasted.document).suffix(3).map { $0 }, ["Конецоловок", "Ёлка 🎄 жирно", "Абзац"])
+        checkEqual(pasted.document.blocks[pasted.document.blocks.count - 2].type, .task)
+        let ids = pasted.document.blocks.map(\.id)
+        checkEqual(Set(ids).count, ids.count, "новые UUID")
+        let empty = BlockDocument(pageID: page, blocks: [Block(id: a, pageID: page, sortKey: "a0", createdAt: 1)])
+        let intoEmpty = try apply(BlockSelection(block: a, offset: 0), [copied[1]], on: empty)
+        checkEqual(intoEmpty.document.blocks[0].plainText, "Ёлка 🎄 жирно")
+        let one = try apply(BlockSelection(block: a, offset: 0), [BlockFragment(type: .task, content: BlockContent(text: "x")), BlockFragment(type: .heading2, content: BlockContent(text: "y"))], on: empty)
+        checkEqual(one.document.blocks[0].type, .task, "в пустой блок вставка несёт свой тип")
+        checkEqual(one.document.blocks[1].type, .heading2)
+    }
+
+    await test("replaceRange: непонятный блок не теряется случайно") {
+        let doc = sample()
+        let covered = try apply(range(c, 1, d, 1), [], on: doc)
+        checkEqual(texts(covered.document), ["Заголовок", "Ёлка 🎄 жирно", "Аонец"], "покрытый целиком удаляется вместе с выделением")
+        let copied = doc.fragments(in: range(c, 1, d, 1))
+        check(copied[1].content == nil, "копия хранит непрозрачный блок")
+        checkEqual(copied[1].json, #"{"rows":1}"#, "исходная строка")
+        let pasted = try apply(BlockSelection(block: a, offset: 9), copied, on: doc)
+        check(pasted.document.blocks.contains { $0.type.rawValue == "table" && (try? $0.contentJSON()) == #"{"rows":1}"# && $0.id != u }, "вставлен копией без потерь")
+        let keep = try BlockEditing.apply(.replaceRange(BlockSelection(block: u, offset: 1), []), to: doc, ids: SeqIDs(), now: 1)
+        check(keep.changes.isEmpty, "пустая правка с курсором на блоке ничего не меняет")
+        let typed = try apply(BlockSelection(block: u, offset: 1), BlockFragment.lines("новый"), on: doc)
+        check(typed.document.block(u) != nil, "ввод рядом с блоком его не удаляет")
+        check(texts(typed.document).contains("новый"), "текст стал новым блоком")
+        let itself = try apply(range(u, 0, u, 1), [], on: doc)
+        check(itself.document.block(u) == nil, "выделенный блок удаляется")
+    }
+
+    await test("replaceRange: всё удалено — остаётся пустой абзац; потомки не теряются") {
+        let doc = sample()
+        let all = try apply(range(a, 0, d, 5), [], on: doc)
+        checkEqual(texts(all.document), [""], "поле для ввода осталось")
+        let p = UUID(), kid = UUID(), x = UUID()
+        let nested = BlockDocument(pageID: page, blocks: [
+            Block(id: x, pageID: page, sortKey: "a0", content: BlockContent(text: "начало"), createdAt: 1),
+            Block(id: p, pageID: page, sortKey: "a1", content: BlockContent(text: "родитель"), createdAt: 1),
+            Block(id: kid, pageID: page, parentID: p, sortKey: "a0", content: BlockContent(text: "дочерний"), createdAt: 1),
+        ])
+        let m = try apply(range(x, 6, p, 8), [], on: nested)
+        checkEqual(texts(m.document), ["начало", "дочерний"], "дочерний блок сохранён")
+        checkEqual(m.document.block(kid)?.parentID, x, "и получил нового родителя")
+    }
+
+    await test("Enter в начале заголовка сохраняет заголовок") {
+        let doc = sample()
+        let r = try BlockEditing.apply(.splitBlock(BlockPoint(blockID: a, offset: 0)), to: doc, ids: SeqIDs(), now: 1)
+        checkEqual(r.document.blocks[0].type, .paragraph)
+        checkEqual(r.document.blocks[0].plainText, "")
+        checkEqual(r.document.blocks[1].type, .heading1)
+        checkEqual(r.document.blocks[1].plainText, "Заголовок")
+        var back = r.document
+        back.apply(r.inverse)
+        checkEqual(back, doc, "обратимость")
+    }
+}

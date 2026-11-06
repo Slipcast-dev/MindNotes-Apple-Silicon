@@ -15,6 +15,8 @@ final class EditorSession {
     private var undo = UndoStack()
     private var dirtySinceSnapshot = false
     private var lastSnapshotAt: Int64?
+    /// Автоматический снимок в работе: уход со страницы его дожидается.
+    private var snapshotTask: Task<Void, Never>?
 
     /// Срабатывает после каждой правки, отмены и повтора.
     var onChange: (() -> Void)?
@@ -37,6 +39,9 @@ final class EditorSession {
         self.clock = clock
         self.ids = ids
     }
+
+    /// Выделение из интерфейса: отмена возвращает его вместе с текстом.
+    func updateSelection(_ selection: BlockSelection?) { self.selection = selection }
 
     @discardableResult
     func perform(_ command: EditCommand, recordUndo: Bool = true) throws -> EditResult {
@@ -87,7 +92,7 @@ final class EditorSession {
     private func scheduleSnapshotIfDue() {
         guard policy.isDue(dirty: dirtySinceSnapshot, lastSnapshotAt: lastSnapshotAt, now: clock.nowMillis()) else { return }
         lastSnapshotAt = clock.nowMillis()
-        Task { try? await self.snapshot(reason: "Автоматический снимок") }
+        snapshotTask = Task { try? await self.snapshot(reason: "Автоматический снимок") }
     }
 
     /// Снимок подтверждённого состояния: сначала запись правок.
@@ -107,6 +112,7 @@ final class EditorSession {
 
     /// Уход со страницы: правки записаны, снимок сделан, если страница менялась.
     func close() async throws {
+        await snapshotTask?.value
         try await coordinator.flush()
         if dirtySinceSnapshot { try await snapshot(reason: "Уход со страницы") }
     }
