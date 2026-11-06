@@ -1,71 +1,38 @@
 import AppKit
 import SwiftUI
 
-/// Раздел «Файлы», когда ни один файл не открыт. Файлы остаются на диске; импорта здесь нет.
+/// Раздел «Файлы» по макету: файлы на диске можно посмотреть и импортировать в пространство. Оригиналы не меняются.
 struct FilesScreen: View {
     @EnvironmentObject private var shell: ShellModel
-    @EnvironmentObject private var state: AppState
-    @EnvironmentObject private var library: LibraryStore
-
-    private var recent: [LibraryFile] {
-        Array(library.allFiles.sorted { ($0.lastOpened ?? .distantPast, $0.name) > ($1.lastOpened ?? .distantPast, $1.name) }.prefix(20))
-    }
-
-    /// Папка библиотеки: виртуальная, на диске ничего не создаётся.
-    private func newFolder() {
-        let alert = NSAlert()
-        alert.messageText = L("Новая папка")
-        alert.informativeText = L("Папка появится в библиотеке файлов. На диске ничего не создаётся.")
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.placeholderString = L("Название")
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        alert.addButton(withTitle: L("Создать"))
-        alert.addButton(withTitle: L("Отмена"))
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        guard !library.folderExists(name) else {
-            shell.errorMessage = String(format: L("Папка «%@» уже есть."), name)
-            return
-        }
-        _ = library.createFolder(name)
-        shell.showsLibrary = true
-    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Eyebrow(text: L("Файловый режим"))
+                Eyebrow(text: L("Файлы на диске"))
                 ScreenTitle(text: L("Файлы")).padding(.top, 8).padding(.bottom, 9)
-                Text("Работайте с Markdown и текстом на диске.")
+                Text("Посмотрите текстовый файл или импортируйте его как страницу. Сам файл не меняется.")
                     .font(.system(size: 14))
                     .foregroundColor(Tokens.muted)
                     .padding(.bottom, 24)
-                HStack(spacing: 9) {
-                    Button("Открыть файл…") { state.presentOpenPanel() }.buttonStyle(NotesButtonStyle(kind: .primary))
-                    Button("Новый файл…") { state.presentNewFilePanel() }.buttonStyle(NotesButtonStyle())
-                    Button("Новая папка…") { newFolder() }.buttonStyle(NotesButtonStyle())
-                    Button("Добавить папку с диска…") { state.presentFolderPanel() }.buttonStyle(NotesButtonStyle())
-                    Button(shell.showsLibrary ? "Скрыть библиотеку" : "Библиотека") { shell.showsLibrary.toggle() }
-                        .buttonStyle(NotesButtonStyle(kind: .plain))
-                }
-                if !recent.isEmpty {
+                Button("Открыть файл…") { shell.presentOpenFile() }.buttonStyle(NotesButtonStyle(kind: .primary))
+                if !shell.recentFiles.isEmpty {
                     VStack(spacing: 0) {
-                        ForEach(recent) { file in
+                        ForEach(shell.recentFiles, id: \.self) { url in
                             HStack(spacing: 10) {
-                                Text(URL(fileURLWithPath: file.path).pathExtension.uppercased().prefix(4))
+                                Text(url.pathExtension.uppercased().prefix(4))
                                     .font(.system(size: 11))
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
                                     .background(RoundedRectangle(cornerRadius: 6).fill(Tokens.soft))
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(file.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                                    Text(file.path).font(.system(size: 12)).foregroundColor(Tokens.muted).lineLimit(1).truncationMode(.middle)
+                                    Text(url.lastPathComponent).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                                    Text(url.deletingLastPathComponent().path).font(.system(size: 12)).foregroundColor(Tokens.muted).lineLimit(1).truncationMode(.middle)
                                 }
                                 Spacer()
-                                Button("Открыть") { state.open(urls: [URL(fileURLWithPath: file.path)]) }
-                                    .buttonStyle(NotesButtonStyle())
+                                Button("Предпросмотр") { shell.previewFile(url) }.buttonStyle(NotesButtonStyle())
+                                if shell.isOpen {
+                                    Button("Импортировать") { shell.importFile(url) }.buttonStyle(NotesButtonStyle())
+                                }
                             }
                             .padding(.vertical, 11)
                         }
@@ -80,6 +47,51 @@ struct FilesScreen: View {
             .padding(.top, 32)
             .padding(.bottom, 42)
         }
+        .sheet(item: $shell.preview) { FilePreviewSheet(preview: $0) }
+    }
+}
+
+struct FilePreview: Identifiable {
+    let url: URL
+    let text: String
+    let encoding: String
+    var id: URL { url }
+}
+
+struct FilePreviewSheet: View {
+    @EnvironmentObject private var shell: ShellModel
+    @Environment(\.dismiss) private var dismiss
+    let preview: FilePreview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(preview.url.lastPathComponent).font(Tokens.titleFont(28))
+            Text(String(format: L("Файл на диске · %@ · строк: %d"), preview.encoding, preview.text.split(separator: "\n", omittingEmptySubsequences: false).count))
+                .font(.system(size: 12))
+                .foregroundColor(Tokens.muted)
+            ScrollView {
+                Text(preview.text.prefix(200_000))
+                    .font(.system(size: 13, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+            }
+            .background(RoundedRectangle(cornerRadius: 9).fill(Tokens.card))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Tokens.line))
+            HStack {
+                Spacer()
+                Button("Закрыть") { dismiss() }.buttonStyle(NotesButtonStyle()).keyboardShortcut(.cancelAction)
+                if shell.isOpen {
+                    Button("Импортировать в пространство") {
+                        dismiss()
+                        shell.importFile(preview.url)
+                    }
+                    .buttonStyle(NotesButtonStyle(kind: .primary))
+                }
+            }
+        }
+        .padding(23)
+        .frame(width: 680, height: 560)
         .background(Tokens.paper)
     }
 }

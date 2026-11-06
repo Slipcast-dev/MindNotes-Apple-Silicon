@@ -4,8 +4,8 @@ import SwiftUI
 /// Настройки приложения по макету. Подробные настройки файлового режима — отдельным окном.
 struct SettingsScreen: View {
     @EnvironmentObject private var shell: ShellModel
-    @EnvironmentObject private var prefs: Preferences
-    @State private var language = AppLanguage.saved == .en ? AppLanguage.en : AppLanguage.ru
+    @EnvironmentObject private var prefs: AppPreferences
+    @State private var language = AppLanguage.saved
 
     var body: some View {
         ScrollView {
@@ -18,7 +18,7 @@ struct SettingsScreen: View {
                     .padding(.bottom, 24)
                 VStack(spacing: 0) {
                     row(L("Тема"), L("Светлое или тёмное оформление")) {
-                        Button("Переключить тему") { prefs.appearance = prefs.theme.isDark ? .light : .dark }
+                        Button("Переключить тему") { prefs.isDark.toggle() }
                             .buttonStyle(NotesButtonStyle())
                     }
                     divider
@@ -47,10 +47,6 @@ struct SettingsScreen: View {
                             }
                             .buttonStyle(NotesButtonStyle())
                         }
-                    }
-                    divider
-                    row(L("Файловый режим"), L("Шрифты, подсветка кода, типы файлов")) {
-                        Button("Настройки файлов") { shell.goFileSettings() }.buttonStyle(NotesButtonStyle())
                     }
                     divider
                     row(L("Обновления"), L("Локальная сборка обновляется вручную")) {

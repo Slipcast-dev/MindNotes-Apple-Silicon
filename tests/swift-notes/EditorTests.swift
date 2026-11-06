@@ -436,3 +436,15 @@ func runRangeTests() async {
         checkEqual(back, doc, "обратимость")
     }
 }
+
+func runImportTests() async {
+    await test("Импорт Markdown: заголовки, задачи, абзацы, встроенная разметка") {
+        let f = MarkdownImport.fragments(from: "# Заголовок\r\n\nТекст **жирный** и *курсив*\nвторая строка\n\n- [ ] Дело\n- [x] Сделано\n## Два\nбез `кода конца и ~~зач~~")
+        checkEqual(f.map(\.type), ["heading1", "paragraph", "task", "task", "heading2", "paragraph"])
+        checkEqual(f[1].plain, "Текст жирный и курсив\nвторая строка")
+        check(f[1].content?.runs.contains { $0.text == "жирный" && $0.marks == ["b"] } == true, "жирный")
+        check(f[1].content?.runs.contains { $0.text == "курсив" && $0.marks == ["i"] } == true, "курсив")
+        checkEqual(f[3].content?.checked, true)
+        checkEqual(f[5].plain, "без `кода конца и зач", "незакрытая разметка остаётся текстом")
+    }
+}

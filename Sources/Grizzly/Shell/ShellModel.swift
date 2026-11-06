@@ -8,7 +8,6 @@ enum ShellSection: Equatable {
     case page(UUID)
     case backups
     case settings
-    case fileSettings
     case trash
 }
 
@@ -21,9 +20,8 @@ final class ShellModel: ObservableObject {
     @Published private(set) var saveStatus: SaveStatus = .saved
     @Published private(set) var editor: PageEditorModel?
     @Published var errorMessage: String?
-    @Published var filesMounted = false
-    /// Панель библиотеки в разделе «Файлы».
-    @Published var showsLibrary = false
+    @Published private(set) var recentFiles: [URL] = []
+    @Published var preview: FilePreview?
     @Published private(set) var trashItems: [TrashItem] = []
     @Published private(set) var backups: [BackupItem] = []
     @Published private(set) var busyMessage: String?
@@ -58,6 +56,7 @@ final class ShellModel: ObservableObject {
     // MARK: Пространство
 
     func restoreLastWorkspace() {
+        loadRecentFiles()
         guard let path = UserDefaults.standard.string(forKey: lastWorkspaceKey),
               FileManager.default.fileExists(atPath: path) else { return }
         open(at: URL(fileURLWithPath: path))
@@ -184,6 +183,10 @@ final class ShellModel: ObservableObject {
         guard let session else { return }
         let editorSession = try await session.open(id)
         pages = session.pages
+        installEditor(editorSession, id: id)
+    }
+
+    private func installEditor(_ editorSession: EditorSession, id: UUID) {
         let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS)
         editor = PageEditorModel(session: editorSession, style: style) { [weak self] in self?.errorMessage = $0 }
         section = .page(id)
@@ -197,10 +200,6 @@ final class ShellModel: ObservableObject {
 
     func goSettings() {
         leavePage { self.section = .settings }
-    }
-
-    func goFileSettings() {
-        leavePage { self.section = .fileSettings }
     }
 
     func goTrash() {
@@ -267,10 +266,7 @@ final class ShellModel: ObservableObject {
     }
 
     func goFiles() {
-        leavePage {
-            self.filesMounted = true
-            self.section = .files
-        }
+        leavePage { self.section = .files }
     }
 
     /// Уход со страницы: правка уже в очереди записи; снимок истории делается после неё.
@@ -295,6 +291,65 @@ final class ShellModel: ObservableObject {
             guard let session = self.session else { return }
             try await session.move(id, toParent: parent, afterSibling: nil)
             self.pages = session.pages
+        }
+    }
+
+    // MARK: Файлы на диске
+
+    private let recentFilesKey = "recentFiles"
+
+    func presentOpenFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = L("Открыть")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        previewFile(url)
+    }
+
+    /// Показывает файл без изменений и без импорта.
+    func previewFile(_ url: URL) {
+        rememberFile(url)
+        do {
+            let file = try TextFileReader.read(url)
+            leavePage { self.section = .files }
+            preview = FilePreview(url: url, text: file.text, encoding: file.encoding)
+        } catch {
+            errorMessage = String(format: L("Не удалось прочитать файл: %@"), Self.describe(error))
+        }
+    }
+
+    private func rememberFile(_ url: URL) {
+        var paths = UserDefaults.standard.stringArray(forKey: recentFilesKey) ?? []
+        paths.removeAll { $0 == url.path }
+        paths.insert(url.path, at: 0)
+        paths = Array(paths.prefix(20))
+        UserDefaults.standard.set(paths, forKey: recentFilesKey)
+        loadRecentFiles()
+    }
+
+    func loadRecentFiles() {
+        recentFiles = (UserDefaults.standard.stringArray(forKey: recentFilesKey) ?? [])
+            .filter { FileManager.default.fileExists(atPath: $0) }
+            .map { URL(fileURLWithPath: $0) }
+    }
+
+    /// Импорт в новую страницу. Оригинал только читается.
+    func importFile(_ url: URL) {
+        enqueue {
+            guard let session = self.session else { return }
+            let file = try TextFileReader.read(url)
+            let title = url.deletingPathExtension().lastPathComponent
+            let fragments = MarkdownImport.fragments(from: file.text)
+            let page = try await session.createPage(parent: nil, title: title)
+            let opened = try await session.open(page.id)
+            if let first = opened.document.blocks.first, !fragments.isEmpty {
+                try opened.perform(.replaceRange(BlockSelection(block: first.id, offset: 0), fragments), recordUndo: false)
+            }
+            self.pages = session.pages
+            self.installEditor(opened, id: page.id)
+            self.notice = String(format: L("Импортировано блоков: %d. Файл не изменён."), fragments.count)
         }
     }
 
