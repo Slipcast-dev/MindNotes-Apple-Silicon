@@ -26,6 +26,8 @@ final class PageEditorModel: ObservableObject {
     }
 
     func emergencyText(title: String) -> String { session.emergencyText(title: title) }
+
+    func closePanels() { panels.close() }
 }
 
 /// Единый текстовый вид страницы.
@@ -63,9 +65,15 @@ final class EditorPanels {
         }
     }
 
-    deinit {
-        let panels = [slashPanel, toolbarPanel]
-        Task { @MainActor in panels.forEach { $0?.orderOut(nil) } }
+    /// Панель держит контроллер, поэтому при уходе со страницы её нужно отсоединить от окна.
+    func close() {
+        for panel in [slashPanel, toolbarPanel].compactMap({ $0 }) {
+            panel.parent?.removeChildWindow(panel)
+            panel.orderOut(nil)
+            panel.contentView = nil
+        }
+        slashPanel = nil
+        toolbarPanel = nil
     }
 
     private func panel(_ size: NSSize) -> NSPanel {

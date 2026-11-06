@@ -60,6 +60,17 @@ enum MarkdownImport {
             for (token, mark) in tokens where rest.hasPrefix(token) {
                 let body = rest.dropFirst(token.count)
                 if let end = body.range(of: token), end.lowerBound != body.startIndex {
+                    // Маркер должен прилегать к тексту: «2 * 3 * 4» и «*.txt и *.md» — обычный текст.
+                    let opensOnText = body.first?.isWhitespace == false
+                    let closesOnText = body[body.index(before: end.lowerBound)].isWhitespace == false
+                    // Подчёркивание внутри слова не разметка: snake_case_name.
+                    let wordBefore = plain.last.map { $0.isLetter || $0.isNumber } ?? runs.last?.text.last.map { $0.isLetter || $0.isNumber } ?? false
+                    let afterClose = body[end.upperBound...].first
+                    let wordAfter = afterClose.map { $0.isLetter || $0.isNumber } ?? false
+                    if token != "`" {
+                        guard opensOnText, closesOnText else { continue }
+                        if token == "_", wordBefore || wordAfter { continue }
+                    }
                     if !plain.isEmpty { runs.append(TextRun(plain)); plain = "" }
                     runs.append(TextRun(String(body[..<end.lowerBound]), marks: [mark]))
                     rest = body[end.upperBound...]

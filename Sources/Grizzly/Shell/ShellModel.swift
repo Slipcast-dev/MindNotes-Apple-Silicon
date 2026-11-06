@@ -18,7 +18,9 @@ final class ShellModel: ObservableObject {
     @Published private(set) var workspaceName = ""
     @Published private(set) var pages: [Page] = []
     @Published private(set) var saveStatus: SaveStatus = .saved
-    @Published private(set) var editor: PageEditorModel?
+    @Published private(set) var editor: PageEditorModel? {
+        didSet { if oldValue !== editor { oldValue?.closePanels() } }
+    }
     @Published var errorMessage: String?
     @Published private(set) var recentFiles: [URL] = []
     @Published var preview: FilePreview?
@@ -310,9 +312,9 @@ final class ShellModel: ObservableObject {
 
     /// Показывает файл без изменений и без импорта.
     func previewFile(_ url: URL) {
-        rememberFile(url)
         do {
             let file = try TextFileReader.read(url)
+            rememberFile(url)
             leavePage { self.section = .files }
             preview = FilePreview(url: url, text: file.text, encoding: file.encoding)
         } catch {
@@ -339,10 +341,13 @@ final class ShellModel: ObservableObject {
     func importFile(_ url: URL) {
         enqueue {
             guard let session = self.session else { return }
-            let file = try TextFileReader.read(url)
+            // Чтение и разбор вне главного потока; страница появляется только после успешного разбора.
+            let fragments = try await Task.detached(priority: .userInitiated) {
+                MarkdownImport.fragments(from: try TextFileReader.read(url).text)
+            }.value
             let title = url.deletingPathExtension().lastPathComponent
-            let fragments = MarkdownImport.fragments(from: file.text)
             let page = try await session.createPage(parent: nil, title: title)
+            self.pages = session.pages
             let opened = try await session.open(page.id)
             if let first = opened.document.blocks.first, !fragments.isEmpty {
                 try opened.perform(.replaceRange(BlockSelection(block: first.id, offset: 0), fragments), recordUndo: false)

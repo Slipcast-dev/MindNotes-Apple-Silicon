@@ -50,12 +50,28 @@ struct BlockFragment: Codable, Equatable {
         }
     }
 
+    /// Текст одним блоком: для вставки в блок кода.
+    static func codeText(_ text: String) -> [BlockFragment] {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n").replacingOccurrences(of: "\u{2028}", with: "\n")
+        return [BlockFragment(type: .paragraph, content: BlockContent(text: normalized))]
+    }
+
     static func plainText(_ fragments: [BlockFragment]) -> String {
         fragments.map(\.plain).joined(separator: "\n")
     }
 }
 
 extension BlockDocument {
+    /// Блоки внутри свёрнутых родителей.
+    var hiddenIDs: Set<UUID> {
+        var hidden: Set<UUID> = []
+        for b in blocks {
+            guard let parent = b.parentID else { continue }
+            if hidden.contains(parent) || block(parent)?.isCollapsed == true { hidden.insert(b.id) }
+        }
+        return hidden
+    }
+
     /// Начало и конец выделения в порядке документа.
     func ordered(_ s: BlockSelection) -> (start: BlockPoint, end: BlockPoint)? {
         guard let a = index(of: s.anchor.blockID), let f = index(of: s.focus.blockID) else { return nil }
@@ -67,7 +83,8 @@ extension BlockDocument {
     func fragments(in selection: BlockSelection) -> [BlockFragment] {
         guard let (start, end) = ordered(selection), let si = index(of: start.blockID), let ei = index(of: end.blockID) else { return [] }
         var out: [BlockFragment] = []
-        for i in si...ei {
+        let hidden = hiddenIDs
+        for i in si...ei where !hidden.contains(blocks[i].id) {
             let b = blocks[i]
             guard var c = b.content else {
                 // Непонятный блок копируется, только если выделен целиком.

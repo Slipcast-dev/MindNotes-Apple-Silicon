@@ -16,6 +16,8 @@ enum EditCommand: Equatable {
     case replaceRange(BlockSelection, [BlockFragment])
     /// Форматирование выделенного текста.
     case formatText(BlockSelection, MarkEdit)
+    /// Метки только что набранного текста; склеивается с набором в один шаг отмены.
+    case typedMarks(BlockSelection, add: [String], remove: [String])
     case indent(UUID)
     case outdent(UUID)
     case setCollapsed(block: UUID, collapsed: Bool)
@@ -129,10 +131,10 @@ enum BlockEditing {
 
         case let .mergeBackward(id):
             let (b, c) = try editable(id)
-            guard let i = document.index(of: id), i > 0 else {
+            let hidden = document.hiddenIDs
+            guard let i = document.index(of: id), let previous = document.blocks[..<i].last(where: { !hidden.contains($0.id) }) else {
                 return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
             }
-            let previous = document.blocks[i - 1]
             // Предсказуемое правило: с непонятным блоком не объединяем, чтобы не потерять его данные.
             guard let pc = previous.content else {
                 return EditResult(document: document, changes: [], inverse: [], selection: BlockSelection(block: id, offset: 0), coalesceKey: nil)
@@ -171,7 +173,9 @@ enum BlockEditing {
 
         case let .changeType(id, type):
             let (b, c) = try editable(id)
-            var n = updated(b, c)
+            var clean = c
+            if type != .toggle { clean.extra["collapsed"] = nil }
+            var n = updated(b, clean)
             n.type = type
             return result([.upsert(n)], selection: nil)
 
@@ -215,7 +219,7 @@ enum BlockEditing {
                     if i == fragments.count - 1 { runs += tail }
                     if i == 0 && useHostFirst {
                         // В непустое начало блока фрагмент вливается; в пустое блок принимает его тип.
-                        let keepHost = !head.isEmpty || fragments.count == 1
+                        let keepHost = !head.isEmpty || !tail.isEmpty || fragment.type == BlockType.paragraph.rawValue
                         pieces.append(Piece(type: keepHost ? hostType : BlockType(rawValue: fragment.type),
                                             content: BlockContent(runs: runs, checked: keepHost ? hostChecked : c.checked, extra: keepHost ? hostExtra : c.extra)))
                     } else {
@@ -229,7 +233,9 @@ enum BlockEditing {
 
             // Удаляемые блоки: всё между границами и покрытые края, кроме блока-хозяина.
             var removed: [UUID] = []
-            if si < ei { removed += document.blocks[(si + 1)..<ei].map(\.id) }
+            // Скрытые потомки свёрнутого блока-хозяина пользователь не выделял: они остаются.
+            let keptHidden: Set<UUID> = host?.id == first.id && first.isCollapsed ? Set(document.descendants(of: first.id).map(\.id)) : []
+            if si < ei { removed += document.blocks[(si + 1)..<ei].map(\.id).filter { !keptHidden.contains($0) } }
             if si < ei, last.id != host?.id, last.content != nil || lastCovered { removed.append(last.id) }
             if first.id != host?.id, firstCovered || first.content != nil { removed.append(first.id) }
             let removedSet = Set(removed)
@@ -245,6 +251,11 @@ enum BlockEditing {
             for (i, piece) in pieces.enumerated() {
                 if i == 0, let host, piece.fragment == nil {
                     var b = host
+                    // Родителя хозяина удаляет эта же правка: хозяин занимает его место.
+                    if let p = host.parentID, removedSet.contains(p) {
+                        b.parentID = first.parentID
+                        b.sortKey = first.sortKey
+                    }
                     b.type = piece.type
                     b.setContent(piece.content)
                     b.updatedAt = now
@@ -332,18 +343,37 @@ enum BlockEditing {
             }
             return result(changes, selection: selection)
 
+        case let .typedMarks(selection, add, remove):
+            guard selection.anchor.blockID == selection.focus.blockID, let (start, end) = document.ordered(selection) else {
+                return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
+            }
+            let (b, c) = try editable(start.blockID)
+            var n = c
+            n.runs = RichText.mapMarks(c.runs, range: start.offset..<max(start.offset, end.offset)) { marks in
+                marks.filter { !remove.contains($0) } + add.filter { !marks.contains($0) }
+            }
+            return result([.upsert(updated(b, n))], selection: nil, key: "text:\(b.id)")
+
         case let .indent(id):
             guard let b = document.block(id) else { throw EditError.blockNotFound(id) }
             let siblings = document.blocks.filter { $0.parentID == b.parentID }
-            guard let i = siblings.firstIndex(where: { $0.id == id }), i > 0 else {
+            // В неделимый блок вложить нельзя.
+            guard let i = siblings.firstIndex(where: { $0.id == id }), i > 0, siblings[i - 1].content != nil else {
                 return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
             }
-            let newParent = siblings[i - 1]
+            var newParent = siblings[i - 1]
             let lastChild = document.blocks.last { $0.parentID == newParent.id }
             var n = b
             n.parentID = newParent.id
             n.sortKey = SortKey.between(lastChild?.sortKey, nil)
             n.updatedAt = now
+            // Свёрнутый родитель разворачивается: блок не должен исчезать из вида.
+            if newParent.isCollapsed, var c = newParent.content {
+                c.extra["collapsed"] = nil
+                newParent.setContent(c)
+                newParent.updatedAt = now
+                return result([.upsert(newParent), .upsert(n)], selection: nil)
+            }
             return result([.upsert(n)], selection: nil)
 
         case let .outdent(id):
@@ -355,7 +385,19 @@ enum BlockEditing {
             n.parentID = parent.parentID
             n.sortKey = SortKey.between(parent.sortKey, document.nextSibling(of: parent)?.sortKey)
             n.updatedAt = now
-            return result([.upsert(n)], selection: nil)
+            // Младшие братья становятся потомками: порядок текста на странице не меняется.
+            let siblings = document.blocks.filter { $0.parentID == parentID }
+            let younger = siblings.drop { $0.id != id }.dropFirst()
+            var key = document.blocks.last { $0.parentID == id }?.sortKey
+            let moved: [BlockChange] = younger.map { y in
+                var m = y
+                m.parentID = id
+                key = SortKey.between(key, nil)
+                m.sortKey = key!
+                m.updatedAt = now
+                return .upsert(m)
+            }
+            return result([.upsert(n)] + moved, selection: nil)
 
         case let .setCollapsed(id, collapsed):
             let (b, c) = try editable(id)

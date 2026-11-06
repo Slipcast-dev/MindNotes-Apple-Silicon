@@ -13,6 +13,7 @@ func runAllNotesTests() async {
     await runNativeEditorTests()
     await runNativeEditorReviewTests()
     await runNotionEditorTests()
+    await runNotionReviewTests()
     await runBackupTests()
     await runVerticalScenario()
     await runGapTests()

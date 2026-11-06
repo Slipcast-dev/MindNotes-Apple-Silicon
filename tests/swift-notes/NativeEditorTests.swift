@@ -685,3 +685,161 @@ func runNotionEditorTests() async {
         }
     }
 }
+
+@MainActor
+func runNotionReviewTests() async {
+    _ = NSApplication.shared
+    await test("Ревью: строка целиком с потомком не ломает структуру и сохранение") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "родитель"), (.paragraph, "дитя1"), (.paragraph, "дитя2"), (.paragraph, "конец")])
+            let parent = r.doc.blocks[0].id, c1 = r.doc.blocks[1].id, c2 = r.doc.blocks[2].id
+            r.controller.perform(.batch([.indent(c1), .indent(c2)]))
+            let before = r.doc
+            r.tv.setSelectedRange(NSRange(location: 0, length: r.controller.spans[1].location))
+            r.tv.deleteBackward(nil)
+            checkEqual(r.texts, ["дитя1", "дитя2", "конец"])
+            checkEqual(r.doc.block(c1)?.parentID, nil, "занял место родителя")
+            checkEqual(r.doc.block(c2)?.parentID, c1, "второй ребёнок под ним")
+            check(r.doc.block(parent) == nil)
+            r.checkSync()
+            try await r.session.coordinator.flush()
+            let saved = try await r.ws.blocks(ofPage: r.editor.pageID)
+            checkEqual(Set(saved.map(\.plainText)), ["дитя1", "дитя2", "конец"], "база приняла правку")
+            r.tv.undo(nil)
+            checkEqual(r.doc, before)
+            try await r.session.coordinator.flush()
+            let back = try await r.ws.blocks(ofPage: r.editor.pageID)
+            checkEqual(back.count, 4, "отмена записана")
+            try await r.close()
+        }
+    }
+
+    await test("Ревью: свёрнутый блок не теряет скрытых потомков") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.toggle, "раздел"), (.paragraph, "внутри"), (.paragraph, "снаружи"), (.paragraph, "ещё")])
+            let toggle = r.doc.blocks[0].id, inner = r.doc.blocks[1].id
+            r.controller.perform(.batch([.indent(inner), .setCollapsed(block: toggle, collapsed: true)]))
+            r.checkSync("свёрнуто")
+            r.select(0, 3, 1, 3)
+            let board = NSPasteboard(name: NSPasteboard.Name("notes.test.\(UUID().uuidString)"))
+            r.controller.copy(to: board)
+            checkEqual(board.string(forType: .string), "дел\nсна", "скрытое не копируется")
+            r.tv.deleteBackward(nil)
+            check(r.doc.block(inner) != nil, "скрытый потомок цел")
+            checkEqual(r.doc.block(toggle)?.plainText, "разружи")
+            r.checkSync("удаление через свёрнутый")
+            r.tv.undo(nil)
+            r.caret(0, 6)
+            r.key(#selector(NSResponder.deleteForward(_:)))
+            checkEqual(r.texts, ["раздел", "внутри", "снаружи", "ещё"], "Delete в конце свёрнутого ничего не сливает")
+            r.caret(1, 0)
+            r.key(#selector(NSResponder.deleteBackward(_:)))
+            checkEqual(r.doc.block(toggle)?.plainText, "разделснаружи", "Backspace сливает с видимым блоком, а не со скрытым")
+            checkEqual(r.doc.block(inner)?.plainText, "внутри")
+            r.checkSync("Backspace")
+            try await r.close()
+        }
+    }
+
+    await test("Ревью: смена типа свёрнутого блока показывает потомков; вложение в свёрнутый разворачивает") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.toggle, "раздел"), (.paragraph, "внутри"), (.paragraph, "снаружи")])
+            let toggle = r.doc.blocks[0].id, inner = r.doc.blocks[1].id, outer = r.doc.blocks[2].id
+            r.controller.perform(.batch([.indent(inner), .setCollapsed(block: toggle, collapsed: true)]))
+            r.caret(1, 0)
+            r.key(#selector(NSResponder.insertTab(_:)))
+            checkEqual(r.doc.block(outer)?.parentID, toggle)
+            check(r.doc.block(toggle)?.isCollapsed == false, "свёрнутый родитель раскрылся")
+            r.checkSync("Tab")
+            r.controller.perform(.setCollapsed(block: toggle, collapsed: true))
+            r.controller.perform(.changeType(block: toggle, type: .paragraph))
+            checkEqual(r.tv.string, "раздел\nвнутри\nснаружи", "потомки снова видны")
+            r.checkSync("смена типа")
+            try await r.close()
+        }
+    }
+
+    await test("Ревью: outdent сохраняет порядок; выделение строки не захватывает следующую") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "P"), (.paragraph, "c1"), (.paragraph, "b"), (.paragraph, "c2"), (.paragraph, "конец")])
+            r.controller.perform(.batch(r.doc.blocks[1...3].map { .indent($0.id) }))
+            let b = r.doc.blocks[2].id, c2 = r.doc.blocks[3].id
+            let before = r.doc
+            r.caret(2, 0)
+            r.key(#selector(NSResponder.insertBacktab(_:)))
+            checkEqual(r.texts, ["P", "c1", "b", "c2", "конец"], "порядок текста тот же")
+            checkEqual(r.doc.block(c2)?.parentID, b, "младший брат под ним")
+            r.checkSync("outdent")
+            r.tv.undo(nil)
+            checkEqual(r.doc, before)
+            let line = NSRange(location: r.controller.spans[4].location - r.controller.spans[3].length - 1, length: r.controller.spans[3].length + 1)
+            r.tv.setSelectedRange(line)
+            r.controller.run(.turnInto(.heading1))
+            checkEqual(r.doc.blocks.last?.type, .paragraph, "следующий блок не затронут")
+            checkEqual(r.doc.block(c2)?.type, .heading1)
+            try await r.close()
+        }
+    }
+
+    await test("Ревью: дублирование и вставка сохраняют тип; код не разбивается") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.task, "дело"), (.code, "a")], checked: [0])
+            r.caret(0, 2)
+            r.controller.run(.duplicateBlock)
+            checkEqual(r.types.map(\.rawValue), ["task", "task", "code"], "тип сохранён")
+            checkEqual(r.doc.blocks[1].content?.checked, true)
+            r.checkSync("дублирование")
+            let board = NSPasteboard(name: NSPasteboard.Name("notes.test.\(UUID().uuidString)"))
+            board.clearContents()
+            board.setString("b\nc\r\nd", forType: .string)
+            r.caret(2, 1)
+            r.controller.paste(from: board)
+            checkEqual(r.texts[2], "ab\nc\nd", "код одним блоком")
+            r.checkSync("вставка в код")
+            r.controller.perform(.setPlainText(block: r.doc.blocks[0].id, text: ""))
+            r.controller.renderAll()
+            r.caret(0, 0)
+            r.controller.paste(from: board)
+            checkEqual(r.types[0], .task, "обычный текст в пустую задачу сохраняет её тип")
+            r.checkSync("вставка в пустой блок")
+            try await r.close()
+        }
+    }
+
+    await test("Ревью: метки набора не трогают другие; ⌘B снимается; набор — один шаг отмены") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "текст")])
+            r.select(0, 0, 0, 5)
+            r.controller.run(.highlight("yellow"))
+            r.caret(0, 5)
+            r.controller.run(.mark("b"))
+            r.type("Ж")
+            r.type("Ю")
+            let last = r.doc.blocks[0].content!.runs.last!
+            checkEqual(last.text, "ЖЮ")
+            check(last.marks.contains("b") && last.marks.contains("bg:yellow"), "жирный добавлен, маркер остался: \(last.marks)")
+            r.tv.undo(nil)
+            checkEqual(r.texts[0], "текст", "один шаг отмены")
+            r.tv.redo(nil)
+            r.caret(0, 7)
+            check(r.controller.isMarked("b"), "у курсора жирный")
+            r.controller.run(.mark("b"))
+            check(!r.controller.isMarked("b"), "снят для следующего ввода")
+            r.type("я")
+            checkEqual(r.doc.blocks[0].content!.runs.last!.text, "я")
+            check(!r.doc.blocks[0].content!.runs.last!.marks.contains("b"), "ввод без жирного")
+            r.checkSync()
+            try await r.close()
+        }
+    }
+
+    await test("Ревью: импорт не съедает символы; двоичный файл отклоняется") {
+        checkEqual(RichText.plain(MarkdownImport.inline("snake_case_name и 2 * 3 * 4 и *.txt и *.md")), "snake_case_name и 2 * 3 * 4 и *.txt и *.md")
+        checkEqual(MarkdownImport.inline("_курсив_ и `a*b*c`").map(\.text), ["курсив", " и ", "a*b*c"])
+        try await withTempDir { dir in
+            let bin = dir.appendingPathComponent("a.bin")
+            try Data([0x41, 0, 0x42]).write(to: bin)
+            await checkThrows("двоичный") { try TextFileReader.read(bin) }
+        }
+    }
+}

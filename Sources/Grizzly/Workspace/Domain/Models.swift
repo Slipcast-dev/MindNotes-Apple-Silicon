@@ -173,7 +173,7 @@ struct Block: Equatable, Identifiable {
 
     /// Свёрнутый блок скрывает потомков.
     var isCollapsed: Bool {
-        if case .bool(true)? = content?.extra["collapsed"] { return true }
+        if type == .toggle, case .bool(true)? = content?.extra["collapsed"] { return true }
         return false
     }
 
