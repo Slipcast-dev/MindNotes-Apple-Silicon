@@ -95,9 +95,10 @@ enum RichText {
     static func snap(_ text: String, _ offset: Int) -> Int {
         let u = text.utf16
         let clamped = min(max(0, offset), u.count)
+        // На конце строки символа нет: rangeOfComposedCharacterSequence бросил бы исключение.
+        if clamped == u.count { return clamped }
         let index = u.index(u.startIndex, offsetBy: clamped)
         let snapped = text.rangeOfComposedCharacterSequence(at: index).lowerBound
-        if index == text.endIndex { return u.count }
         return u.distance(from: u.startIndex, to: snapped)
     }
 

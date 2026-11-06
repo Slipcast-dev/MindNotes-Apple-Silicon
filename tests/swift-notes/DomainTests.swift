@@ -1,7 +1,8 @@
 import Foundation
 
 func handleChildMode() async -> Bool {
-    await handleCrashChild()
+    if await handleExtraChild() { return true }
+    return await handleCrashChild()
 }
 
 func runDomainTests() async {
