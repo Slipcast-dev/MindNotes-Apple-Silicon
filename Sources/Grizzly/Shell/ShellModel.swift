@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 
 enum ShellSection: Equatable {
@@ -76,9 +77,19 @@ final class ShellModel: ObservableObject {
 
     /// Последнее открытое — первым.
     private func rememberWorkspace(path: String, name: String) {
-        knownWorkspaces.removeAll { $0.path == path }
-        knownWorkspaces.insert(KnownWorkspace(path: path, name: name), at: 0)
+        let canonical = Self.canonical(path)
+        knownWorkspaces.removeAll { Self.canonical($0.path) == canonical }
+        knownWorkspaces.insert(KnownWorkspace(path: canonical, name: name), at: 0)
         saveKnownWorkspaces()
+    }
+
+    /// Один каталог в разных написаниях (симлинк, /private, косая на конце) — одно пространство.
+    private static func canonical(_ path: String) -> String {
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    func isCurrent(_ item: KnownWorkspace) -> Bool {
+        workspaceRoot.map { Self.canonical($0.path) == Self.canonical(item.path) } ?? false
     }
 
     /// Убирает из списка; папка и данные остаются на месте.
@@ -88,7 +99,7 @@ final class ShellModel: ObservableObject {
     }
 
     func switchWorkspace(_ item: KnownWorkspace) {
-        guard item.path != workspaceRoot?.path else { return }
+        guard !isCurrent(item) else { return }
         guard item.exists else {
             errorMessage = String(format: L("Папка пространства не найдена: %@"), item.path)
             return
@@ -106,17 +117,33 @@ final class ShellModel: ObservableObject {
     private func cacheImages(for look: WorkspaceLook) async {
         guard let store else { return }
         for id in [look.logoAsset, look.coverAsset].compactMap({ $0 }) where imageCache[id] == nil {
-            if let url = try? await store.assetURL(id), let image = NSImage(contentsOf: url) { imageCache[id] = image }
+            if let url = try? await store.assetURL(id) { imageCache[id] = await Self.loadImage(url) }
         }
         objectWillChange.send()
     }
 
-    func saveLook(_ new: WorkspaceLook, name: String) {
+    /// Уменьшенная копия вне главного потока: полноразмерная картинка не нужна логотипу и обложке.
+    private static func loadImage(_ url: URL) async -> NSImage? {
+        await Task.detached(priority: .userInitiated) { () -> NSImage? in
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                            kCGImageSourceCreateThumbnailWithTransform: true,
+                                            kCGImageSourceThumbnailMaxPixelSize: 2400]
+            guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+        }.value
+    }
+
+    /// `candidates` — картинки, выбранные в окне настройки: невыбранные удаляются, как и заменённые.
+    func saveLook(_ new: WorkspaceLook, name: String, candidates: Set<UUID>) {
         enqueue {
             guard let store = self.store else { return }
+            let unused = candidates.union([self.look.logoAsset, self.look.coverAsset].compactMap { $0 })
+                .subtracting([new.logoAsset, new.coverAsset].compactMap { $0 })
             try await store.setLook(new)
             self.look = new
             await self.cacheImages(for: new)
+            for id in unused { try? await store.deleteAsset(id); self.imageCache[id] = nil }
             let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
             if !clean.isEmpty, clean != self.workspaceName {
                 try await store.rename(to: clean)
@@ -126,21 +153,43 @@ final class ShellModel: ObservableObject {
         }
     }
 
-    /// Копирует изображение в пространство: архив и восстановление его сохранят.
-    func pickImage(_ done: @escaping (UUID) -> Void) {
+    /// Окно настройки закрыто без сохранения: выбранные картинки не нужны.
+    func discardAssets(_ ids: Set<UUID>) {
+        enqueue {
+            guard let store = self.store else { return }
+            for id in ids {
+                try? await store.deleteAsset(id)
+                self.imageCache[id] = nil
+            }
+        }
+    }
+
+    /// Копирует изображение в пространство: архив и восстановление его сохранят. nil — выбор отменён или не удался.
+    func pickImage(_ done: @escaping (UUID?) -> Void) {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image]
         panel.prompt = L("Выбрать")
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard NSImage(contentsOf: url) != nil else {
-            errorMessage = L("Не удалось прочитать изображение.")
-            return
+        guard panel.runModal() == .OK, let url = panel.url, let owner = store else { return done(nil) }
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size <= 64 * 1024 * 1024 else {
+            errorMessage = L("Изображение слишком большое: до 64 МБ.")
+            return done(nil)
         }
-        enqueue {
-            guard let store = self.store else { return }
-            let asset = try await store.addAsset(copying: url, now: SystemClock().nowMillis())
-            self.imageCache[asset.id] = NSImage(contentsOf: url)
-            done(asset.id)
+        Task { @MainActor in
+            guard let image = await Self.loadImage(url) else {
+                self.errorMessage = L("Не удалось прочитать изображение.")
+                return done(nil)
+            }
+            // За время выбора пространство могло смениться: чужой файл в него не попадёт.
+            guard self.store === owner else { return done(nil) }
+            do {
+                let asset = try await owner.addAsset(copying: url, now: SystemClock().nowMillis())
+                self.imageCache[asset.id] = image
+                done(asset.id)
+            } catch {
+                self.errorMessage = Self.describe(error)
+                done(nil)
+            }
         }
     }
 
@@ -237,7 +286,7 @@ final class ShellModel: ObservableObject {
         panel.prompt = L("Создать")
         panel.message = L("Выберите пустую папку на локальном диске. Не используйте папки облачной синхронизации.")
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        act {
+        enqueue {
             let name = L("Моё пространство")
             // Не на главном потоке: проверка базы и миграция могут быть долгими.
             let store = try await Task.detached(priority: .userInitiated) { try SQLiteWorkspace.create(at: url, name: name) }.value
@@ -256,7 +305,7 @@ final class ShellModel: ObservableObject {
     }
 
     private func open(at url: URL) {
-        act {
+        enqueue {
             var options = SQLiteWorkspace.Options()
             let root = self.supportDirectory.appendingPathComponent("Backups/before-migration", isDirectory: true)
             // Проверенная копия обязательна до изменения формата (ТЗ §8).
@@ -272,30 +321,39 @@ final class ShellModel: ObservableObject {
         }
     }
 
+    /// Сначала готовит новое пространство целиком, и только затем закрывает прежнее:
+    /// сбой открытия оставляет пользователя в том пространстве, где он работал.
     private func adopt(_ store: SQLiteWorkspace) async throws {
-        try await closeSession()
-        let name = try await store.workspaceName()
-        let loadedLook = try await store.look()
-        let session = WorkspaceSession(store: store, name: name)
-        session.coordinator.onStatusChange = { [weak self] in self?.saveStatus = $0 }
-        try await session.refreshPages()
-        self.store = store
-        self.session = session
-        workspaceName = name
-        imageCache = [:]
-        look = loadedLook
-        await cacheImages(for: loadedLook)
-        rememberWorkspace(path: store.layout.root.path, name: name)
-        try await reloadTags()
-        pages = session.pages
-        saveStatus = .saved
-        // Файл, открытый из Finder при запуске, важнее восстановления последней страницы.
-        if section != .files { section = .home }
-        UserDefaults.standard.set(store.layout.root.path, forKey: lastWorkspaceKey)
-        try await reloadBackups()
-        // После перезапуска пользователь возвращается к той же странице.
-        if section != .files, let raw = UserDefaults.standard.string(forKey: lastPageKey), let id = UUID(uuidString: raw), pages.contains(where: { $0.id == id }) {
-            try await show(id)
+        do {
+            let name = try await store.workspaceName()
+            let loadedLook = try await store.look()
+            let session = WorkspaceSession(store: store, name: name)
+            session.coordinator.onStatusChange = { [weak self] in self?.saveStatus = $0 }
+            try await session.refreshPages()
+            let loadedTags = try await store.tags()
+            let loadedPageTags = try await store.pageTags()
+            try await closeSession()
+            self.store = store
+            self.session = session
+            workspaceName = name
+            imageCache = [:]
+            look = loadedLook
+            tags = loadedTags
+            pageTags = loadedPageTags
+            pages = session.pages
+            saveStatus = .saved
+            await cacheImages(for: loadedLook)
+            rememberWorkspace(path: store.layout.root.path, name: name)
+            if section != .files { section = .home }
+            UserDefaults.standard.set(store.layout.root.path, forKey: lastWorkspaceKey)
+            try await reloadBackups()
+            // После перезапуска пользователь возвращается к той же странице.
+            if section != .files, let raw = UserDefaults.standard.string(forKey: lastPageKey), let id = UUID(uuidString: raw), pages.contains(where: { $0.id == id }) {
+                try await show(id)
+            }
+        } catch {
+            if self.store !== store { store.close() } // Блокировка нового пространства не должна остаться.
+            throw error
         }
     }
 

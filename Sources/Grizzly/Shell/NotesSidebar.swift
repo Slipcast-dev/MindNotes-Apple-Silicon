@@ -65,7 +65,7 @@ struct NotesSidebar: View {
                 Menu {
                     ForEach(shell.knownWorkspaces) { item in
                         Button { shell.switchWorkspace(item) } label: {
-                            if item.path == shell.workspaceRoot?.path { Label(item.name, systemImage: "checkmark") } else { Text(item.name) }
+                            if shell.isCurrent(item) { Label(item.name, systemImage: "checkmark") } else { Text(item.name) }
                         }
                         .disabled(!item.exists)
                     }

@@ -75,6 +75,9 @@ struct WorkspaceLookSheet: View {
     @State private var name = ""
     @State private var emoji = ""
     @State private var label = ""
+    /// Картинки, загруженные в этом окне: неиспользованные удаляются при закрытии.
+    @State private var picked: Set<UUID> = []
+    @State private var picking = false
 
     private static let symbols = ["sparkle", "leaf", "mountain.2", "star", "book", "heart", "bolt", "flame", "pawprint", "briefcase", "house", "graduationcap"]
 
@@ -132,13 +135,17 @@ struct WorkspaceLookSheet: View {
             }
             HStack {
                 Spacer()
-                Button(L("Отмена")) { dismiss() }.buttonStyle(NotesButtonStyle()).keyboardShortcut(.cancelAction)
+                Button(L("Отмена")) {
+                    shell.discardAssets(picked)
+                    dismiss()
+                }.buttonStyle(NotesButtonStyle()).keyboardShortcut(.cancelAction)
                 Button(L("Готово")) {
-                    shell.saveLook(draft, name: name)
+                    shell.saveLook(draft, name: name, candidates: picked)
                     dismiss()
                 }
                 .buttonStyle(NotesButtonStyle(kind: .primary))
                 .keyboardShortcut(.defaultAction)
+                .disabled(picking)
             }
             .padding(.top, 14)
         }
@@ -218,6 +225,12 @@ struct WorkspaceLookSheet: View {
     }
 
     private func pick(_ done: @escaping (UUID) -> Void) {
-        shell.pickImage(done)
+        picking = true
+        shell.pickImage { id in
+            picking = false
+            guard let id else { return }
+            picked.insert(id)
+            done(id)
+        }
     }
 }

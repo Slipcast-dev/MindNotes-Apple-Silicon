@@ -86,7 +86,7 @@ struct SettingsScreen: View {
                                 Text(item.exists ? item.path : L("Папка не найдена")).font(.system(size: 12)).foregroundColor(Tokens.muted).lineLimit(1).truncationMode(.middle)
                             }
                             Spacer()
-                            if item.path == shell.workspaceRoot?.path {
+                            if shell.isCurrent(item) {
                                 Chip(text: L("Открыто"))
                             } else {
                                 Button("Открыть") { shell.switchWorkspace(item) }.buttonStyle(NotesButtonStyle()).disabled(!item.exists)

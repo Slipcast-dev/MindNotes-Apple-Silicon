@@ -3,6 +3,7 @@ import Foundation
 func runAllNotesTests() async {
     await runStorageTests()
     await runTagAndLookTests()
+    await runAssetDeleteTests()
     await runSaveTests()
     await runCrashTests()
     await runEditorTests()

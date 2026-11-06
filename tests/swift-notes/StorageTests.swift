@@ -402,3 +402,22 @@ func runTagAndLookTests() async {
         }
     }
 }
+
+func runAssetDeleteTests() async {
+    await test("Вложение: удаление убирает запись и файл, длинное расширение отбрасывается") {
+        try await withTempDir { dir in
+            let ws = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "A")
+            let source = dir.appendingPathComponent("a." + String(repeating: "x", count: 40))
+            try Data("x".utf8).write(to: source)
+            let asset = try await ws.addAsset(copying: source, now: 1)
+            check(!asset.relPath.contains("xxx"), "расширение отброшено: \(asset.relPath)")
+            let url = try await ws.assetURL(asset.id)
+            try await ws.deleteAsset(asset.id)
+            let gone = try await ws.assetURL(asset.id)
+            check(gone == nil, "записи нет")
+            check(!FileManager.default.fileExists(atPath: url!.path), "файла нет")
+            try await ws.deleteAsset(UUID())
+            ws.close()
+        }
+    }
+}

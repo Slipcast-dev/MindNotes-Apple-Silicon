@@ -109,7 +109,8 @@ extension SQLiteWorkspace {
 
     /// Копирует файл в `assets/`: сначала временный файл и атомарный перенос, затем запись в базе (FR-08).
     func addAsset(copying source: URL, id: UUID = UUID(), now: Int64) async throws -> AssetRecord {
-        let ext = source.pathExtension.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        let cleaned = source.pathExtension.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        let ext = cleaned.count <= 10 ? cleaned : ""
         let hex = String(id.lowercasedString.prefix(2))
         let rel = "assets/\(hex)/\(id.lowercasedString)\(ext.isEmpty ? "" : ".\(ext)")"
         let root = layout
@@ -147,6 +148,13 @@ extension SQLiteWorkspace {
             throw error
         }
         return record
+    }
+
+    /// Удаляет запись и файл. Файл вложения неизменяем, поэтому порядок безопасен: сначала ссылка в базе.
+    func deleteAsset(_ id: UUID) async throws {
+        guard let url = try await assetURL(id) else { return }
+        try await writer.run { try $0.run("DELETE FROM assets WHERE id=?", [SQLValue(id)]) }
+        try? FileManager.default.removeItem(at: url)
     }
 
     func assetURL(_ id: UUID) async throws -> URL? {
