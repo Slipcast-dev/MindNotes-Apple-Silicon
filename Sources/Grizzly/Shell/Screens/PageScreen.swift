@@ -155,7 +155,7 @@ struct PageScreen: View {
                     .padding(.horizontal, -BlockEditorController.gutter) // Ручка блока в левом поле, текст по колонке.
                     .sheet(item: $editor.editingTable) { table in
                         TableEditorSheet(rows: table.rows) { rows in
-                            editor.controller.perform(.setAtomData(block: table.id, json: AtomData.tableJSON(rows), plain: AtomData.tablePlain(rows)))
+                            editor.controller.perform(.setAtomData(block: table.id, json: AtomData.tableJSON(rows, keeping: table.extra), plain: AtomData.tablePlain(rows)))
                         }
                     }
                 let kids = shell.children(of: editor.pageID)

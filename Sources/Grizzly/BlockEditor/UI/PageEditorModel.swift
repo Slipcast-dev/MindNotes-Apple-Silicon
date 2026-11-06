@@ -21,7 +21,11 @@ final class PageEditorModel: ObservableObject {
         controller.onHeightChange = { [weak self] in self?.contentHeight = $0 }
         controller.updateHeight(force: true)
         controller.onEditTable = { [weak self] block in
-            self?.editingTable = EditingTable(id: block.id, rows: AtomData.rows(of: block))
+            guard AtomData.isEditableTable(block) else {
+                onError(L("Эта таблица создана более новой версией и здесь не редактируется."))
+                return
+            }
+            self?.editingTable = EditingTable(id: block.id, rows: AtomData.rows(of: block), extra: block.atomJSON)
         }
     }
 
@@ -38,6 +42,8 @@ final class PageEditorModel: ObservableObject {
 struct EditingTable: Identifiable {
     let id: UUID
     var rows: [[String]]
+    /// Все поля блока: неизвестные сохраняются при записи.
+    var extra: [String: JSONValue]
 }
 
 /// Редактор простой таблицы: строки и столбцы, первая строка — заголовок.

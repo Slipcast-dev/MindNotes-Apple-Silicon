@@ -54,7 +54,14 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     var pickFile: ((BlockType) -> URL?)?
     /// Открыть таблицу в редакторе.
     var onEditTable: ((Block) -> Void)?
-    private var imageCache: [UUID: NSImage] = [:]
+    /// Миниатюры занимают много памяти: кэш ограничен.
+    private let imageCache: NSCache<NSUUID, NSImage> = {
+        let cache = NSCache<NSUUID, NSImage>()
+        cache.countLimit = 40
+        return cache
+    }()
+    private var loadingImages: Set<UUID> = []
+    private var failedImages: Set<UUID> = []
 
     private(set) var spans: [Span] = []
     private(set) var visible: [Block] = []
@@ -387,16 +394,24 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     /// Неделимые блоки встают на место выделения; ниже всегда остаётся строка для ввода.
     func insertFragments(_ fragments: [BlockFragment]) {
-        perform(.replaceRange(selection(for: textView.selectedRange()), fragments))
-        ensureTextAfterAtom()
+        if textView.hasMarkedText() { textView.unmarkText() }
+        let range = textView.selectedRange()
+        let end = point(at: range.location + range.length)
+        // В конце страницы ниже нужна строка для ввода; одна правка отмены.
+        let atDocumentEnd = spans.last.map { $0.id == end.blockID && end.offset == $0.length } ?? false
+        let tail = atDocumentEnd ? [BlockFragment(type: .paragraph, content: BlockContent())] : []
+        perform(.replaceRange(selection(for: range), fragments + tail))
+        if !atDocumentEnd { ensureTextAfterAtom() }
     }
 
     /// Копирует файлы в пространство и вставляет блоки: сначала файл, затем ссылка (FR-08).
-    func insertFiles(_ urls: [URL], type: BlockType? = nil) {
+    func insertFiles(_ urls: [URL], type: BlockType? = nil, removingAfterCopy: Bool = false) {
         guard let add = addAttachment else { return }
         Task { @MainActor in
             var fragments: [BlockFragment] = []
             for url in urls {
+                // Временная копия из буфера обмена не должна оставаться.
+                defer { if removingAfterCopy { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) } }
                 do {
                     let asset = try await add(url)
                     let isImage = type == .image || (type == nil && UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true)
@@ -409,11 +424,28 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         }
     }
 
+    /// Программы и сценарии не запускаются одним нажатием: файл показывается в Finder.
+    static func isExecutable(_ url: URL) -> Bool {
+        let risky: Set<String> = ["app", "command", "tool", "terminal", "sh", "bash", "zsh", "py", "pl", "rb", "scpt", "applescript", "workflow", "pkg", "mpkg", "dmg", "jar"]
+        if risky.contains(url.pathExtension.lowercased()) { return true }
+        guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
+        return type.conforms(to: .executable) || type.conforms(to: .application) || type.conforms(to: .script)
+    }
+
+    private func openAttachment(_ url: URL) {
+        if Self.isExecutable(url) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// Плашка неделимого блока.
     private func cell(for block: Block) -> NSTextAttachmentCell? {
         switch block.type {
         case .image:
-            return ImageBlockCell(picture: picture(for: block), name: AtomData.name(of: block), ink: style.muted, line: style.line)
+            let picture = picture(for: block)
+            return ImageBlockCell(picture: picture, loading: picture == nil && !failedImages.contains(block.assetID ?? UUID()), name: AtomData.name(of: block), ink: style.muted, line: style.line, soft: style.soft)
         case .file:
             let size = ByteCountFormatter.string(fromByteCount: AtomData.size(of: block), countStyle: .file)
             return FileBlockCell(name: AtomData.name(of: block), detail: size, ink: style.ink, muted: style.muted, line: style.line)
@@ -424,15 +456,43 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         }
     }
 
+    /// Миниатюра из кэша; при промахе загружается вне главного потока, затем плашка заменяется.
     private func picture(for block: Block) -> NSImage? {
         guard let id = block.assetID else { return nil }
-        if let cached = imageCache[id] { return cached }
-        guard let url = assetURL?(id), let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 1800]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        let picture = NSImage(cgImage: image, size: NSSize(width: CGFloat(image.width) / 2, height: CGFloat(image.height) / 2))
-        imageCache[id] = picture
-        return picture
+        if let cached = imageCache.object(forKey: id as NSUUID) { return cached }
+        guard !loadingImages.contains(id), !failedImages.contains(id) else { return nil }
+        guard let url = assetURL?(id) else {
+            failedImages.insert(id)
+            return nil
+        }
+        loadingImages.insert(id)
+        Task { @MainActor [weak self] in
+            let image = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+                guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+                let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 1800]
+                guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+                return NSImage(cgImage: cg, size: NSSize(width: CGFloat(cg.width) / 2, height: CGFloat(cg.height) / 2))
+            }.value
+            guard let self else { return }
+            self.loadingImages.remove(id)
+            if let image { self.imageCache.setObject(image, forKey: id as NSUUID) } else { self.failedImages.insert(id) }
+            self.reloadAtoms(asset: id)
+        }
+        return nil
+    }
+
+    /// Заменяет плашки блоков с этим вложением; текст и выделение не меняются.
+    private func reloadAtoms(asset: UUID) {
+        guard let storage = textView.textStorage, !textView.hasMarkedText() else { return }
+        let selected = textView.selectedRange()
+        applying = true
+        for span in spans {
+            guard let block = document.block(span.id), block.assetID == asset, span.end <= storage.length else { continue }
+            storage.replaceCharacters(in: NSRange(location: span.location, length: span.length), with: style.render(block, depth: depths[block.id] ?? 0))
+        }
+        textView.setSelectedRange(selected)
+        applying = false
+        updateHeight()
     }
 
     private func moveCurrentBlock(down: Bool) {
@@ -471,7 +531,11 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     func finishDrag(_ id: UUID, at point: NSPoint) {
-        guard let target = dropTarget(at: point), target.after != id else { return }
+        guard let target = dropTarget(at: point), target.after != id, let block = document.block(id) else { return }
+        // То же место — не правка: нет записи и лишнего шага отмены.
+        let siblings = document.blocks.filter { $0.parentID == block.parentID }
+        let previous = siblings.firstIndex { $0.id == id }.flatMap { $0 > 0 ? siblings[$0 - 1].id : nil }
+        if target.parent == block.parentID, target.after == previous { return }
         perform(.moveBlock(id, parent: target.parent, after: target.after))
     }
 
@@ -482,12 +546,15 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         return NSRect(x: x, y: line.minY, width: 16, height: 18)
     }
 
+    /// Блок на высоте курсора мыши. Вызывается на каждое движение, поэтому без перебора всех блоков.
     func block(atY y: CGFloat) -> Span? {
-        for span in spans {
-            if let rect = blockRect(for: span), y >= rect.minY - 4, y <= rect.maxY + 4 { return span }
-        }
-        return nil
+        guard let manager = textView.layoutManager, let container = textView.textContainer, !spans.isEmpty else { return nil }
+        let glyphs = manager.glyphRange(forBoundingRect: NSRect(x: 0, y: max(0, y - textView.textContainerOrigin.y - 1), width: container.size.width, height: 2), in: container)
+        guard glyphs.length > 0 else { return spans.last }
+        return spans[spanIndex(at: manager.characterIndexForGlyph(at: glyphs.location))]
     }
+
+    func span(withID id: UUID) -> Span? { spans.first { $0.id == id } }
 
     func drawHandle(for span: Span) {
         guard let rect = handleRect(for: span) else { return }
@@ -1044,10 +1111,10 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             guard let rect = blockRect(for: span), rect.contains(point) else { return false }
             switch block.type {
             case .file:
-                if let id = block.assetID, let url = assetURL?(id) { NSWorkspace.shared.open(url) }
+                if let id = block.assetID, let url = assetURL?(id) { openAttachment(url) }
                 return true
             case .image:
-                if clickCount >= 2, let id = block.assetID, let url = assetURL?(id) { NSWorkspace.shared.open(url); return true }
+                if clickCount >= 2, let id = block.assetID, let url = assetURL?(id) { openAttachment(url); return true }
                 return false
             case .table:
                 onEditTable?(block)
@@ -1206,6 +1273,8 @@ final class BlockTextView: NSTextView {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty else { return false }
+        let at = characterIndexForInsertion(at: convert(sender.draggingLocation, from: nil))
+        setSelectedRange(NSRange(location: at, length: 0))
         run { $0.insertFiles(urls) }
         return true
     }
@@ -1235,15 +1304,15 @@ final class BlockTextView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         run { $0.drawMarkers(in: dirtyRect) }
-        if let span = hoveredSpan { run { $0.drawHandle(for: span) } }
+        if let id = hoveredBlock { run { c in if let span = c.span(withID: id) { c.drawHandle(for: span) } } }
         if let y = dropLine {
             NSColor.controlAccentColor.setFill()
             NSRect(x: textContainerOrigin.x, y: y, width: bounds.width - textContainerOrigin.x, height: 2).fill()
         }
     }
 
-    private var hoveredSpan: BlockEditorController.Span? {
-        didSet { if oldValue?.id != hoveredSpan?.id { needsDisplay = true } }
+    private var hoveredBlock: UUID? {
+        didSet { if oldValue != hoveredBlock { needsDisplay = true } }
     }
     private var dropLine: CGFloat? {
         didSet { needsDisplay = true }
@@ -1258,12 +1327,12 @@ final class BlockTextView: NSTextView {
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
         let at = convert(event.locationInWindow, from: nil)
-        run { self.hoveredSpan = $0.block(atY: at.y) }
+        run { self.hoveredBlock = $0.block(atY: at.y)?.id }
     }
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
-        hoveredSpan = nil
+        hoveredBlock = nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -1284,15 +1353,18 @@ final class BlockTextView: NSTextView {
     /// Перетаскивание блока за ручку: линия показывает место, отпускание выполняет одну команду.
     private func trackDrag(of span: BlockEditorController.Span) {
         guard let window else { return }
-        var last = NSPoint.zero
+        guard let start = window.currentEvent.map({ convert($0.locationInWindow, from: nil) }) else { return }
+        var last = start
+        var moved = false
         while let event = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
             last = convert(event.locationInWindow, from: nil)
+            if abs(last.y - start.y) > 3 { moved = true }
             if event.type == .leftMouseUp { break }
             run { dropLine = $0.dropTarget(at: last)?.y }
             autoscroll(with: event)
         }
         dropLine = nil
-        run { $0.finishDrag(span.id, at: last) }
+        if moved { run { $0.finishDrag(span.id, at: last) } } // Простое нажатие на ручку ничего не двигает.
     }
 
     // MARK: Единое меню

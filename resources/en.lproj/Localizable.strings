@@ -610,3 +610,5 @@
 "Переместить вниз" = "Move Down";
 "Копировать ссылку на блок" = "Copy Link to Block";
 "Сменить" = "Change";
+"Эта таблица создана более новой версией и здесь не редактируется." = "This table was created by a newer version and cannot be edited here.";
+"Можно добавить только обычный файл." = "Only regular files can be added.";

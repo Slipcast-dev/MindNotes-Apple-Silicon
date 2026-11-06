@@ -180,8 +180,8 @@ final class ShellModel: ObservableObject {
         panel.allowedContentTypes = [.image]
         panel.prompt = L("Выбрать")
         guard panel.runModal() == .OK, let url = panel.url, let owner = store else { return done(nil) }
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        guard size <= 64 * 1024 * 1024 else {
+                let size = (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                guard size <= 64 * 1024 * 1024 else {
             errorMessage = L("Изображение слишком большое: до 64 МБ.")
             return done(nil)
         }
@@ -441,8 +441,8 @@ final class ShellModel: ObservableObject {
         editor?.controller.onOpenLink = { [weak self] page, block in self?.followLink(to: page, block: block) }
         editor?.controller.addAttachment = { [weak self] url in
             guard let store = self?.store else { throw WorkspaceError.storage(code: 0, detail: "пространство закрыто") }
-            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            guard size <= 512 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
+                        let size = (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                        guard size <= 512 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
             return try await store.addAsset(copying: url, now: SystemClock().nowMillis())
         }
         editor?.controller.assetURL = { [weak self] id in self?.assetFileURL(id) }

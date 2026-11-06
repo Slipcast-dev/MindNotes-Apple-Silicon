@@ -14,8 +14,20 @@ enum AtomData {
                       plain: asset.originalName)
     }
 
-    static func tableJSON(_ rows: [[String]]) -> String {
-        json(["rows": .array(rows.map { .array($0.map { .string($0) }) })])
+    /// Прочие поля блока сохраняются: их могла записать более новая версия.
+    static func tableJSON(_ rows: [[String]], keeping base: [String: JSONValue] = [:]) -> String {
+        var object = base
+        object["rows"] = .array(rows.map { .array($0.map { .string($0) }) })
+        return json(object)
+    }
+
+    /// Таблицу можно править, только если её формат понятен этой версии.
+    static func isEditableTable(_ block: Block) -> Bool {
+        guard block.type == .table, block.contentVersion <= 1, case .array(let rows)? = block.atomJSON["rows"] else { return false }
+        return rows.allSatisfy { row in
+            guard case .array(let cells) = row else { return false }
+            return cells.allSatisfy { if case .string = $0 { return true } else { return false } }
+        }
     }
 
     static func tablePlain(_ rows: [[String]]) -> String { rows.flatMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ") }

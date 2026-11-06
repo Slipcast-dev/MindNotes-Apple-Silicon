@@ -108,7 +108,12 @@ extension SQLiteWorkspace {
     // MARK: Управляемые файлы
 
     /// Копирует файл в `assets/`: сначала временный файл и атомарный перенос, затем запись в базе (FR-08).
-    func addAsset(copying source: URL, id: UUID = UUID(), now: Int64) async throws -> AssetRecord {
+    func addAsset(copying given: URL, id: UUID = UUID(), now: Int64) async throws -> AssetRecord {
+        // Копируется цель ссылки, а не сама ссылка; каталоги и особые файлы не принимаются (FR-08).
+        let source = given.resolvingSymlinksInPath()
+        guard (try source.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true else {
+            throw WorkspaceError.storage(code: 0, detail: NSLocalizedString("Можно добавить только обычный файл.", comment: ""))
+        }
         let cleaned = source.pathExtension.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
         let ext = cleaned.count <= 10 ? cleaned : ""
         let hex = String(id.lowercasedString.prefix(2))
@@ -136,7 +141,7 @@ extension SQLiteWorkspace {
             try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fm.moveItem(at: tmp, to: target)
             let sha = hash.finalize().map { String(format: "%02x", $0) }.joined()
-            return AssetRecord(id: id, relPath: rel, originalName: source.lastPathComponent, mime: nil, byteSize: size, sha256: sha, createdAt: now)
+            return AssetRecord(id: id, relPath: rel, originalName: given.lastPathComponent, mime: nil, byteSize: size, sha256: sha, createdAt: now)
         }.value
         do {
             try await writer.run { db in

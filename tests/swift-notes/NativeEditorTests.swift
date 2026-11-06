@@ -1054,3 +1054,62 @@ func runAttachmentTests() async {
         }
     }
 }
+
+@MainActor
+func runAttachmentReviewTests() async {
+    _ = NSApplication.shared
+    await test("Ревью вложений: исполняемые файлы, таблица будущей версии, символическая ссылка, каталог") {
+        check(BlockEditorController.isExecutable(URL(fileURLWithPath: "/a/запуск.command")))
+        check(BlockEditorController.isExecutable(URL(fileURLWithPath: "/a/Программа.APP")))
+        check(BlockEditorController.isExecutable(URL(fileURLWithPath: "/a/run.sh")))
+        check(!BlockEditorController.isExecutable(URL(fileURLWithPath: "/a/отчёт.pdf")))
+        check(!BlockEditorController.isExecutable(URL(fileURLWithPath: "/a/фото.png")))
+
+        let page = UUID()
+        let extra = #"{"format":"будущее","rows":[["a"]]}"#
+        let keep = Block(id: UUID(), pageID: page, parentID: nil, sortKey: "a0", type: .table, contentVersion: 1, contentJSON: extra, plainText: "a", createdAt: 1, updatedAt: 1)
+        check(AtomData.isEditableTable(keep))
+        let written = AtomData.tableJSON([["б"]], keeping: keep.atomJSON)
+        check(written.contains("будущее") && written.contains("б"), "неизвестное поле сохранено: \(written)")
+        let newer = Block(id: UUID(), pageID: page, parentID: nil, sortKey: "a0", type: .table, contentVersion: 9, contentJSON: extra, plainText: "", createdAt: 1, updatedAt: 1)
+        check(!AtomData.isEditableTable(newer), "более новая версия")
+        let odd = Block(id: UUID(), pageID: page, parentID: nil, sortKey: "a0", type: .table, contentVersion: 1, contentJSON: #"{"rows":[[1,{"a":2}]]}"#, plainText: "", createdAt: 1, updatedAt: 1)
+        check(!AtomData.isEditableTable(odd), "непонятные ячейки")
+
+        try await withTempDir { dir in
+            let ws = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "A")
+            let real = dir.appendingPathComponent("настоящий.txt")
+            try Data("данные".utf8).write(to: real)
+            let link = dir.appendingPathComponent("ссылка.txt")
+            try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+            let asset = try await ws.addAsset(copying: link, now: 1)
+            checkEqual(asset.originalName, "ссылка.txt")
+            let copy = try await ws.assetURL(asset.id)
+            let attrs = try FileManager.default.attributesOfItem(atPath: copy!.path)
+            checkEqual(attrs[.type] as? FileAttributeType, .typeRegular, "копируется цель, а не ссылка")
+            checkEqual(try Data(contentsOf: copy!), Data("данные".utf8))
+            await checkThrows("каталог") { try await ws.addAsset(copying: dir, now: 1) }
+            ws.close()
+        }
+    }
+
+    await test("Ревью вложений: бросок на то же место и вставка в конце страницы одной правкой") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "а"), (.paragraph, "б")])
+            let before = r.doc
+            let b = r.doc.blocks[1].id
+            r.tv.layoutManager?.ensureLayout(for: r.tv.textContainer!)
+            let rect = r.controller.handleRect(for: r.controller.spans[1])!
+            r.controller.finishDrag(b, at: NSPoint(x: 30, y: rect.minY + 1))
+            checkEqual(r.doc, before, "то же место")
+            check(!r.controller.canUndo, "нет шага отмены")
+            r.caret(1, 1)
+            r.controller.insertFragments([AtomData.table([["x"]])])
+            checkEqual(r.types.map(\.rawValue), ["paragraph", "paragraph", "table", "paragraph"], "ниже строка для ввода")
+            r.checkSync("вставка")
+            r.tv.undo(nil)
+            checkEqual(r.doc, before, "одна правка отмены")
+            try await r.close()
+        }
+    }
+}

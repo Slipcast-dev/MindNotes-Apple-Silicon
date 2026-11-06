@@ -159,12 +159,16 @@ final class DividerCell: NSTextAttachmentCell {
 /// Изображение на ширину текста.
 final class ImageBlockCell: NSTextAttachmentCell {
     private let picture: NSImage?
+    private let loading: Bool
+    private let soft: NSColor
     private let name: String
     private let ink: NSColor
     private let line: NSColor
 
-    init(picture: NSImage?, name: String, ink: NSColor, line: NSColor) {
+    init(picture: NSImage?, loading: Bool, name: String, ink: NSColor, line: NSColor, soft: NSColor) {
         self.picture = picture
+        self.loading = loading
+        self.soft = soft
         self.name = name
         self.ink = ink
         self.line = line
@@ -182,6 +186,11 @@ final class ImageBlockCell: NSTextAttachmentCell {
 
     override func draw(withFrame frame: NSRect, in view: NSView?) {
         guard let picture else {
+            if loading {
+                soft.setFill()
+                NSBezierPath(roundedRect: frame, xRadius: 9, yRadius: 9).fill()
+                return
+            }
             line.setStroke()
             NSBezierPath(roundedRect: frame.insetBy(dx: 0.5, dy: 0.5), xRadius: 9, yRadius: 9).stroke()
             let text = String(format: NSLocalizedString("Изображение недоступно: %@", comment: ""), name) as NSString
