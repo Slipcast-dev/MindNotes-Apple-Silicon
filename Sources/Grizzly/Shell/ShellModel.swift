@@ -26,14 +26,13 @@ struct KnownWorkspace: Codable, Equatable, Identifiable {
 final class ShellModel: ObservableObject {
     @Published var section: ShellSection = .welcome {
         didSet {
-            guard oldValue != section, !restoringHistory else { return }
-            if oldValue != .welcome { backStack.append(oldValue) }
+            guard oldValue != section, oldValue != .welcome, section != .welcome else { return }
+            backStack.append(oldValue)
             forwardStack = []
         }
     }
     @Published private(set) var backStack: [ShellSection] = []
     @Published private(set) var forwardStack: [ShellSection] = []
-    private var restoringHistory = false
     @Published var showsSearch = false
     @Published private(set) var backlinks: [Backlink] = []
     @Published private(set) var workspaceName = ""
@@ -345,6 +344,8 @@ final class ShellModel: ObservableObject {
             let loadedPageTags = try await store.pageTags()
             try await closeSession()
             self.store = store
+            backStack = [] // История относится к прежнему пространству.
+            forwardStack = []
             self.session = session
             workspaceName = name
             imageCache = [:]
@@ -372,6 +373,8 @@ final class ShellModel: ObservableObject {
         enqueue {
             try await self.closeSession()
             UserDefaults.standard.removeObject(forKey: self.lastWorkspaceKey)
+            self.backStack = []
+            self.forwardStack = []
             self.section = .welcome
         }
     }
@@ -449,30 +452,41 @@ final class ShellModel: ObservableObject {
     // MARK: История переходов
 
     func goBack() {
-        guard let target = backStack.popLast() else { return }
-        forwardStack.append(section)
-        restore(target)
+        enqueue {
+            guard let target = self.backStack.last else { return }
+            let current = self.section
+            var back = self.backStack
+            back.removeLast()
+            let forward = self.forwardStack + [current]
+            try await self.transition(to: target)
+            // Стеки меняются только после удачного перехода.
+            self.backStack = back
+            self.forwardStack = forward
+        }
     }
 
     func goForward() {
-        guard let target = forwardStack.popLast() else { return }
-        backStack.append(section)
-        restore(target)
+        enqueue {
+            guard let target = self.forwardStack.last else { return }
+            let current = self.section
+            var forward = self.forwardStack
+            forward.removeLast()
+            let back = self.backStack + [current]
+            try await self.transition(to: target)
+            self.backStack = back
+            self.forwardStack = forward
+        }
     }
 
-    private func restore(_ target: ShellSection) {
-        enqueue {
-            self.restoringHistory = true
-            defer { self.restoringHistory = false }
-            if case .page(let id) = target {
-                // Страница могла уйти в корзину: на неё не переходим.
-                if self.pages.contains(where: { $0.id == id }) { try await self.show(id) } else { self.section = .home }
-            } else {
-                try await self.session?.closeEditor()
-                self.editor = nil
-                self.section = target
-            }
+    private func transition(to target: ShellSection) async throws {
+        // Страница могла уйти в корзину: на неё не переходим.
+        if case .page(let id) = target, pages.contains(where: { $0.id == id }) {
+            try await show(id)
+            return
         }
+        try await session?.closeEditor()
+        editor = nil
+        if case .page = target { section = .home } else { section = target }
     }
 
     // MARK: Поиск и ссылки
@@ -501,7 +515,7 @@ final class ShellModel: ObservableObject {
         if pages.contains(where: { $0.id == id }) {
             openPage(id)
         } else {
-            notice = L("Страница, на которую ведёт ссылка, в корзине.")
+            notice = L("Страница, на которую ведёт ссылка, в корзине или удалена.")
         }
     }
 

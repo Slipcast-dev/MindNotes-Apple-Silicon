@@ -2,45 +2,70 @@ import Foundation
 
 /// Поисковый индекс и ссылки. Обновляется в транзакции записи; ошибка откатывает правку вместе с ним.
 enum SearchIndex {
+    // Строка индекса адресуется rowid: столбцы page_id и block_id не индексируются, и удаление по ним сканировало бы весь индекс.
+    // Блок: rowid его строки в blocks. Заголовок страницы: отрицательный rowid страницы.
+
+    private static func insert(_ db: SQLiteConnection, rowid: Int64, page: UUID, block: UUID?, text: String) throws {
+        try db.run("INSERT INTO search_index(rowid, page_id, block_id, text) VALUES(?,?,?,?)",
+                   [.int(rowid), SQLValue(page), block.map { SQLValue($0) } ?? .text(""), .text(SearchText.normalize(text))])
+    }
+
     static func updateBlock(_ db: SQLiteConnection, id: UUID, page: UUID, text: String, targets: Set<UUID>) throws {
-        try db.run("DELETE FROM search_index WHERE block_id=?", [SQLValue(id)])
-        if !text.isEmpty {
-            try db.run("INSERT INTO search_index(page_id, block_id, text) VALUES(?,?,?)", [SQLValue(page), SQLValue(id), .text(SearchText.normalize(text))])
-        }
+        guard let rowid = try db.scalarInt("SELECT rowid FROM blocks WHERE id=?", [SQLValue(id)]) else { return }
+        try db.run("DELETE FROM search_index WHERE rowid=?", [.int(rowid)])
+        if !text.isEmpty { try insert(db, rowid: rowid, page: page, block: id, text: text) }
         try db.run("DELETE FROM page_links WHERE block_id=?", [SQLValue(id)])
         for target in targets {
             try db.run("INSERT OR IGNORE INTO page_links(block_id, from_page, to_page) VALUES(?,?,?)", [SQLValue(id), SQLValue(page), SQLValue(target)])
         }
     }
 
+    /// Вызывается до удаления блока. Потомки уйдут каскадом, поэтому их строки убираются здесь же.
     static func removeBlock(_ db: SQLiteConnection, id: UUID) throws {
-        try db.run("DELETE FROM search_index WHERE block_id=?", [SQLValue(id)])
+        let rowids = try db.query("""
+        WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT b.id FROM blocks b JOIN sub ON b.parent_id = sub.id)
+        SELECT rowid FROM blocks WHERE id IN (SELECT id FROM sub)
+        """, [SQLValue(id)]) { $0.int(0) }
+        for rowid in rowids { try db.run("DELETE FROM search_index WHERE rowid=?", [.int(rowid)]) }
     }
 
-    /// Заголовок хранится строкой индекса с пустым block_id.
     static func updateTitle(_ db: SQLiteConnection, page: UUID, title: String) throws {
-        try db.run("DELETE FROM search_index WHERE page_id=? AND block_id=''", [SQLValue(page)])
-        try db.run("INSERT INTO search_index(page_id, block_id, text) VALUES(?,'',?)", [SQLValue(page), .text(SearchText.normalize(title))])
+        guard let rowid = try db.scalarInt("SELECT rowid FROM pages WHERE id=?", [SQLValue(page)]) else { return }
+        try db.run("DELETE FROM search_index WHERE rowid=?", [.int(-rowid)])
+        try insert(db, rowid: -rowid, page: page, block: nil, text: title)
     }
 
+    /// Вызывается до удаления страницы: её блоки уйдут каскадом.
     static func removePage(_ db: SQLiteConnection, page: UUID) throws {
-        try db.run("DELETE FROM search_index WHERE page_id=?", [SQLValue(page)])
+        let blocks = try db.query("SELECT rowid FROM blocks WHERE page_id=?", [SQLValue(page)]) { $0.int(0) }
+        for rowid in blocks { try db.run("DELETE FROM search_index WHERE rowid=?", [.int(rowid)]) }
+        if let rowid = try db.scalarInt("SELECT rowid FROM pages WHERE id=?", [SQLValue(page)]) {
+            try db.run("DELETE FROM search_index WHERE rowid=?", [.int(-rowid)])
+        }
     }
 
-    /// Полная перестройка: индекс нигде не считается источником истины.
+    /// Полная перестройка порциями: индекс нигде не считается источником истины.
     static func rebuild(_ db: SQLiteConnection) throws {
         try db.execute("DELETE FROM search_index; DELETE FROM page_links;")
-        let pages = try db.query("SELECT id, title FROM pages") { ($0.uuid(0), $0.text(1)) }
-        for (id, title) in pages {
-            if let id { try updateTitle(db, page: id, title: title) }
+        let pages = try db.query("SELECT rowid, id, title FROM pages") { ($0.int(0), $0.uuid(1), $0.text(2)) }
+        for (rowid, id, title) in pages {
+            if let id { try insert(db, rowid: -rowid, page: id, block: nil, text: title) }
         }
-        let rows = try db.query("SELECT id, page_id, parent_id, sort_key, type, content_v, content_json, plain_text, created_at, updated_at FROM blocks") { r -> Block? in
-            guard let bid = r.uuid(0), let pid = r.uuid(1) else { return nil }
-            return Block(id: bid, pageID: pid, parentID: r.uuid(2), sortKey: r.text(3), type: BlockType(rawValue: r.text(4)),
-                         contentVersion: Int(r.int(5)), contentJSON: r.text(6), plainText: r.text(7), createdAt: r.int(8), updatedAt: r.int(9))
-        }
-        for b in rows.compactMap({ $0 }) {
-            try updateBlock(db, id: b.id, page: b.pageID, text: b.plainText, targets: PageLink.targets(of: b))
+        var last: Int64 = 0
+        while true {
+            let rows = try db.query("""
+            SELECT rowid, id, page_id, type, content_v, content_json, plain_text FROM blocks WHERE rowid > ? ORDER BY rowid LIMIT 2000
+            """, [.int(last)]) { ($0.int(0), $0.uuid(1), $0.uuid(2), $0.text(3), $0.int(4), $0.text(5), $0.text(6)) }
+            guard let end = rows.last?.0 else { return }
+            last = end
+            for (rowid, id, page, type, version, json, text) in rows {
+                guard let id, let page else { continue }
+                if !text.isEmpty { try insert(db, rowid: rowid, page: page, block: id, text: text) }
+                let block = Block(id: id, pageID: page, parentID: nil, sortKey: "", type: BlockType(rawValue: type), contentVersion: Int(version), contentJSON: json, plainText: text, createdAt: 0, updatedAt: 0)
+                for target in PageLink.targets(of: block) {
+                    try db.run("INSERT OR IGNORE INTO page_links(block_id, from_page, to_page) VALUES(?,?,?)", [SQLValue(id), SQLValue(page), SQLValue(target)])
+                }
+            }
         }
     }
 }
@@ -117,6 +142,7 @@ extension SQLiteWorkspace {
     func duplicatePage(_ id: UUID, title: String, ids: IDGenerator, now: Int64) async throws -> UUID {
         try await writer.run { db in
             try db.transaction {
+                try db.execute("PRAGMA defer_foreign_keys=ON") // Блок может быть вставлен раньше родителя.
                 let subtree = try db.query("""
                 WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT p.id FROM pages p JOIN sub ON p.parent_id = sub.id WHERE p.deleted_at IS NULL)
                 SELECT id FROM sub

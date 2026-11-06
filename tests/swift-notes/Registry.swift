@@ -5,6 +5,7 @@ func runAllNotesTests() async {
     await runTagAndLookTests()
     await runAssetDeleteTests()
     await runSearchTests()
+    await runSearchReviewTests()
     await runSaveTests()
     await runCrashTests()
     await runEditorTests()

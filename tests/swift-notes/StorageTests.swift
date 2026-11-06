@@ -608,3 +608,59 @@ func runSearchTests() async {
         }
     }
 }
+
+func runSearchReviewTests() async {
+    await test("Ревью поиска: глубокая вложенность при дублировании, каскад, окончательное удаление, скорость") {
+        try await withTempDir { dir in
+            let ws = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "A")
+            let p = try await ws.createPage(parent: nil, title: "Глубокая", id: UUID(), now: 1)
+            // Родитель с большим UUID, чем у потомка: порядок чтения не должен ломать вставку.
+            let top = UUID(uuidString: "FFFFFFFF-0000-0000-0000-000000000001")!, mid = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!, leaf = UUID(uuidString: "77777777-0000-0000-0000-000000000003")!
+            var b = SaveBatch()
+            b.upserts[top] = Block(id: top, pageID: p.id, sortKey: "a0", content: BlockContent(text: "корень слово"), createdAt: 1)
+            b.upserts[mid] = Block(id: mid, pageID: p.id, parentID: top, sortKey: "a0", content: BlockContent(text: "середина слово"), createdAt: 1)
+            b.upserts[leaf] = Block(id: leaf, pageID: p.id, parentID: mid, sortKey: "a0", content: BlockContent(text: "лист слово"), createdAt: 1)
+            try await ws.commit(b)
+            let copy = try await ws.duplicatePage(p.id, title: "Копия", ids: RandomIDs(), now: 2)
+            let copied = try await ws.blocks(ofPage: copy)
+            let cTop = copied.first { $0.plainText == "корень слово" }!, cMid = copied.first { $0.plainText == "середина слово" }!, cLeaf = copied.first { $0.plainText == "лист слово" }!
+            checkEqual(cMid.parentID, cTop.id)
+            checkEqual(cLeaf.parentID, cMid.id, "внук под копией родителя")
+            var del = SaveBatch()
+            del.deletes = [top]
+            try await ws.commit(del)
+            let stale = try ws.maintenanceWrite { try $0.scalarInt("SELECT count(*) FROM search_index WHERE search_index MATCH '\"лист\"*'") }
+            checkEqual(stale, 1, "строки каскадно удалённых потомков убраны, осталась копия")
+            let batch = UUID()
+            try await ws.trashPage(copy, batch: batch, now: 3)
+            try await ws.purgeTrash(batch: batch)
+            let none = try ws.maintenanceWrite { try $0.scalarInt("SELECT count(*) FROM search_index WHERE search_index MATCH '\"лист\"*'") }
+            checkEqual(none, 0, "окончательное удаление чистит индекс")
+            ws.close()
+        }
+        try await withTempDir { dir in
+            let ws = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "A")
+            let p = try await ws.createPage(parent: nil, title: "Большая", id: UUID(), now: 1)
+            var b = SaveBatch()
+            for i in 0..<5_000 {
+                let id = UUID()
+                b.upserts[id] = Block(id: id, pageID: p.id, sortKey: "a\(i)", content: BlockContent(text: "строка номер \(i)"), createdAt: 1)
+            }
+            let t0 = Date()
+            try await ws.commit(b)
+            let t1 = Date()
+            try await ws.rebuildSearchIndex()
+            let t2 = Date()
+            let one = b.upserts.values.first!
+            var edit = one
+            edit.setContent(BlockContent(text: "правка"))
+            var small = SaveBatch()
+            small.upserts[edit.id] = edit
+            try await ws.commit(small)
+            let t3 = Date()
+            print(String(format: "index: insert5k=%.2fс rebuild=%.2fс edit=%.1fмс", t1.timeIntervalSince(t0), t2.timeIntervalSince(t1), t3.timeIntervalSince(t2) * 1000))
+            check(t3.timeIntervalSince(t2) < 1, "правка не сканирует весь индекс")
+            ws.close()
+        }
+    }
+}

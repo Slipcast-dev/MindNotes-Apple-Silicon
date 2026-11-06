@@ -341,8 +341,8 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
                 try db.execute("PRAGMA defer_foreign_keys=ON") // Родитель может войти в пакет позже потомка.
                 let indexed = try Self.indexExists(db)
                 for id in batch.deletes {
-                    try db.run("DELETE FROM blocks WHERE id=?", [SQLValue(id)])
                     if indexed { try SearchIndex.removeBlock(db, id: id) }
+                    try db.run("DELETE FROM blocks WHERE id=?", [SQLValue(id)])
                 }
                 for (b, json) in rows {
                     try db.run("""
