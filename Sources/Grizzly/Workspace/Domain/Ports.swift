@@ -1,0 +1,87 @@
+import Foundation
+
+/// Источник времени; в тестах подменяется, бизнес-логика не зависит от реальных часов.
+protocol WallClock {
+    func nowMillis() -> Int64
+}
+
+struct SystemClock: WallClock {
+    func nowMillis() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
+}
+
+protocol IDGenerator {
+    func next() -> UUID
+}
+
+struct RandomIDs: IDGenerator {
+    func next() -> UUID { UUID() }
+}
+
+/// Отмена запланированной записи.
+protocol ScheduledTask {
+    func cancel()
+}
+
+/// Планировщик автосохранения; в тестах время двигается вручную.
+protocol SaveScheduler {
+    @discardableResult
+    func schedule(afterMillis: Int64, _ action: @escaping @MainActor () -> Void) -> ScheduledTask
+}
+
+/// Пакет изменений одной транзакции: последняя правка каждого блока и заголовки страниц.
+struct SaveBatch: Equatable {
+    var upserts: [UUID: Block] = [:]
+    var deletes: Set<UUID> = []
+    var touchedPages: Set<UUID> = []
+
+    var isEmpty: Bool { upserts.isEmpty && deletes.isEmpty && touchedPages.isEmpty }
+
+    /// Новое важнее: повторная правка заменяет старую, удаление отменяет запись.
+    mutating func merge(_ newer: SaveBatch) {
+        for id in newer.deletes { upserts[id] = nil; deletes.insert(id) }
+        for (id, block) in newer.upserts { upserts[id] = block; deletes.remove(id) }
+        touchedPages.formUnion(newer.touchedPages)
+    }
+}
+
+/// Приёмник пакетов. Возврат без ошибки означает, что транзакция зафиксирована.
+protocol BlockSink: AnyObject {
+    func commit(_ batch: SaveBatch) async throws
+}
+
+/// Операции над страницами и блоками.
+protocol WorkspaceStore: BlockSink {
+    func workspaceID() async throws -> UUID
+    func allPages() async throws -> [Page]
+    func page(_ id: UUID) async throws -> Page?
+    func createPage(parent: UUID?, title: String, id: UUID, now: Int64) async throws -> Page
+    func updatePage(_ page: Page) async throws
+    /// Перемещение транзакционно; цикл запрещён.
+    func movePage(_ id: UUID, toParent parent: UUID?, afterSibling: UUID?, now: Int64) async throws
+    func blocks(ofPage id: UUID) async throws -> [Block]
+    func markOpened(_ id: UUID, now: Int64) async throws
+    func saveRevision(pageID: UUID, reason: String, blocks: [Block], id: UUID, now: Int64) async throws -> Revision?
+    func revisions(ofPage id: UUID) async throws -> [Revision]
+    func revisionBlocks(_ revisionID: UUID) async throws -> [Block]
+    func close()
+}
+
+/// Согласованный снимок базы и его проверка. Реализация в Persistence: слой Backup не знает об SQLite.
+protocol DatabaseSnapshotter {
+    /// Снимает копию работающей базы средствами SQLite; обычное копирование файла при WAL некорректно.
+    func snapshotDatabase(to url: URL) throws
+}
+
+struct SnapshotInfo: Equatable {
+    var workspaceID: UUID
+    var schemaVersion: Int
+    var assets: [AssetRecord]
+}
+
+protocol SnapshotInspector {
+    /// Проверяет целостность копии и читает из неё сведения. Бросает ошибку, если копия неверна.
+    func inspect(_ databaseFile: URL) throws -> SnapshotInfo
+    /// Назначает восстановленному пространству новый идентификатор, старый сохраняет в `restored_from`.
+    func assignNewIdentity(_ databaseFile: URL, newID: UUID, now: Int64) throws
+    var supportedSchemaVersion: Int { get }
+}
