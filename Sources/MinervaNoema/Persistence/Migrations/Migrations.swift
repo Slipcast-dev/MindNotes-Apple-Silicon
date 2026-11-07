@@ -11,9 +11,25 @@ enum Migrations {
     static let applicationID: Int64 = 0x47525A4E // "GRZN"
 
     /// Полный список миграций. Изменять уже выпущенные миграции нельзя: только добавлять новые и fixture прошлой версии.
-    static let all: [Migration] = [v1, v2, v3, v4]
+    static let all: [Migration] = [v1, v2, v3, v4, v5]
 
     static var supportedVersion: Int { all.last?.version ?? 0 }
+
+    private static let v5 = Migration(version: 5, name: "шаблоны") { db in
+        try db.execute(schemaV5)
+    }
+
+    /// Шаблон — скрытая копия страницы: `deleted_at` задан, `trash_batch_id` пуст, поэтому страница не видна нигде и не считается корзиной.
+    static let schemaV5 = """
+    CREATE TABLE templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        root_page_id TEXT NOT NULL UNIQUE REFERENCES pages(id) ON DELETE CASCADE,
+        database_id TEXT REFERENCES databases(id) ON DELETE CASCADE,
+        created_at INTEGER NOT NULL
+    );
+    CREATE INDEX templates_db ON templates(database_id);
+    """
 
     private static let v4 = Migration(version: 4, name: "базы данных") { db in
         try db.execute(schemaV4)

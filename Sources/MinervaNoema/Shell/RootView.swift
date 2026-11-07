@@ -96,6 +96,7 @@ struct NotesLayout: View {
         case .settings: SettingsScreen()
         case .files: FilesScreen()
         case .trash: TrashScreen()
+        case .templates: TemplatesScreen()
         case .tag(let id): TagScreen(id: id).id(id)
         default: HomeScreen().background(Tokens.paper)
         }
@@ -137,6 +138,7 @@ struct CrumbBar: View {
         case .backups: return L("Резервные копии")
         case .settings: return L("Настройки")
         case .trash: return L("Корзина")
+        case .templates: return L("Шаблоны")
         case .tag(let id): return shell.tags.first { $0.id == id }?.name ?? L("Тег")
         case .files: return L("Файлы")
         default: return L("Главная")
@@ -176,6 +178,7 @@ struct CrumbBar: View {
                         Button("Новая подстраница") { shell.createPage(parent: id) }
                     }
                     Button("Дублировать страницу") { shell.duplicatePage(id) }
+                    if !shell.isDatabase(id) { Button("Сохранить как шаблон…") { shell.saveAsTemplate(id) } }
                     Divider()
                     Button("Удалить страницу") { shell.trash(id) }
                 } label: { Image(systemName: "ellipsis") }

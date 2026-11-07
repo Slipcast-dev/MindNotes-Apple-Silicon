@@ -39,6 +39,266 @@ private func ruleState(_ rule: FilterRule) -> DatabaseViewState {
 }
 
 func runDatabaseTests() async {
+    await test("Представления: перенос даты в календаре не сдвигает день и сохраняет длину (AT-07)") {
+        try await withWorkspace { w in
+            let d = try await makeDatabase(w)
+            let r = try await record(w, d, "Задача")
+            let date = prop(d, .date)
+            let start = LocalDate(year: 2026, month: 3, day: 7)!, target = LocalDate(year: 2026, month: 3, day: 8)!
+            let saved = NSTimeZone.default
+            defer { NSTimeZone.default = saved }
+            for zone in ["Pacific/Kiritimati", "America/New_York", "Pacific/Pago_Pago", "Europe/Moscow"] {
+                NSTimeZone.default = TimeZone(identifier: zone)!
+                let span = DateValue(start: .day(start), end: .day(start.adding(days: 3)))
+                let moved = span.moved(toDay: target)
+                checkEqual(moved, DateValue(start: .day(target), end: .day(LocalDate(year: 2026, month: 3, day: 11)!)), zone)
+                try await w.setValue(pages: [r], property: date.id, value: .date(moved), now: 2)
+                checkEqual(try await w.recordValues(page: r, database: d)[date.id], .date(moved), zone)
+                checkEqual(try await titles(w, d, ruleState(FilterRule(property: date.id, op: .equals, value: "2026-03-08"))), ["Задача"], "таблица видит новую дату: \(zone)")
+                checkEqual(try await titles(w, d, ruleState(FilterRule(property: date.id, op: .equals, value: "2026-03-07"))), [], "старый день пуст: \(zone)")
+            }
+            // Момент: время суток и пояс сохраняются даже через переход на летнее время.
+            let tz = TimeZone(identifier: "America/New_York")!
+            var cal = Calendar(identifier: .gregorian); cal.timeZone = tz
+            let ms = Int64(cal.date(from: DateComponents(year: 2026, month: 3, day: 7, hour: 9, minute: 30))!.timeIntervalSince1970 * 1000)
+            let moment = DateValue(start: .moment(ms: ms, zone: tz.identifier)).moved(toDay: LocalDate(year: 2026, month: 3, day: 9)!)
+            checkEqual(moment.start.localText, "2026-03-09T09:30")
+            checkEqual(moment.start.localDay, LocalDate(year: 2026, month: 3, day: 9)!)
+            // Карточку диапазона взяли за средний день: сдвиг считается от него.
+            let wide = DateValue(start: .day(LocalDate(year: 2026, month: 5, day: 10)!), end: .day(LocalDate(year: 2026, month: 5, day: 14)!))
+            let grabbed = LocalDate(year: 2026, month: 5, day: 12)!, dropped = LocalDate(year: 2026, month: 5, day: 20)!
+            checkEqual(wide.moved(byDays: grabbed.days(to: dropped)), DateValue(start: .day(LocalDate(year: 2026, month: 5, day: 18)!), end: .day(LocalDate(year: 2026, month: 5, day: 22)!)))
+            // Счёт дней через конец февраля високосного года.
+            checkEqual(LocalDate(year: 2028, month: 2, day: 28)!.adding(days: 2), LocalDate(year: 2028, month: 3, day: 1)!)
+            checkEqual(LocalDate(year: 2026, month: 11, day: 7)!.weekdayFromMonday, 5, "суббота")
+            checkEqual(LocalDate(year: 2026, month: 12, day: 15)!.addingMonths(1).firstOfMonth, LocalDate(year: 2027, month: 1, day: 1)!)
+        }
+    }
+
+    await test("Представления: одна запись во всех видах, группы не теряют записи (AT-06)") {
+        try await withWorkspace { w in
+            let d = try await makeDatabase(w)
+            let status = prop(d, .status)
+            let a = try await record(w, d, "А"), b = try await record(w, d, "Б")
+            _ = try await record(w, d, "Без статуса")
+            try await w.setValue(pages: [a], property: status.id, value: .options([status.options[0].id]), now: 2)
+            try await w.setValue(pages: [b], property: status.id, value: .options([status.options[1].id]), now: 2)
+            let state = DatabaseViewState()
+            let groups = RecordGroup.groups(for: status)
+            checkEqual(groups.count, 4, "три варианта и пустая группа")
+            func column(_ g: RecordGroup) async throws -> [String] { try await titles(w, d, state.narrowed(by: [g.rule])) }
+            checkEqual(try await column(groups[0]), ["А"])
+            checkEqual(try await column(groups[3]), ["Без статуса"], "запись без значения видна")
+            // Перенос карточки меняет значение, таблица видит его сразу.
+            let moved = groups[2].value(replacing: .options([status.options[0].id]), from: groups[0], type: .status)
+            try await w.setValue(pages: [a], property: status.id, value: moved, now: 3)
+            checkEqual(try await column(groups[0]), [])
+            checkEqual(try await column(groups[2]), ["А"])
+            let row = try await w.queryRecords(database: d, state: state, limit: 10, offset: 0).rows.first { $0.id == a }
+            checkEqual(row?.values[status.id], .options([status.options[2].id]), "таблица видит новый статус")
+            checkEqual(groups[3].value(replacing: moved, from: groups[2], type: .status), nil, "в пустую группу — очистка")
+
+            // Группа сужает текущий фильтр, а не заменяет его.
+            let title = prop(d, .title)
+            var filtered = DatabaseViewState()
+            filtered.filter.items = [.rule(FilterRule(property: title.id, op: .contains, value: "без"))]
+            checkEqual(try await titles(w, d, filtered.narrowed(by: [groups[3].rule])), ["Без статуса"])
+            checkEqual(try await titles(w, d, filtered.narrowed(by: [groups[2].rule])), [])
+
+            // Множественный выбор: меняется только вариант исходной колонки.
+            let m = UUID()
+            try await w.addProperty(database: d.id, name: "Метки", type: .multiSelect, id: m, now: 1)
+            let o1 = UUID(), o2 = UUID(), o3 = UUID()
+            try await w.addOption(property: m, name: "1", color: nil, id: o1)
+            try await w.addOption(property: m, name: "2", color: nil, id: o2)
+            try await w.addOption(property: m, name: "3", color: nil, id: o3)
+            let withMulti = try await reload(w, d)
+            guard let multi = withMulti.property(m) else { return check(false, "свойство") }
+            let mg = RecordGroup.groups(for: multi)
+            checkEqual(mg[2].value(replacing: .options([o1, o2]), from: mg[0], type: .multiSelect), .options([o2, o3]))
+            checkEqual(mg[1].value(replacing: .options([o1, o2]), from: mg[0], type: .multiSelect), .options([o2]), "без дубля")
+            try await w.setValue(pages: [a], property: m, value: .options([o1, o2]), now: 4)
+            checkEqual(try await titles(w, withMulti, state.narrowed(by: [mg[0].rule])), ["А"])
+            checkEqual(try await titles(w, withMulti, state.narrowed(by: [mg[1].rule])), ["А"], "запись в обеих колонках")
+
+            // Флажок: запись без значения в группе «не отмечено».
+            let f = UUID()
+            try await w.addProperty(database: d.id, name: "Важно", type: .checkbox, id: f, now: 1)
+            let withFlag = try await reload(w, d)
+            guard let flag = withFlag.property(f) else { return check(false, "свойство") }
+            let fg = RecordGroup.groups(for: flag)
+            checkEqual(fg.count, 2)
+            try await w.setValue(pages: [b], property: f, value: .checkbox(true), now: 5)
+            checkEqual(try await titles(w, withFlag, state.narrowed(by: [fg[1].rule])).count, 2, "без значения — не отмечено")
+            checkEqual(try await titles(w, withFlag, state.narrowed(by: [fg[0].rule])), ["Б"])
+            checkEqual(fg[0].value(replacing: nil, from: fg[1], type: .checkbox), .checkbox(true))
+        }
+    }
+
+    await test("Представления: состояние группировки и дат устойчиво") {
+        try await withWorkspace { w in
+            var d = try await makeDatabase(w)
+            let status = prop(d, .status), date = prop(d, .date), title = prop(d, .title)
+            var state = DatabaseViewState()
+            checkEqual(state.groupProperty(d.properties, kind: DatabaseView.tableKind)?.id, nil, "таблица без группировки")
+            checkEqual(state.groupProperty(d.properties, kind: DatabaseView.boardKind)?.id, status.id, "доска берёт статус")
+            checkEqual(state.calendarProperty(d.properties)?.id, date.id)
+            state.groupBy = title.id
+            checkEqual(state.groupProperty(d.properties, kind: DatabaseView.tableKind)?.id, nil, "заголовок не группируется")
+            state.groupBy = status.id
+            state.dateProperty = date.id
+            state.showCover = false
+            let round = DatabaseViewState(json: try state.jsonString())
+            checkEqual(round, state)
+            try await w.saveViewState(d.views[0].id, state)
+            try await w.deleteProperty(date.id)
+            try await w.deleteProperty(status.id)
+            d = try await reload(w, d)
+            checkEqual(d.views[0].state.groupBy, nil)
+            checkEqual(d.views[0].state.dateProperty, nil)
+            checkEqual(d.views[0].state.calendarProperty(d.properties)?.id, nil, "без дат календарь пуст, а не падает")
+            checkEqual(d.views[0].state.groupProperty(d.properties, kind: DatabaseView.boardKind)?.id, nil)
+
+            let t2 = NewDatabase(title: "Д", titleProperty: "Н", statusProperty: "С", statusOptions: ["1"], dateProperty: "С2", viewName: "Таблица",
+                                 extraViews: [("Доска", DatabaseView.boardKind), ("Календарь", DatabaseView.calendarKind)])
+            let five = try await w.createDatabase(parent: nil, template: t2, ids: RandomIDs(), now: 1)
+            checkEqual(five.views.map(\.kind), [DatabaseView.tableKind, DatabaseView.boardKind, DatabaseView.calendarKind], "порядок вкладок")
+        }
+    }
+
+    await test("Встроенное представление: блок хранит своё состояние, записи не копируются") {
+        try await withWorkspace { w in
+            let d = try await makeDatabase(w)
+            let status = prop(d, .status)
+            let holder = try await w.createPage(parent: nil, title: "Обзор", id: UUID(), now: 1)
+            _ = try await record(w, d, "Запись")
+            var state = DatabaseViewState()
+            state.filter.items = [.rule(FilterRule(property: status.id, op: .equals, value: status.options[0].id.uuidString))]
+            state.extra["future"] = .string("x")
+            let fragment = AtomData.databaseView(page: d.pageID, kind: DatabaseView.boardKind, state: try state.jsonString())
+            check(BlockType.databaseView.isAtom)
+            let blockID = UUID()
+            var batch = SaveBatch()
+            batch.upserts[blockID] = Block(id: blockID, pageID: holder.id, parentID: nil, sortKey: "a0", type: .databaseView, contentVersion: 1,
+                                           contentJSON: fragment.json, plainText: "", createdAt: 1, updatedAt: 1)
+            try await w.commit(batch)
+            let saved = try await w.blocks(ofPage: holder.id)[0]
+            checkEqual(AtomData.viewPage(of: saved), d.pageID)
+            checkEqual(AtomData.viewKind(of: saved), DatabaseView.boardKind)
+            checkEqual(DatabaseViewState(json: AtomData.viewState(of: saved)), state, "свой фильтр и неизвестные поля")
+            checkEqual(try await w.allPages().filter { $0.databaseID == d.id }.count, 1, "копий записей нет")
+
+            // Копия страницы смотрит на ту же базу; копия с базой — на свою.
+            let copy = try await w.duplicatePage(holder.id, title: "Копия", ids: RandomIDs(), now: 2)
+            checkEqual(AtomData.viewPage(of: try await w.blocks(ofPage: copy)[0]), d.pageID)
+            let inside = try await w.createPage(parent: nil, title: "Папка", id: UUID(), now: 1)
+            try await w.movePage(d.pageID, toParent: inside.id, afterSibling: nil, now: 2)
+            try await w.movePage(holder.id, toParent: inside.id, afterSibling: nil, now: 2)
+            let folderCopy = try await w.duplicatePage(inside.id, title: "Папка 2", ids: RandomIDs(), now: 3)
+            let pages = try await w.allPages()
+            guard let holderCopy = pages.first(where: { $0.parentID == folderCopy && $0.title == "Обзор" }), let dbCopy = pages.first(where: { $0.parentID == folderCopy && $0.title == "Задачи" }) else { return check(false, "копии") }
+            let embedded = try await w.blocks(ofPage: holderCopy.id)[0]
+            checkEqual(AtomData.viewPage(of: embedded), dbCopy.id, "ссылка внутри поддерева переназначена")
+            guard let copyID = try await w.databaseIndex()[dbCopy.id], let copied = try await w.database(copyID) else { return check(false, "база") }
+            if case .rule(let rule)? = DatabaseViewState(json: AtomData.viewState(of: embedded)).filter.items.first {
+                checkEqual(rule.property, prop(copied, .status).id, "фильтр смотрит на свойство копии")
+                checkEqual(rule.value, prop(copied, .status).options[0].id.uuidString)
+            } else { check(false, "правило") }
+        }
+    }
+
+    await test("Шаблоны: скрыты отовсюду, новые UUID, ссылки как при дублировании (FR-12)") {
+        try await withWorkspace { w in
+            let page = try await w.createPage(parent: nil, title: "Образец", id: UUID(), now: 1)
+            let child = try await w.createPage(parent: page.id, title: "Часть", id: UUID(), now: 1)
+            let outside = try await w.createPage(parent: nil, title: "Внешняя", id: UUID(), now: 1)
+            var run = TextRun("ссылка")
+            run.marks = [PageLink.mark(child.id)]
+            var run2 = TextRun("внешняя")
+            run2.marks = [PageLink.mark(outside.id)]
+            let blockID = UUID()
+            var batch = SaveBatch()
+            batch.upserts[blockID] = Block(id: blockID, pageID: page.id, sortKey: "a0", content: BlockContent(runs: [run, TextRun(" "), run2, TextRun(" уникальноеслово")]), createdAt: 1)
+            try await w.commit(batch)
+
+            let t = try await w.saveTemplate(from: page.id, name: "Мой шаблон", ids: RandomIDs(), now: 2)
+            checkEqual(t.databaseID, nil)
+            let visible = try await w.allPages().map(\.title).sorted()
+            checkEqual(visible, ["Внешняя", "Образец", "Часть"], "шаблон не виден в дереве")
+            checkEqual(try await w.trashItems().count, 0, "шаблон не в корзине")
+            checkEqual(try await w.search("уникальноеслово").map(\.pageID), [page.id], "шаблон не найден поиском")
+            checkEqual(try await w.backlinks(to: outside.id).map(\.pageID), [page.id], "шаблон не даёт обратных ссылок")
+
+            let made = try await w.instantiate(template: t.id, parent: nil, ids: RandomIDs(), now: 3)
+            let again = try await w.instantiate(template: t.id, parent: outside.id, ids: RandomIDs(), now: 4)
+            check(made != again && made != page.id)
+            checkEqual(try await w.page(made)?.title, "Мой шаблон")
+            checkEqual(try await w.page(made)?.deletedAt, nil)
+            checkEqual(try await w.page(again)?.parentID, outside.id)
+            let pages = try await w.allPages()
+            guard let madeChild = pages.first(where: { $0.parentID == made }) else { return check(false, "подстраница") }
+            check(madeChild.id != child.id, "новый UUID")
+            let targets = PageLink.targets(of: try await w.blocks(ofPage: made)[0])
+            checkEqual(targets, [madeChild.id, outside.id], "внутренняя переназначена, внешняя сохранена")
+
+            // Правка оригинала и копии не трогает шаблон; удаление шаблона не трогает созданное.
+            try await w.renameTemplate(t.id, to: "Новое имя")
+            checkEqual(try await w.templates().first?.name, "Новое имя")
+            let third = try await w.instantiate(template: t.id, parent: nil, ids: RandomIDs(), now: 5)
+            checkEqual(try await w.page(third)?.title, "Новое имя")
+            try await w.deleteTemplate(t.id)
+            checkEqual(try await w.templates().count, 0)
+            checkEqual(try await w.page(made)?.title, "Мой шаблон")
+            let hidden = try await w.reader.run { try $0.scalarInt("SELECT count(*) FROM pages WHERE deleted_at IS NOT NULL") }
+            checkEqual(hidden, 0, "скрытые страницы удалены")
+            let keep = try await w.saveTemplate(from: page.id, name: "Ещё", ids: RandomIDs(), now: 6)
+            await checkThrows("обычное дублирование не видит скрытую страницу") { try await w.duplicatePage(keep.rootPage, title: "x", ids: RandomIDs(), now: 6) }
+            await checkThrows("удалённый шаблон") { try await w.instantiate(template: t.id, parent: nil, ids: RandomIDs(), now: 6) }
+        }
+    }
+
+    await test("Шаблоны записи: свойства, база, удаление базы, резервная копия") {
+        try await withTempDir { dir in
+            let root = dir.appendingPathComponent("w")
+            let w = try SQLiteWorkspace.create(at: root, name: "T")
+            let d = try await makeDatabase(w)
+            let status = prop(d, .status)
+            let r = try await record(w, d, "Образец")
+            let value = PropertyValue.options([status.options[1].id])
+            try await w.setValue(pages: [r], property: status.id, value: value, now: 2)
+            let t = try await w.saveTemplate(from: r, name: "Задача", ids: RandomIDs(), now: 3)
+            checkEqual(t.databaseID, d.id)
+            checkEqual(try await titles(w, d, DatabaseViewState()), ["Образец"], "шаблон не виден в таблице")
+            let made = try await w.instantiate(template: t.id, parent: nil, ids: RandomIDs(), now: 4)
+            checkEqual(try await w.page(made)?.databaseID, d.id)
+            checkEqual(try await w.page(made)?.parentID, d.pageID)
+            checkEqual(try await w.recordValues(page: made, database: d)[status.id], value, "значения из шаблона")
+            await checkThrows("базу нельзя сделать шаблоном") { try await w.saveTemplate(from: d.pageID, name: "x", ids: RandomIDs(), now: 5) }
+
+            // Смена типа свойства затрагивает и шаблон: значение не устаревает молча.
+            let archive = dir.appendingPathComponent("a.minervabackup")
+            _ = try BackupService.create(workspaceRoot: root, snapshotter: w, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 6)
+
+            let batch = UUID()
+            try await w.trashPage(d.pageID, batch: batch, now: 7)
+            await checkThrows("база в корзине") { try await w.instantiate(template: t.id, parent: nil, ids: RandomIDs(), now: 8) }
+            checkEqual(try await w.templates().count, 1, "корзина не удаляет шаблон")
+            try await w.purgeTrash(batch: batch)
+            checkEqual(try await w.templates().count, 0)
+            let left = try await w.reader.run { try $0.scalarInt("SELECT (SELECT count(*) FROM pages) + (SELECT count(*) FROM property_values) + (SELECT count(*) FROM property_value_options)") }
+            checkEqual(left, 0, "ни скрытых страниц, ни значений")
+            w.close()
+
+            let target = dir.appendingPathComponent("r")
+            _ = try RestoreService.restore(archive: archive, to: target, inspector: SQLiteSnapshotInspector(), newID: UUID(), now: 9)
+            let restored = try SQLiteWorkspace.open(at: target)
+            defer { restored.close() }
+            checkEqual(try await restored.templates().map(\.name), ["Задача"], "шаблон в архиве")
+            let fresh = try await restored.instantiate(template: t.id, parent: nil, ids: RandomIDs(), now: 10)
+            checkEqual(try await restored.page(fresh)?.databaseID, d.id)
+        }
+    }
+
     await test("Переименование: настройки и каталог копируются один раз, оригиналы целы") {
         try await withTempDir { dir in
             let fm = FileManager.default

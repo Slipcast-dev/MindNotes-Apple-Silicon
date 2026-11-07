@@ -43,6 +43,7 @@ extension FilterOp {
 @MainActor
 final class DatabaseModel: ObservableObject {
     static let pageSize = 100
+    static let calendarLimit = 1000
 
     let store: SQLiteWorkspace
     let databaseID: UUID
@@ -51,15 +52,35 @@ final class DatabaseModel: ObservableObject {
     @Published var activeViewID: UUID?
     @Published private(set) var rows: [RecordRow] = []
     @Published private(set) var total = 0
+    /// Группы текущего вида: без группировки одна, с `group == nil`.
+    @Published private(set) var sections: [RecordSection] = []
+    /// Календарь: записи месяца и записи без даты.
+    @Published private(set) var calendarRows: [RecordRow] = []
+    /// Записей в видимых днях: больше предела означает, что показаны не все.
+    @Published private(set) var calendarTotal = 0
+    @Published private(set) var undated: RecordPage = RecordPage(rows: [], total: 0)
+    @Published var month = LocalDate(date: Date(), in: .current).firstOfMonth
+    @Published private(set) var templates: [PageTemplate] = []
     @Published var selection: Set<UUID> = []
-    private var limit = DatabaseModel.pageSize
+    private var limits: [String: Int] = [:]
+    private var embedded: EmbeddedView?
     private var chain: Task<Void, Never>?
     private let flush: () async throws -> Void
     private let pagesChanged: () async throws -> Void
     private let report: (String) -> Void
 
-    init(store: SQLiteWorkspace, databaseID: UUID, pageID: UUID, flush: @escaping () async throws -> Void,
+    /// Встроенное представление: состояние принадлежит блоку страницы, а не базе.
+    struct EmbeddedView {
+        var id: UUID
+        var name: String
+        var kind: String
+        var state: DatabaseViewState
+        var save: (String, DatabaseViewState) -> Void
+    }
+
+    init(store: SQLiteWorkspace, databaseID: UUID, pageID: UUID, embedded: EmbeddedView? = nil, flush: @escaping () async throws -> Void,
          pagesChanged: @escaping () async throws -> Void, report: @escaping (String) -> Void) {
+        self.embedded = embedded
         self.store = store
         self.databaseID = databaseID
         self.pageID = pageID
@@ -68,8 +89,15 @@ final class DatabaseModel: ObservableObject {
         self.report = report
     }
 
-    /// Показываются только таблицы; представления других видов хранятся до M6.
-    var views: [DatabaseView] { database?.views.filter { $0.kind == DatabaseView.tableKind } ?? [] }
+    var isEmbedded: Bool { embedded != nil }
+
+    /// Вид неизвестной версии хранится, но не показывается.
+    var views: [DatabaseView] {
+        if let embedded {
+            return [DatabaseView(id: embedded.id, databaseID: databaseID, name: embedded.name, kind: embedded.kind, sortKey: "", state: embedded.state)]
+        }
+        return database?.views.filter { DatabaseView.knownKinds.contains($0.kind) } ?? []
+    }
     var activeView: DatabaseView? { views.first { $0.id == activeViewID } ?? views.first }
     var state: DatabaseViewState { activeView?.state ?? DatabaseViewState() }
 
@@ -90,6 +118,15 @@ final class DatabaseModel: ObservableObject {
 
     func reload() { perform {} }
 
+    fileprivate func setEmbedded(kind: String) {
+        guard var view = embedded else { return }
+        view.kind = kind
+        embedded = view
+        limits = [:]
+        view.save(kind, view.state)
+        reload()
+    }
+
     /// Ждёт завершения всех поставленных действий.
     func settle() async { await chain?.value }
 
@@ -97,25 +134,110 @@ final class DatabaseModel: ObservableObject {
         try await flush() // Заголовки записей идут общей очередью сохранения.
         guard let fresh = try await store.database(databaseID) else { return }
         database = fresh
-        let page = try await store.queryRecords(database: fresh, state: state, limit: limit, offset: 0)
-        rows = page.rows
-        total = page.total
+        templates = try await store.templates().filter { $0.databaseID == databaseID }
+        let current = state
+        let kind = activeView?.kind ?? DatabaseView.tableKind
+        total = try await store.queryRecords(database: fresh, state: current, limit: 0, offset: 0).total
+        if kind == DatabaseView.calendarKind {
+            try await loadCalendar(fresh, current)
+            rows = calendarRows + undated.rows
+            sections = []
+        } else {
+            var loaded: [RecordSection] = []
+            if let property = current.groupProperty(fresh.properties, kind: kind) {
+                for group in RecordGroup.groups(for: property) {
+                    let page = try await store.queryRecords(database: fresh, state: current.narrowed(by: [group.rule]), limit: limits[group.id] ?? Self.pageSize, offset: 0)
+                    loaded.append(RecordSection(id: group.id, group: group, rows: page.rows, total: page.total))
+                }
+            } else {
+                let page = try await store.queryRecords(database: fresh, state: current, limit: limits["all"] ?? Self.pageSize, offset: 0)
+                loaded = [RecordSection(id: "all", group: nil, rows: page.rows, total: page.total)]
+            }
+            sections = loaded
+            rows = loaded.flatMap(\.rows)
+        }
         selection.formIntersection(Set(rows.map(\.id)))
     }
 
-    func showMore() {
-        limit += Self.pageSize
+    private func loadCalendar(_ fresh: Database, _ current: DatabaseViewState) async throws {
+        guard let date = current.calendarProperty(fresh.properties) else {
+            calendarRows = []
+            calendarTotal = 0
+            undated = RecordPage(rows: [], total: 0)
+            return
+        }
+        // Границы — вся видимая сетка: в днях соседних месяцев записи тоже показаны.
+        let first = calendarDays.first ?? month, last = calendarDays.last ?? month
+        // «Не раньше» сравнивает конец значения, «не позже» — начало: попадают и диапазоны, идущие через месяц.
+        let inMonth = current.narrowed(by: [FilterRule(property: date.id, op: .greaterOrEqual, value: first.iso),
+                                            FilterRule(property: date.id, op: .lessOrEqual, value: last.iso)])
+        let page = try await store.queryRecords(database: fresh, state: inMonth, limit: Self.calendarLimit, offset: 0)
+        calendarRows = page.rows
+        calendarTotal = page.total
+        undated = try await store.queryRecords(database: fresh, state: current.narrowed(by: [FilterRule(property: date.id, op: .isEmpty, value: "")]),
+                                               limit: limits["undated"] ?? Self.pageSize, offset: 0)
+    }
+
+    func showMore(_ section: String = "all") {
+        limits[section, default: Self.pageSize] += Self.pageSize
         reload()
+    }
+
+    /// Дни сетки: с понедельника недели первого числа до конца последней недели месяца.
+    var calendarDays: [LocalDate] {
+        let first = month.firstOfMonth
+        let start = first.adding(days: -first.weekdayFromMonday)
+        let count = start.days(to: first.addingMonths(1).adding(days: -1)) + 1
+        return (0..<((count + 6) / 7 * 7)).map { start.adding(days: $0) }
+    }
+
+    func showMonth(_ value: LocalDate) {
+        month = value.firstOfMonth
+        reload()
+    }
+
+    /// Перенос карточки между группами: меняется значение свойства группировки.
+    func move(record id: UUID, from source: RecordSection?, to target: RecordSection) {
+        guard let group = target.group, source?.id != target.id,
+              let type = database?.property(group.property)?.type,
+              let row = rows.first(where: { $0.id == id }) else { return }
+        setValue(pages: [id], property: group.property, value: group.value(replacing: row.values[group.property], from: source?.group, type: type))
+    }
+
+    /// Перенос в календаре: длина диапазона и время сохраняются, сдвиг считается от дня, за который взяли карточку.
+    /// Запись без даты получает этот день.
+    func move(record id: UUID, grabbedOn grabbed: LocalDate?, toDay day: LocalDate) {
+        guard let database, let property = state.calendarProperty(database.properties),
+              let row = rows.first(where: { $0.id == id }) else { return }
+        if case .date(let value)? = row.values[property.id] {
+            let moved = grabbed.map { value.moved(byDays: $0.days(to: day)) } ?? value.moved(toDay: day)
+            setValue(pages: [id], property: property.id, value: .date(moved))
+        } else {
+            setValue(pages: [id], property: property.id, value: .date(DateValue(start: .day(day))))
+        }
+    }
+
+    func createRecord(from template: PageTemplate) {
+        perform { [store, pagesChanged] in
+            _ = try await store.instantiate(template: template.id, parent: nil, ids: RandomIDs(), now: SystemClock().nowMillis())
+            try await pagesChanged()
+        }
     }
 
     func selectView(_ id: UUID) {
         activeViewID = id
-        limit = Self.pageSize
+        limits = [:]
         selection = []
         reload()
     }
 
     func updateState(_ change: @escaping (inout DatabaseViewState) -> Void) {
+        if var view = embedded {
+            change(&view.state)
+            embedded = view
+            view.save(view.kind, view.state)
+            return reload()
+        }
         guard let view = activeView else { return }
         perform { [store] in
             var state = (try await store.database(self.databaseID))?.views.first { $0.id == view.id }?.state ?? view.state
@@ -149,6 +271,13 @@ final class DatabaseModel: ObservableObject {
 
     /// Столбцы считаются по свежей базе: свойство могло появиться или исчезнуть после последнего показа.
     private func updateColumns(_ change: @escaping (inout [ColumnState]) -> Void) {
+        if embedded != nil, let database {
+            return updateState { state in
+                var columns = state.orderedColumns(database.properties)
+                change(&columns)
+                state.columns = columns
+            }
+        }
         guard let view = activeView else { return }
         perform { [store, databaseID] in
             guard let fresh = try await store.database(databaseID), var state = fresh.views.first(where: { $0.id == view.id })?.state else { return }
@@ -173,6 +302,21 @@ final class DatabaseModel: ObservableObject {
     }
 }
 
+/// Группа записей на экране. `group == nil` — всё без группировки.
+struct RecordSection: Identifiable, Equatable {
+    var id: String
+    var group: RecordGroup?
+    var rows: [RecordRow]
+    var total: Int
+}
+
+extension DatabaseModel {
+    /// Вид встроенного представления меняется на месте: блок хранит его сам.
+    func setEmbeddedKind(_ kind: String) {
+        setEmbedded(kind: kind)
+    }
+}
+
 /// Текст значения для показа. День форматируется от полудня своего дня: сдвига быть не может.
 enum PropertyDisplay {
     static func date(_ value: DateValue) -> String {
@@ -192,6 +336,20 @@ enum PropertyDisplay {
             }
         }
         return value.end.map { "\(one(value.start)) — \(one($0))" } ?? one(value.start)
+    }
+
+    /// Значение одной строкой: для карточек, где правка идёт в таблице или на странице записи.
+    static func text(_ value: PropertyValue?, property: PropertyDefinition) -> String? {
+        switch value {
+        case .text(let s)?, .url(let s)?, .unconverted(let s)?: return s.isEmpty ? nil : s
+        case .number(let n)?: return number(n)
+        case .date(let d)?: return date(d)
+        case .checkbox(let b)?: return b ? "\(property.name): ✓" : nil
+        case .options(let ids)?:
+            let names = ids.compactMap { id in property.options.first { $0.id == id }?.name }
+            return names.isEmpty ? nil : names.joined(separator: ", ")
+        case nil: return nil
+        }
     }
 
     static func number(_ value: Double) -> String {

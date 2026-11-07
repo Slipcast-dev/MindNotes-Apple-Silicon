@@ -80,6 +80,31 @@ struct LocalDate: Hashable, Comparable {
 
     var iso: String { String(format: "%04d-%02d-%02d", year, month, day) }
 
+    private static var utc: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        return calendar
+    }
+
+    private var utcDate: Date { Self.utc.date(from: DateComponents(year: year, month: month, day: day)) ?? Date(timeIntervalSince1970: 0) }
+
+    /// Счёт идёт в UTC, где нет перехода на летнее время: день не теряется.
+    func adding(days: Int) -> LocalDate {
+        LocalDate(date: Self.utc.date(byAdding: .day, value: days, to: utcDate) ?? utcDate, in: TimeZone(secondsFromGMT: 0) ?? .current)
+    }
+
+    func days(to other: LocalDate) -> Int {
+        Self.utc.dateComponents([.day], from: utcDate, to: other.utcDate).day ?? 0
+    }
+
+    /// Понедельник = 0 … воскресенье = 6.
+    var weekdayFromMonday: Int { (Self.utc.component(.weekday, from: utcDate) + 5) % 7 }
+    var firstOfMonth: LocalDate { LocalDate(year: year, month: month, day: 1) ?? self }
+
+    func addingMonths(_ count: Int) -> LocalDate {
+        LocalDate(date: Self.utc.date(byAdding: .month, value: count, to: utcDate) ?? utcDate, in: TimeZone(secondsFromGMT: 0) ?? .current)
+    }
+
     static func < (a: LocalDate, b: LocalDate) -> Bool { (a.year, a.month, a.day) < (b.year, b.month, b.day) }
 }
 
@@ -87,6 +112,14 @@ struct LocalDate: Hashable, Comparable {
 enum DatePoint: Hashable {
     case day(LocalDate)
     case moment(ms: Int64, zone: String)
+
+    /// День, который показывают часы в собственном поясе значения.
+    var localDay: LocalDate {
+        switch self {
+        case .day(let d): return d
+        case .moment: return LocalDate(iso: String(localText.prefix(10))) ?? LocalDate(date: Date(timeIntervalSince1970: 0), in: .current)
+        }
+    }
 
     /// Настенное время в собственном поясе: `ГГГГ-ММ-ДД` или `ГГГГ-ММ-ДДTЧЧ:ММ`. Подходит для сравнения строк.
     var localText: String {
@@ -109,6 +142,27 @@ struct DateValue: Hashable {
         self.start = start
         self.end = end
     }
+
+    /// Перенос в календаре: длина диапазона и время суток сохраняются, день меняется точно на выбранный.
+    func moved(toDay target: LocalDate) -> DateValue {
+        switch start {
+        case .day(let old):
+            guard case .day(let oldEnd)? = end else { return DateValue(start: .day(target)) }
+            return DateValue(start: .day(target), end: .day(target.adding(days: old.days(to: oldEnd))))
+        case .moment(let ms, let zone):
+            let tz = TimeZone(identifier: zone) ?? TimeZone(secondsFromGMT: 0) ?? .current
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = tz
+            let clock = calendar.dateComponents([.hour, .minute, .second], from: Date(timeIntervalSince1970: Double(ms) / 1000))
+            let moved = calendar.date(from: DateComponents(year: target.year, month: target.month, day: target.day, hour: clock.hour, minute: clock.minute, second: clock.second))
+            let newMs = moved.map { Int64($0.timeIntervalSince1970 * 1000) } ?? ms
+            guard case .moment(let endMs, _)? = end else { return DateValue(start: .moment(ms: newMs, zone: zone)) }
+            return DateValue(start: .moment(ms: newMs, zone: zone), end: .moment(ms: newMs + (endMs - ms), zone: zone))
+        }
+    }
+
+    /// Сдвиг на число дней: карточку диапазона можно взять за любой его день.
+    func moved(byDays days: Int) -> DateValue { moved(toDay: start.localDay.adding(days: days)) }
 
     /// Диапазон: одного вида, в одном поясе, конец не раньше начала.
     var isValid: Bool {
@@ -351,12 +405,21 @@ struct DatabaseViewState: Equatable {
     var filter = FilterGroup()
     var sorts: [SortRule] = []
     var columns: [ColumnState] = []
+    /// Свойство группировки: столбцы доски и разделы других видов.
+    var groupBy: UUID?
+    /// Свойство даты календаря.
+    var dateProperty: UUID?
+    /// Показывать обложку страницы на карточке галереи.
+    var showCover = true
     var extra: [String: JSONValue] = [:]
 
     private struct Known: Codable {
         var filter: FilterGroup?
         var sorts: [SortRule]?
         var columns: [ColumnState]?
+        var groupBy: UUID?
+        var dateProperty: UUID?
+        var showCover: Bool?
     }
 
     init() {}
@@ -368,7 +431,10 @@ struct DatabaseViewState: Equatable {
             filter = known.filter ?? FilterGroup()
             sorts = known.sorts ?? []
             columns = known.columns ?? []
-            for key in ["filter", "sorts", "columns"] { object[key] = nil }
+            groupBy = known.groupBy
+            dateProperty = known.dateProperty
+            showCover = known.showCover ?? true
+            for key in ["filter", "sorts", "columns", "groupBy", "dateProperty", "showCover"] { object[key] = nil }
         }
         extra = object
     }
@@ -376,10 +442,28 @@ struct DatabaseViewState: Equatable {
     func jsonString() throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let known = try encoder.encode(Known(filter: filter, sorts: sorts, columns: columns))
+        let known = try encoder.encode(Known(filter: filter, sorts: sorts, columns: columns, groupBy: groupBy, dateProperty: dateProperty, showCover: showCover))
         guard case .object(let fields) = try JSONDecoder().decode(JSONValue.self, from: known) else { return "{}" }
         let merged = extra.merging(fields) { _, new in new }
         return String(decoding: try encoder.encode(JSONValue.object(merged)), as: UTF8.self)
+    }
+
+    /// Группировка: заданное свойство, если оно ещё подходит; у доски без выбора — первое подходящее.
+    func groupProperty(_ properties: [PropertyDefinition], kind: String) -> PropertyDefinition? {
+        if let groupBy, let found = properties.first(where: { $0.id == groupBy && RecordGroup.isGroupable($0.type) }) { return found }
+        guard kind == DatabaseView.boardKind else { return nil }
+        return properties.first { $0.type == .status } ?? properties.first { RecordGroup.isGroupable($0.type) }
+    }
+
+    func calendarProperty(_ properties: [PropertyDefinition]) -> PropertyDefinition? {
+        properties.first { $0.id == dateProperty && $0.type == .date } ?? properties.first { $0.type == .date }
+    }
+
+    /// То же представление, сужённое до условия: текущий фильтр не меняется.
+    func narrowed(by rules: [FilterRule]) -> DatabaseViewState {
+        var out = self
+        out.filter = FilterGroup(mode: .and, items: [.group(filter)] + rules.map { .rule($0) })
+        return out
     }
 
     /// Столбцы в порядке представления: новые свойства в конце и видимы, удалённые исчезают, заголовок всегда виден.
@@ -397,6 +481,11 @@ struct DatabaseViewState: Equatable {
 struct DatabaseView: Equatable, Identifiable {
     /// Вид представления: M5 показывает таблицу, остальные появятся в M6 и хранятся без потерь.
     static let tableKind = "table"
+    static let boardKind = "board"
+    static let listKind = "list"
+    static let calendarKind = "calendar"
+    static let galleryKind = "gallery"
+    static let knownKinds = [tableKind, boardKind, listKind, calendarKind, galleryKind]
 
     var id: UUID
     var databaseID: UUID
@@ -425,12 +514,58 @@ struct NewDatabase {
     var statusOptions: [String]
     var dateProperty: String
     var viewName: String
+    /// Остальные представления новой базы: название и вид.
+    var extraViews: [(name: String, kind: String)] = []
+}
+
+/// Группа записей: столбец доски или раздел. Отбор — обычное правило фильтра, поэтому механизм запроса один.
+struct RecordGroup: Equatable, Identifiable {
+    var id: String
+    var property: UUID
+    var option: PropertyOption?
+    var checked: Bool?
+    var rule: FilterRule
+
+    static func isGroupable(_ type: PropertyType) -> Bool { type.usesOptions || type == .checkbox }
+
+    /// Сначала варианты по порядку, в конце группа без значения: запись не должна пропасть из вида.
+    static func groups(for def: PropertyDefinition) -> [RecordGroup] {
+        if def.type == .checkbox {
+            return [RecordGroup(id: "true", property: def.id, checked: true, rule: FilterRule(property: def.id, op: .isTrue, value: "")),
+                    RecordGroup(id: "false", property: def.id, checked: false, rule: FilterRule(property: def.id, op: .isFalse, value: ""))]
+        }
+        guard def.type.usesOptions else { return [] }
+        let op: FilterOp = def.type == .multiSelect ? .contains : .equals
+        return def.options.map { RecordGroup(id: $0.id.uuidString, property: def.id, option: $0, rule: FilterRule(property: def.id, op: op, value: $0.id.uuidString)) }
+            + [RecordGroup(id: "empty", property: def.id, rule: FilterRule(property: def.id, op: .isEmpty, value: ""))]
+    }
+
+    /// Значение записи после переноса в эту группу. Во множественном выборе заменяется только вариант исходной группы.
+    func value(replacing current: PropertyValue?, from source: RecordGroup?, type: PropertyType) -> PropertyValue? {
+        if let checked { return .checkbox(checked) }
+        guard type == .multiSelect else { return option.map { .options([$0.id]) } }
+        guard let option else { return nil }
+        var ids: [UUID] = []
+        if case .options(let old)? = current { ids = old.filter { $0 != source?.option?.id } }
+        if !ids.contains(option.id) { ids.append(option.id) }
+        return .options(ids)
+    }
+}
+
+/// Шаблон пользователя: скрытая копия страницы с поддеревом. У записи указана база.
+struct PageTemplate: Equatable, Identifiable {
+    var id: UUID
+    var name: String
+    var rootPage: UUID
+    var databaseID: UUID?
+    var createdAt: Int64
 }
 
 struct RecordRow: Equatable, Identifiable {
     var id: UUID
     var title: String
     var icon: String?
+    var cover: UUID? = nil
     var values: [UUID: PropertyValue]
 }
 

@@ -185,10 +185,10 @@ extension SQLiteWorkspace {
             let whereArgs = [SQLValue(database.id)] + (filter?.args ?? [])
             let total = try db.scalarInt("SELECT count(*) FROM pages p WHERE \(whereSQL)", whereArgs) ?? 0
             let rows = try db.query("""
-            SELECT p.id, p.title, p.icon FROM pages p\(joins.sql) WHERE \(whereSQL) ORDER BY \(order.sql) LIMIT ? OFFSET ?
+            SELECT p.id, p.title, p.icon, p.cover_asset_id FROM pages p\(joins.sql) WHERE \(whereSQL) ORDER BY \(order.sql) LIMIT ? OFFSET ?
             """, joins.args + whereArgs + order.args + [.int(Int64(limit)), .int(Int64(offset))]) { r -> RecordRow? in
                 guard let id = r.uuid(0) else { return nil }
-                return RecordRow(id: id, title: r.text(1), icon: r.optText(2), values: [:])
+                return RecordRow(id: id, title: r.text(1), icon: r.optText(2), cover: r.uuid(3), values: [:])
             }.compactMap { $0 }
             let values = try Self.loadValues(db, pages: rows.map(\.id), properties: database.properties)
             return RecordPage(rows: rows.map { var row = $0; row.values = values[$0.id] ?? [:]; return row }, total: Int(total))
@@ -274,6 +274,12 @@ extension SQLiteWorkspace {
                 }
                 try db.run("INSERT INTO database_views(id, database_id, name, kind, sort_key, state_json) VALUES(?,?,?,?,?,?)",
                            [SQLValue(ids.next()), SQLValue(id), .text(template.viewName), .text(DatabaseView.tableKind), .text(SortKey.between(nil, nil)), .text(try DatabaseViewState().jsonString())])
+                var viewKey = SortKey.between(nil, nil)
+                for extra in template.extraViews {
+                    viewKey = SortKey.between(viewKey, nil)
+                    try db.run("INSERT INTO database_views(id, database_id, name, kind, sort_key, state_json) VALUES(?,?,?,?,?,?)",
+                               [SQLValue(ids.next()), SQLValue(id), .text(extra.name), .text(extra.kind), .text(viewKey), .text(try DatabaseViewState().jsonString())])
+                }
                 guard let created = try Self.loadDatabase(db, id) else { throw WorkspaceError.corrupted("база не создана") }
                 return created
             }
@@ -413,6 +419,8 @@ extension SQLiteWorkspace {
                     state.filter = state.filter.removingRules { $0.property == id }
                     state.sorts.removeAll { $0.property == id }
                     state.columns.removeAll { $0.property == id }
+                    if state.groupBy == id { state.groupBy = nil }
+                    if state.dateProperty == id { state.dateProperty = nil }
                 }
                 try db.run("DELETE FROM property_definitions WHERE id=?", [SQLValue(id)])
             }
@@ -595,6 +603,89 @@ extension SQLiteWorkspace {
         }
     }
 
+    // MARK: Шаблоны
+
+    func templates() async throws -> [PageTemplate] {
+        try await reader.run { db in
+            try db.query("SELECT id, name, root_page_id, database_id, created_at FROM templates ORDER BY created_at, id") { r -> PageTemplate? in
+                guard let id = r.uuid(0), let root = r.uuid(2) else { return nil }
+                return PageTemplate(id: id, name: r.text(1), rootPage: root, databaseID: r.uuid(3), createdAt: r.int(4))
+            }.compactMap { $0 }
+        }
+    }
+
+    /// Сохраняет страницу или запись как шаблон. Запись получает шаблон своей базы, со значениями свойств.
+    func saveTemplate(from page: UUID, name: String, ids: IDGenerator, now: Int64) async throws -> PageTemplate {
+        try await writer.run { db in
+            try db.transaction {
+                guard try db.scalarInt("SELECT 1 FROM databases WHERE page_id=?", [SQLValue(page)]) == nil else { throw Self.storageError("Базу нельзя сохранить как шаблон.") }
+                let root = try Self.copySubtree(db, root: page, title: name, target: .hidden(now: now), ids: ids, now: now)
+                let database = try db.query("SELECT database_id FROM pages WHERE id=?", [SQLValue(root)], { $0.uuid(0) }).first ?? nil
+                let id = ids.next()
+                try db.run("INSERT INTO templates(id, name, root_page_id, database_id, created_at) VALUES(?,?,?,?,?)",
+                           [SQLValue(id), .text(name), SQLValue(root), SQLValue(database), .int(now)])
+                return PageTemplate(id: id, name: name, rootPage: root, databaseID: database, createdAt: now)
+            }
+        }
+    }
+
+    /// Создаёт страницу из шаблона той же операцией, что и дублирование. Запись появляется в своей базе.
+    func instantiate(template: UUID, parent: UUID?, ids: IDGenerator, now: Int64) async throws -> UUID {
+        try await writer.run { db in
+            try db.transaction {
+                guard let row = try db.query("SELECT name, root_page_id, database_id FROM templates WHERE id=?", [SQLValue(template)], { (name: $0.text(0), root: $0.uuid(1), database: $0.uuid(2)) }).first, let root = row.root else {
+                    throw Self.storageError("Шаблон не найден.")
+                }
+                var target = parent
+                if let database = row.database {
+                    guard let page = try db.query("SELECT d.page_id FROM databases d JOIN pages q ON q.id = d.page_id WHERE d.id=? AND q.deleted_at IS NULL", [SQLValue(database)], { $0.uuid(0) }).first ?? nil else {
+                        throw Self.storageError("База недоступна.")
+                    }
+                    target = page
+                }
+                return try Self.copySubtree(db, root: root, title: row.name, target: .live(parent: target), ids: ids, now: now)
+            }
+        }
+    }
+
+    func renameTemplate(_ id: UUID, to name: String) async throws {
+        try await writer.run { db in
+            try db.transaction {
+                guard let root = try db.query("SELECT root_page_id FROM templates WHERE id=?", [SQLValue(id)], { $0.uuid(0) }).first ?? nil else { return }
+                try db.run("UPDATE templates SET name=? WHERE id=?", [.text(name), SQLValue(id)])
+                try db.run("UPDATE pages SET title=? WHERE id=?", [.text(name), SQLValue(root)])
+            }
+        }
+    }
+
+    /// Шаблон удаляется вместе со скрытыми страницами; созданные из него страницы от него не зависят.
+    func deleteTemplate(_ id: UUID) async throws {
+        try await writer.run { db in
+            try db.transaction {
+                guard let root = try db.query("SELECT root_page_id FROM templates WHERE id=?", [SQLValue(id)], { $0.uuid(0) }).first ?? nil else { return }
+                try Self.deleteHiddenSubtree(db, root: root)
+            }
+        }
+    }
+
+    private static func deleteHiddenSubtree(_ db: SQLiteConnection, root: UUID) throws {
+        let pages = try db.query("""
+        WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT p.id FROM pages p JOIN sub ON p.parent_id = sub.id WHERE p.deleted_at IS NOT NULL AND p.trash_batch_id IS NULL)
+        SELECT id FROM sub
+        """, [SQLValue(root)]) { $0.uuid(0) }.compactMap { $0 }
+        for page in pages { try SearchIndex.removePage(db, page: page) }
+        for page in pages { try db.run("DELETE FROM pages WHERE id=?", [SQLValue(page)]) }
+    }
+
+    /// Окончательное удаление базы забирает её шаблоны: без базы они бесполезны и остались бы скрытым мусором.
+    static func deleteTemplates(_ db: SQLiteConnection, ofPagesInBatch batch: UUID) throws {
+        let roots = try db.query("""
+        SELECT t.root_page_id FROM templates t JOIN databases d ON d.id = t.database_id JOIN pages q ON q.id = d.page_id
+        WHERE q.trash_batch_id = ? AND q.deleted_at IS NOT NULL
+        """, [SQLValue(batch)]) { $0.uuid(0) }.compactMap { $0 }
+        for root in roots { try deleteHiddenSubtree(db, root: root) }
+    }
+
     // MARK: Дублирование
 
     /// Часть дублирования страниц: база в поддереве копируется целиком, копия записи остаётся в базе и сохраняет значения.
@@ -629,6 +720,18 @@ extension SQLiteWorkspace {
                 }
                 try db.run("INSERT INTO database_views(id, database_id, name, kind, sort_key, state_json) VALUES(?,?,?,?,?,?)",
                            [SQLValue(ids.next()), SQLValue(copy), .text(v.name), .text(v.kind), .text(v.key), .text(json)])
+            }
+        }
+        // Встроенные представления хранят ID свойств и вариантов: у копии базы они свои.
+        let idMap = propertyMap.merging(optionMap, uniquingKeysWith: { a, _ in a })
+        if !idMap.isEmpty {
+            for new in pageMap.values {
+                let embedded = try db.query("SELECT id, content_json FROM blocks WHERE page_id=? AND type=?", [SQLValue(new), .text(BlockType.databaseView.rawValue)]) { ($0.uuid(0), $0.text(1)) }
+                for (block, json) in embedded {
+                    var updated = json
+                    for (from, to) in idMap { updated = updated.replacingOccurrences(of: from.uuidString, with: to.uuidString) }
+                    if updated != json { try db.run("UPDATE blocks SET content_json=? WHERE id=?", [.text(updated), SQLValue(block)]) }
+                }
             }
         }
         for (old, new) in pageMap {

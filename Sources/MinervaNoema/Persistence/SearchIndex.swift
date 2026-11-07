@@ -146,17 +146,45 @@ extension SQLiteWorkspace {
     func duplicatePage(_ id: UUID, title: String, ids: IDGenerator, now: Int64) async throws -> UUID {
         try await writer.run { db in
             try db.transaction {
+                try Self.copySubtree(db, root: id, title: title, target: .besideSource, ids: ids, now: now)
+            }
+        }
+    }
+
+    /// Куда попадает копия. Страница-шаблон получает `deleted_at` без пакета корзины.
+    enum CopyTarget {
+        case besideSource
+        case hidden(now: Int64)
+        case live(parent: UUID?)
+    }
+
+    /// Единая копия поддерева для дублирования и шаблонов: правила UUID и ссылок одни (FR-12).
+    @discardableResult
+    static func copySubtree(_ db: SQLiteConnection, root id: UUID, title: String, target: CopyTarget, ids: IDGenerator, now: Int64) throws -> UUID {
                 try db.execute("PRAGMA defer_foreign_keys=ON") // Блок может быть вставлен раньше родителя.
+                // Поддерево в том же состоянии, что и корень: корзина не попадает в копию, шаблон видит свои страницы.
                 let subtree = try db.query("""
-                WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT p.id FROM pages p JOIN sub ON p.parent_id = sub.id WHERE p.deleted_at IS NULL)
+                WITH RECURSIVE sub(id) AS (SELECT ? UNION ALL SELECT p.id FROM pages p JOIN sub ON p.parent_id = sub.id WHERE p.deleted_at IS (SELECT deleted_at FROM pages WHERE id = ?) AND p.trash_batch_id IS NULL)
                 SELECT id FROM sub
-                """, [SQLValue(id)]) { $0.uuid(0) }.compactMap { $0 }
-                guard !subtree.isEmpty, let source = try db.query("SELECT parent_id, sort_key FROM pages WHERE id=? AND deleted_at IS NULL", [SQLValue(id)], { ($0.uuid(0), $0.text(1)) }).first else {
+                """, [SQLValue(id), SQLValue(id)]) { $0.uuid(0) }.compactMap { $0 }
+                // Скрытый корень копируется только при создании из шаблона: обычное дублирование его не видит.
+                var sourceSQL = "SELECT parent_id, sort_key FROM pages WHERE id=? AND trash_batch_id IS NULL"
+                if case .live = target {} else { sourceSQL += " AND deleted_at IS NULL" }
+                guard !subtree.isEmpty, let source = try db.query(sourceSQL, [SQLValue(id)], { ($0.uuid(0), $0.text(1)) }).first else {
                     throw WorkspaceError.pageNotFound(id)
+                }
+                let rootParent: UUID?
+                var deletedAt: Int64?
+                switch target {
+                case .besideSource: rootParent = source.0
+                case .hidden(let at): rootParent = source.0; deletedAt = at
+                case .live(let parent): rootParent = parent
                 }
                 var pageMap: [UUID: UUID] = [:]
                 for old in subtree { pageMap[old] = ids.next() }
-                let next = try db.scalarText("SELECT sort_key FROM pages WHERE parent_id IS ? AND deleted_at IS NULL AND sort_key > ? ORDER BY sort_key LIMIT 1", [SQLValue(source.0), .text(source.1)])
+                let next = try db.scalarText("SELECT sort_key FROM pages WHERE parent_id IS ? AND deleted_at IS NULL AND sort_key > ? ORDER BY sort_key LIMIT 1", [SQLValue(rootParent), .text(source.1)])
+                var last: String?
+                if case .live = target { last = try db.scalarText("SELECT sort_key FROM pages WHERE parent_id IS ? AND deleted_at IS NULL ORDER BY sort_key DESC, id DESC LIMIT 1", [SQLValue(rootParent)]) }
 
                 for old in subtree {
                     guard let row = try db.query("SELECT parent_id, sort_key, title, icon, cover_asset_id, full_width FROM pages WHERE id=?", [SQLValue(old)], {
@@ -165,10 +193,10 @@ extension SQLiteWorkspace {
                     let isRoot = old == id
                     let newTitle = isRoot ? title : row.title
                     try db.run("""
-                    INSERT INTO pages(id, parent_id, sort_key, title, icon, cover_asset_id, full_width, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)
-                    """, [SQLValue(newID), SQLValue(isRoot ? source.0 : row.parent.flatMap { pageMap[$0] }),
-                          .text(isRoot ? SortKey.between(row.key, next) : row.key), .text(newTitle), SQLValue(row.icon), SQLValue(row.cover),
-                          .int(row.full), .int(now), .int(now)])
+                    INSERT INTO pages(id, parent_id, sort_key, title, icon, cover_asset_id, full_width, created_at, updated_at, deleted_at) VALUES(?,?,?,?,?,?,?,?,?,?)
+                    """, [SQLValue(newID), SQLValue(isRoot ? rootParent : row.parent.flatMap { pageMap[$0] }),
+                          .text(isRoot ? (last != nil || { if case .live = target { return true } else { return false } }() ? SortKey.between(last, nil) : SortKey.between(row.key, next)) : row.key),
+                          .text(newTitle), SQLValue(row.icon), SQLValue(row.cover), .int(row.full), .int(now), .int(now), SQLValue(deletedAt)])
                     try SearchIndex.updateTitle(db, page: newID, title: newTitle)
                     try db.run("INSERT INTO page_tags(page_id, tag_id) SELECT ?, tag_id FROM page_tags WHERE page_id=?", [SQLValue(newID), SQLValue(old)])
 
@@ -192,7 +220,5 @@ extension SQLiteWorkspace {
                 try Self.duplicateDatabaseData(db, pageMap: pageMap, ids: ids, now: now)
                 guard let root = pageMap[id] else { throw WorkspaceError.pageNotFound(id) }
                 return root
-            }
-        }
     }
 }

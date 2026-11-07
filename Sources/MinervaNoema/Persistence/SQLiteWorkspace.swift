@@ -303,7 +303,7 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
             // Корень пакета: страница, родитель которой не удалён тем же действием.
             try db.query("""
             SELECT \(Self.pageColumns), (SELECT count(*) - 1 FROM pages q WHERE q.trash_batch_id = pages.trash_batch_id)
-            FROM pages WHERE deleted_at IS NOT NULL AND NOT EXISTS (
+            FROM pages WHERE deleted_at IS NOT NULL AND trash_batch_id IS NOT NULL AND NOT EXISTS (
                 SELECT 1 FROM pages q WHERE q.id = pages.parent_id AND q.trash_batch_id = pages.trash_batch_id
             ) ORDER BY deleted_at DESC
             """) { r -> TrashItem? in
@@ -341,6 +341,7 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
             try db.transaction {
                 let doomed = try db.query("SELECT id FROM pages WHERE trash_batch_id = ? AND deleted_at IS NOT NULL", [SQLValue(batch)]) { $0.uuid(0) }
                 if try Self.indexExists(db) { for id in doomed.compactMap({ $0 }) { try SearchIndex.removePage(db, page: id) } }
+                try Self.deleteTemplates(db, ofPagesInBatch: batch)
                 try db.run("DELETE FROM pages WHERE trash_batch_id = ? AND deleted_at IS NOT NULL", [SQLValue(batch)])
             }
         }

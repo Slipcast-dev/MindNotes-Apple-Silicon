@@ -8,6 +8,7 @@ struct DatabaseScreen: View {
     @State private var title = ""
     @State private var showsFilter = false
     @State private var showsSort = false
+    @State private var showsViewSettings = false
     @State private var showsProperties = false
     @State private var bulkProperty: PropertyDefinition?
 
@@ -16,22 +17,29 @@ struct DatabaseScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                Eyebrow(text: L("База данных"))
-                TextField("Без названия", text: $title)
-                    .textFieldStyle(.plain)
-                    .font(Tokens.titleFont())
-                    .accessibilityLabel(Text("Название базы"))
-                    .padding(.top, 8)
-                    .padding(.bottom, 6)
-                    .onChange(of: title) { if $0 != page?.title { shell.rename(model.pageID, to: $0) } }
+                Eyebrow(text: L(model.isEmbedded ? "Встроенное представление" : "База данных"))
+                if model.isEmbedded {
+                    Text(page?.title.isEmpty == false ? page?.title ?? "" : L("Без названия"))
+                        .font(Tokens.titleFont(28))
+                        .padding(.top, 8)
+                        .padding(.bottom, 6)
+                } else {
+                    TextField("Без названия", text: $title)
+                        .textFieldStyle(.plain)
+                        .font(Tokens.titleFont())
+                        .accessibilityLabel(Text("Название базы"))
+                        .padding(.top, 8)
+                        .padding(.bottom, 6)
+                        .onChange(of: title) { if $0 != page?.title { shell.rename(model.pageID, to: $0) } }
+                }
                 Text(L("Записей: %d", model.total)).font(.system(size: 14)).foregroundColor(Tokens.muted).padding(.bottom, 18)
                 toolbar
-                tabs.padding(.top, 14)
+                if !model.isEmbedded { tabs.padding(.top, 14) }
             }
             .padding(.horizontal, Tokens.contentPadding)
             .padding(.top, 28)
-            if !model.selection.isEmpty { bulkBar }
-            table
+            if !model.selection.isEmpty, kind == DatabaseView.tableKind { bulkBar }
+            content
         }
         .onAppear {
             title = page?.title ?? ""
@@ -41,10 +49,33 @@ struct DatabaseScreen: View {
         .sheet(item: $bulkProperty) { BulkEditSheet(model: model, property: $0) }
     }
 
+    private var kind: String { model.activeView?.kind ?? DatabaseView.tableKind }
+
+    @ViewBuilder private var content: some View {
+        switch kind {
+        case DatabaseView.boardKind: BoardView(model: model)
+        case DatabaseView.listKind: ListKindView(model: model)
+        case DatabaseView.calendarKind: CalendarKindView(model: model)
+        case DatabaseView.galleryKind: GalleryView(model: model)
+        default: table
+        }
+    }
+
     private var toolbar: some View {
         HStack(spacing: 9) {
-            Button { model.createRecord() } label: { Label("Запись", systemImage: "plus") }
-                .buttonStyle(NotesButtonStyle(kind: .primary))
+            if model.templates.isEmpty {
+                Button { model.createRecord() } label: { Label("Запись", systemImage: "plus") }
+                    .buttonStyle(NotesButtonStyle(kind: .primary))
+            } else {
+                Menu {
+                    Button("Пустая запись") { model.createRecord() }
+                    Divider()
+                    ForEach(model.templates) { template in
+                        Button(template.name) { model.createRecord(from: template) }
+                    }
+                } label: { Label("Запись", systemImage: "plus") }
+                .fixedSize()
+            }
             Button { showsFilter = true } label: {
                 Label(model.state.filter.ruleCount > 0 ? L("Фильтр (%d)", model.state.filter.ruleCount) : L("Фильтр"), systemImage: "line.3.horizontal.decrease")
             }
@@ -57,6 +88,9 @@ struct DatabaseScreen: View {
             .popover(isPresented: $showsSort, arrowEdge: .bottom) { SortPopover(model: model) }
             Button { showsProperties = true } label: { Label("Свойства", systemImage: "slider.horizontal.3") }
                 .buttonStyle(NotesButtonStyle())
+            Button { showsViewSettings = true } label: { Label("Вид", systemImage: "rectangle.3.group") }
+                .buttonStyle(NotesButtonStyle())
+                .popover(isPresented: $showsViewSettings, arrowEdge: .bottom) { ViewSettingsPopover(model: model) }
         }
     }
 
@@ -79,22 +113,28 @@ struct DatabaseScreen: View {
                     Button("Удалить представление") { deleteView(view) }.disabled(model.views.count < 2)
                 }
             }
-            Button { addView() } label: { Image(systemName: "plus").font(.system(size: 11)).padding(8).contentShape(Rectangle()) }
-                .buttonStyle(.plain)
-                .foregroundColor(Tokens.muted)
-                .help(L("Новое представление"))
-                .accessibilityLabel(Text("Новое представление"))
+            Menu {
+                ForEach(DatabaseView.knownKinds, id: \.self) { kind in
+                    Button(ViewKindTitle.title(kind)) { addView(kind) }
+                }
+            } label: { Image(systemName: "plus").font(.system(size: 11)) }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(L("Новое представление"))
+            .accessibilityLabel(Text("Новое представление"))
             Spacer()
         }
         .overlay(Rectangle().fill(Tokens.line).frame(height: 1), alignment: .bottom)
     }
 
-    private func addView() {
+    private func addView(_ kind: String) {
         let state = model.state
-        let name = L("Таблица %d", model.views.count + 1)
+        let same = model.views.filter { $0.kind == kind }.count
+        let name = same == 0 ? ViewKindTitle.title(kind) : "\(ViewKindTitle.title(kind)) \(same + 1)"
         let id = UUID()
         model.perform { [store = model.store, databaseID = model.databaseID] in
-            try await store.createView(database: databaseID, name: name, kind: DatabaseView.tableKind, state: state, id: id)
+            try await store.createView(database: databaseID, name: name, kind: kind, state: state, id: id)
         }
         model.activeViewID = id
     }
@@ -140,19 +180,27 @@ struct DatabaseScreen: View {
     }
 
     private var table: some View {
-        // Двумерная прокрутка центрирует содержимое меньше себя, поэтому оно растянуто до размера области.
-        GeometryReader { area in
-            ScrollView([.horizontal, .vertical]) {
-                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    Section(header: header) {
-                        ForEach(model.rows) { row($0) }
-                        footer
+        TopLeadingScroll(resetKey: model.visibleColumns.count) {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                Section(header: header) {
+                    ForEach(model.sections) { section in
+                        if let group = section.group {
+                            GroupHeader(group: group, count: section.total, property: model.database?.property(group.property))
+                                .padding(.top, 10)
+                                .padding(.bottom, 4)
+                        }
+                        ForEach(section.rows) { row($0) }
+                        if section.rows.count < section.total {
+                            Button(L("Показать ещё (осталось %d)", section.total - section.rows.count)) { model.showMore(section.id) }
+                                .buttonStyle(NotesButtonStyle(kind: .plain))
+                                .padding(.top, 6)
+                        }
                     }
+                    footer
                 }
-                .padding(.horizontal, Tokens.contentPadding)
-                .padding(.bottom, 30)
-                .frame(minWidth: area.size.width, minHeight: area.size.height, alignment: .topLeading)
             }
+            .padding(.horizontal, Tokens.contentPadding)
+            .padding(.bottom, 30)
         }
     }
 
@@ -220,11 +268,7 @@ struct DatabaseScreen: View {
     }
 
     @ViewBuilder private var footer: some View {
-        if model.rows.count < model.total {
-            Button(L("Показать ещё (осталось %d)", model.total - model.rows.count)) { model.showMore() }
-                .buttonStyle(NotesButtonStyle(kind: .plain))
-                .padding(.top, 10)
-        } else if model.rows.isEmpty {
+        if model.rows.isEmpty {
             Text(model.state.filter.ruleCount > 0 ? "Под фильтр не подходит ни одна запись." : "Записей пока нет. Нажмите «Запись».")
                 .font(.system(size: 13))
                 .foregroundColor(Tokens.muted)

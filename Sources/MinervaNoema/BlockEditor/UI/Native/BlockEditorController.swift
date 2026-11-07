@@ -54,6 +54,11 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     var pickFile: ((BlockType) -> URL?)?
     /// Открыть таблицу в редакторе.
     var onEditTable: ((Block) -> Void)?
+    /// Выбор базы для встроенного представления; nil — отменено.
+    var pickDatabaseView: (() -> BlockFragment?)?
+    /// Предпросмотр встроенного представления: nil, пока данные не загружены.
+    var embedSummary: ((Block) -> EmbedSummary?)?
+    var onOpenEmbed: ((Block) -> Void)?
     /// Миниатюры занимают много памяти: кэш ограничен.
     private let imageCache: NSCache<NSUUID, NSImage> = {
         let cache = NSCache<NSUUID, NSImage>()
@@ -377,6 +382,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             insertFiles([url], type: type)
         case .insertTable:
             insertFragments([AtomData.table([["", "", ""], ["", "", ""]])])
+        case .insertDatabaseView:
+            if let fragment = pickDatabaseView?() { insertFragments([fragment]) }
         case .copyBlockLink:
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(PageLink.url(page: document.pageID, block: id), forType: .string)
@@ -451,6 +458,9 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             return FileBlockCell(name: AtomData.name(of: block), detail: size, ink: style.ink, muted: style.muted, line: style.line)
         case .table:
             return TableBlockCell(rows: AtomData.rows(of: block), ink: style.ink, line: style.line, soft: style.soft)
+        case .databaseView:
+            // Ячейка спрашивает данные при каждой отрисовке: загрузка не меняет высоту и не сдвигает текст.
+            return DatabaseViewBlockCell(summary: { [weak self] in self?.embedSummary?(block) }, ink: style.ink, muted: style.muted, line: style.line, soft: style.soft)
         default:
             return nil
         }
@@ -1118,6 +1128,9 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
                 return false
             case .table:
                 onEditTable?(block)
+                return true
+            case .databaseView:
+                onOpenEmbed?(block)
                 return true
             default:
                 return false

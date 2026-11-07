@@ -57,12 +57,13 @@ struct BlockType: RawRepresentable, Hashable {
     static let image = BlockType(rawValue: "image")
     static let file = BlockType(rawValue: "file")
     static let table = BlockType(rawValue: "table")
+    static let databaseView = BlockType(rawValue: "database_view")
 
     /// Текстовые типы этой версии. Всё остальное хранится непрозрачно и показывается одним неделимым символом.
     static let known: Set<BlockType> = [.paragraph, .heading1, .heading2, .heading3, .task, .bullet, .numbered, .quote, .callout, .toggle, .code]
     var isKnown: Bool { Self.known.contains(self) }
     /// Известные неделимые блоки: у них нет текста, данные лежат в JSON.
-    static let atoms: Set<BlockType> = [.divider, .image, .file, .table]
+    static let atoms: Set<BlockType> = [.divider, .image, .file, .table, .databaseView]
     var isAtom: Bool { Self.atoms.contains(self) }
     var isHeading: Bool { self == .heading1 || self == .heading2 || self == .heading3 }
 }

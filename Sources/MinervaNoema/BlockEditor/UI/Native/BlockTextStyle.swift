@@ -238,6 +238,65 @@ final class FileBlockCell: NSTextAttachmentCell {
 }
 
 /// Простая таблица; нажатие открывает редактор.
+/// Что показывает карточка встроенного представления.
+struct EmbedSummary: Equatable {
+    var title: String
+    var lines: [String]
+    var total: Int
+}
+
+/// Встроенное представление в тексте: заголовок и первые записи. Полный вид открывается нажатием.
+final class DatabaseViewBlockCell: NSTextAttachmentCell {
+    static let maxLines = 5
+    private static let rowHeight: CGFloat = 24
+    private static let headerHeight: CGFloat = 36
+    private let summary: () -> EmbedSummary?
+    private let ink: NSColor
+    private let muted: NSColor
+    private let line: NSColor
+    private let soft: NSColor
+
+    init(summary: @escaping () -> EmbedSummary?, ink: NSColor, muted: NSColor, line: NSColor, soft: NSColor) {
+        self.summary = summary
+        self.ink = ink
+        self.muted = muted
+        self.line = line
+        self.soft = soft
+        super.init(textCell: "")
+    }
+
+    required init(coder: NSCoder) { fatalError("не используется") }
+
+    override func cellFrame(for textContainer: NSTextContainer, proposedLineFragment lineFrag: NSRect, glyphPosition position: NSPoint, characterIndex charIndex: Int) -> NSRect {
+        NSRect(x: 0, y: 0, width: max(40, lineFrag.width - position.x - 1), height: Self.headerHeight + CGFloat(Self.maxLines) * Self.rowHeight + 6)
+    }
+
+    override func draw(withFrame frame: NSRect, in view: NSView?) {
+        let box = frame.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: box, xRadius: 8, yRadius: 8)
+        line.setStroke()
+        path.stroke()
+        let info = summary()
+        let bold: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: ink]
+        let plain: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: ink]
+        let dim: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: muted]
+        let inset: CGFloat = 12
+        let width = box.width - inset * 2
+        (info?.title ?? NSLocalizedString("Загрузка…", comment: "") as String).draw(in: NSRect(x: box.minX + inset, y: box.minY + 9, width: width - 90, height: 20), withAttributes: bold)
+        if let info {
+            let count = String(format: NSLocalizedString("Записей: %d", comment: ""), info.total)
+            let size = (count as NSString).size(withAttributes: dim)
+            count.draw(at: NSPoint(x: box.maxX - inset - size.width, y: box.minY + 10), withAttributes: dim)
+            for (i, text) in info.lines.prefix(Self.maxLines).enumerated() {
+                let y = box.minY + Self.headerHeight + CGFloat(i) * Self.rowHeight
+                soft.setFill()
+                NSRect(x: box.minX + inset, y: y - 1, width: width, height: 1).fill()
+                text.draw(with: NSRect(x: box.minX + inset, y: y + 3, width: width, height: 18), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: plain)
+            }
+        }
+    }
+}
+
 final class TableBlockCell: NSTextAttachmentCell {
     static let rowHeight: CGFloat = 30
     private let rows: [[String]]

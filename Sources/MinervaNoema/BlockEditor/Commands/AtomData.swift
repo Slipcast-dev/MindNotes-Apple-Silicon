@@ -36,6 +36,35 @@ enum AtomData {
         BlockFragment(type: BlockType.table.rawValue, contentVersion: 1, json: tableJSON(rows), plain: tablePlain(rows))
     }
 
+    /// Встроенное представление: страница базы, вид и собственное состояние. Записи не копируются (FR-11).
+    static func databaseView(page: UUID, kind: String, state: String) -> BlockFragment {
+        BlockFragment(type: BlockType.databaseView.rawValue, contentVersion: 1, json: databaseViewJSON(page: page, kind: kind, state: state), plain: "")
+    }
+
+    static func databaseViewJSON(page: UUID, kind: String, state: String, keeping base: [String: JSONValue] = [:]) -> String {
+        var object = base
+        object["page"] = .string(page.uuidString.lowercased())
+        object["kind"] = .string(kind)
+        if let data = state.data(using: .utf8), let parsed = try? JSONDecoder().decode(JSONValue.self, from: data) { object["state"] = parsed }
+        return json(object)
+    }
+
+    static func viewPage(of block: Block) -> UUID? {
+        guard case .string(let s)? = block.atomJSON["page"] else { return nil }
+        return UUID(uuidString: s)
+    }
+
+    static func viewKind(of block: Block) -> String {
+        if case .string(let s)? = block.atomJSON["kind"] { return s }
+        return "table"
+    }
+
+    /// Состояние встроенного представления строкой JSON: разбор и неизвестные поля — забота `DatabaseViewState`.
+    static func viewState(of block: Block) -> String {
+        guard let state = block.atomJSON["state"], let data = try? JSONEncoder().encode(state) else { return "{}" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     static func rows(of block: Block) -> [[String]] {
         guard case .array(let rows)? = block.atomJSON["rows"] else { return [] }
         return rows.map { row in

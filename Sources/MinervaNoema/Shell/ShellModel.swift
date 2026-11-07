@@ -12,6 +12,7 @@ enum ShellSection: Equatable {
     case backups
     case settings
     case trash
+    case templates
     case tag(UUID)
 }
 
@@ -66,6 +67,10 @@ final class ShellModel: ObservableObject {
     /// Базы не в корзине. Считается заранее: дерево спрашивает об этом для каждой страницы.
     private var liveDatabases: Set<UUID> = []
     @Published private(set) var databaseModel: DatabaseModel?
+    @Published private(set) var userTemplates: [PageTemplate] = []
+    /// Предпросмотр на блок: данные блока рядом, изменившийся блок читается заново.
+    private var embedCache: [UUID: (json: String, summary: EmbedSummary)] = [:]
+    private var embedLoading: Set<String> = []
 
     private var session: WorkspaceSession?
     private(set) var store: SQLiteWorkspace?
@@ -370,6 +375,7 @@ final class ShellModel: ObservableObject {
             tags = loadedTags
             pageTags = loadedPageTags
             databaseIndex = loadedDatabases
+            userTemplates = (try? await store.templates()) ?? []
             pages = session.pages
             saveStatus = .saved
             await cacheImages(for: loadedLook)
@@ -410,6 +416,8 @@ final class ShellModel: ObservableObject {
         pageTags = [:]
         databaseIndex = [:]
         databaseModel = nil
+        userTemplates = []
+        embedCache = [:]
     }
 
     // MARK: Базы данных
@@ -428,7 +436,9 @@ final class ShellModel: ObservableObject {
         enqueue {
             guard let store = self.store, let session = self.session else { return }
             let template = NewDatabase(title: L("Новая база"), titleProperty: L("Название"), statusProperty: L("Статус"),
-                                       statusOptions: [L("Запланировано"), L("В работе"), L("Готово")], dateProperty: L("Срок"), viewName: L("Таблица"))
+                                       statusOptions: [L("Запланировано"), L("В работе"), L("Готово")], dateProperty: L("Срок"), viewName: L("Таблица"),
+                                       extraViews: [(L("Доска"), DatabaseView.boardKind), (L("Список"), DatabaseView.listKind),
+                                                    (L("Календарь"), DatabaseView.calendarKind), (L("Галерея"), DatabaseView.galleryKind)])
             let database = try await store.createDatabase(parent: parent, template: template, ids: RandomIDs(), now: SystemClock().nowMillis())
             self.databaseIndex[database.pageID] = database.id
             try await session.refreshPages()
@@ -454,6 +464,153 @@ final class ShellModel: ObservableObject {
         pages = session.pages
         section = .database(page)
         UserDefaults.standard.set(page.uuidString, forKey: lastPageKey)
+    }
+
+    // MARK: Встроенные представления
+
+    /// Выбор базы для блока. Системное окно: блок вставляется только после подтверждения.
+    func pickDatabaseFragment() -> BlockFragment? {
+        let live = pages.filter { isDatabase($0.id) }
+        guard !live.isEmpty else {
+            notice = L("Сначала создайте базу данных.")
+            return nil
+        }
+        let alert = NSAlert()
+        alert.messageText = L("Какую базу показать?")
+        alert.informativeText = L("Записи не копируются: на странице будет представление существующей базы со своими фильтрами.")
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 280, height: 26))
+        popup.addItems(withTitles: live.map { $0.title.isEmpty ? L("Без названия") : $0.title })
+        alert.accessoryView = popup
+        alert.addButton(withTitle: L("Вставить"))
+        alert.addButton(withTitle: L("Отмена"))
+        guard alert.runModal() == .alertFirstButtonReturn, live.indices.contains(popup.indexOfSelectedItem),
+              let state = try? DatabaseViewState().jsonString() else { return nil }
+        return AtomData.databaseView(page: live[popup.indexOfSelectedItem].id, kind: DatabaseView.tableKind, state: state)
+    }
+
+    /// Данные карточки в тексте: при первом запросе загружаются, затем редактор перерисовывается.
+    func embedSummary(_ block: Block) -> EmbedSummary? {
+        guard let json = try? block.contentJSON() else { return nil }
+        if let cached = embedCache[block.id], cached.json == json { return cached.summary }
+        let key = "\(block.id)|\(json)"
+        guard !embedLoading.contains(key), let store else { return nil }
+        guard let page = AtomData.viewPage(of: block), let database = databaseIndex[page], pages.contains(where: { $0.id == page }) else {
+            return EmbedSummary(title: L("База недоступна: она удалена или в корзине."), lines: [], total: 0)
+        }
+        embedLoading.insert(key)
+        let title = pages.first { $0.id == page }?.title ?? ""
+        let state = DatabaseViewState(json: AtomData.viewState(of: block))
+        Task { @MainActor in
+            defer { self.embedLoading.remove(key) }
+            guard let loaded = try? await store.database(database),
+                  let records = try? await store.queryRecords(database: loaded, state: state, limit: DatabaseViewBlockCell.maxLines, offset: 0) else { return }
+            let summary = EmbedSummary(title: "\(ViewKindTitle.title(AtomData.viewKind(of: block))) · \(title.isEmpty ? L("Без названия") : title)",
+                                                lines: records.rows.map { $0.title.isEmpty ? L("Без названия") : $0.title }, total: records.total)
+            self.embedCache[block.id] = (json, summary)
+            self.editor?.controller.textView.needsDisplay = true
+        }
+        return nil
+    }
+
+    /// После правок в открытом представлении карточка должна показать новые данные.
+    func refreshEmbeds() {
+        embedCache = [:]
+        editor?.controller.textView.needsDisplay = true
+    }
+
+    /// Модель полного вида для блока; состояние пишется обратно в блок обычной правкой страницы и попадает в отмену.
+    func embeddedModel(for block: Block, editor: PageEditorModel) -> DatabaseModel? {
+        guard let store, let session, let page = AtomData.viewPage(of: block), let database = databaseIndex[page], pages.contains(where: { $0.id == page }) else { return nil }
+        let coordinator = session.coordinator
+        var keep = block.atomJSON
+        keep["kind"] = nil
+        keep["state"] = nil
+        keep["page"] = nil
+        let embedded = DatabaseModel.EmbeddedView(id: block.id, name: "", kind: AtomData.viewKind(of: block), state: DatabaseViewState(json: AtomData.viewState(of: block))) { [weak editor, keep] kind, state in
+            guard let json = try? state.jsonString() else { return }
+            editor?.controller.perform(.setAtomData(block: block.id, json: AtomData.databaseViewJSON(page: page, kind: kind, state: json, keeping: keep), plain: ""))
+        }
+        return DatabaseModel(store: store, databaseID: database, pageID: page, embedded: embedded, flush: { try await coordinator.flush() },
+                             pagesChanged: { [weak self] in
+                                 guard let self, let session = self.session else { return }
+                                 try await session.refreshPages()
+                                 self.pages = session.pages
+                                 try await self.reloadTrash()
+                             }, report: { [weak self] in self?.errorMessage = $0 })
+    }
+
+    // MARK: Шаблоны
+
+    func goTemplates() {
+        leavePage { self.section = .templates }
+    }
+
+    /// Сохраняет страницу или запись. Шаблон — независимая копия: её дальнейшие правки не связаны с оригиналом.
+    func saveAsTemplate(_ id: UUID) {
+        let current = pages.first { $0.id == id }?.title ?? ""
+        guard let name = PromptAlert.ask(L("Название шаблона"), value: current) else { return }
+        enqueue {
+            guard let store = self.store, let session = self.session else { return }
+            try await session.coordinator.flush()
+            _ = try await store.saveTemplate(from: id, name: name, ids: RandomIDs(), now: SystemClock().nowMillis())
+            self.userTemplates = try await store.templates()
+            self.notice = L("Шаблон сохранён.")
+        }
+    }
+
+    func useTemplate(_ template: PageTemplate) {
+        enqueue {
+            guard let store = self.store, let session = self.session else { return }
+            let page = try await store.instantiate(template: template.id, parent: nil, ids: RandomIDs(), now: SystemClock().nowMillis())
+            try await session.refreshPages()
+            self.pages = session.pages
+            try await self.reloadTags()
+            try await self.reloadDatabases()
+            try await self.show(page)
+        }
+    }
+
+    /// Встроенный шаблон: обычная новая страница с начальным текстом.
+    func useBuiltin(_ template: BuiltinTemplate) {
+        enqueue {
+            guard let session = self.session else { return }
+            let page = try await session.createPage(parent: nil, title: template.title)
+            self.pages = session.pages
+            let opened = try await session.open(page.id)
+            if let first = opened.document.blocks.first {
+                try opened.perform(.replaceRange(BlockSelection(block: first.id, offset: 0), MarkdownImport.fragments(from: template.markdown)), recordUndo: false)
+            }
+            self.pages = session.pages
+            self.installEditor(opened, id: page.id)
+        }
+    }
+
+    func renameTemplate(_ template: PageTemplate) {
+        guard let name = PromptAlert.ask(L("Название шаблона"), value: template.name) else { return }
+        enqueue {
+            guard let store = self.store else { return }
+            try await store.renameTemplate(template.id, to: name)
+            self.userTemplates = try await store.templates()
+        }
+    }
+
+    func deleteTemplate(_ template: PageTemplate) {
+        guard PromptAlert.confirm(L("Удалить шаблон «%@»?", template.name), detail: L("Созданные из него страницы останутся. Это действие нельзя отменить."), action: L("Удалить")) else { return }
+        enqueue {
+            guard let store = self.store else { return }
+            try await store.deleteTemplate(template.id)
+            self.userTemplates = try await store.templates()
+        }
+    }
+
+    func loadImage(asset: UUID) {
+        guard imageCache[asset] == nil, let store else { return }
+        Task {
+            if let url = try? await store.assetURL(asset) {
+                self.imageCache[asset] = await Self.loadImage(url)
+                self.objectWillChange.send()
+            }
+        }
     }
 
     private func reloadDatabases() async throws {
@@ -508,6 +665,9 @@ final class ShellModel: ObservableObject {
         let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS, soft: Tokens.softNS)
         editor = PageEditorModel(session: editorSession, style: style) { [weak self] in self?.errorMessage = $0 }
         editor?.controller.pageSearch = { [weak self] in self?.linkCandidates($0) ?? [] }
+        editor?.controller.pickDatabaseView = { [weak self] in self?.pickDatabaseFragment() }
+        editor?.controller.embedSummary = { [weak self] in self?.embedSummary($0) }
+        embedCache = [:]
         editor?.controller.onOpenLink = { [weak self] page, block in self?.followLink(to: page, block: block) }
         editor?.controller.addAttachment = { [weak self] url in
             guard let store = self?.store else { throw WorkspaceError.storage(code: 0, detail: "пространство закрыто") }
@@ -770,6 +930,7 @@ final class ShellModel: ObservableObject {
             if let session = self.session {
                 try await session.refreshPages() // Запись могла потерять базу и стать обычной страницей.
                 self.pages = session.pages
+                if let store = self.store { self.userTemplates = try await store.templates() }
             }
         }
     }

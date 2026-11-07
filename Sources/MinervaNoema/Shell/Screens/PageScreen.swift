@@ -161,6 +161,9 @@ struct PageScreen: View {
                             editor.controller.perform(.setAtomData(block: table.id, json: AtomData.tableJSON(rows, keeping: table.extra), plain: AtomData.tablePlain(rows)))
                         }
                     }
+                    .sheet(item: $editor.editingEmbed, onDismiss: { shell.refreshEmbeds() }) { block in
+                        EmbeddedDatabaseSheet(block: block, editor: editor)
+                    }
                 let kids = shell.children(of: editor.pageID)
                 if !kids.isEmpty {
                     Text("Подстраницы").font(.system(size: 17, weight: .semibold)).padding(.top, 24).padding(.bottom, 10)

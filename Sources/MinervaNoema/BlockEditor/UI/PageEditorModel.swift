@@ -9,6 +9,8 @@ final class PageEditorModel: ObservableObject {
     @Published private(set) var contentHeight: CGFloat = 60
     /// Открытая в редакторе таблица.
     @Published var editingTable: EditingTable?
+    /// Открытое встроенное представление.
+    @Published var editingEmbed: Block?
     private let panels: EditorPanels
 
     var pageID: UUID { session.pageID }
@@ -26,6 +28,13 @@ final class PageEditorModel: ObservableObject {
                 return
             }
             self?.editingTable = EditingTable(id: block.id, rows: AtomData.rows(of: block), extra: block.atomJSON)
+        }
+        controller.onOpenEmbed = { [weak self] block in
+            guard block.contentVersion <= 1, AtomData.viewPage(of: block) != nil else {
+                onError(L("Это представление создано более новой версией и здесь не открывается."))
+                return
+            }
+            self?.editingEmbed = block
         }
     }
 
