@@ -52,7 +52,11 @@ struct MovePageSheet: View {
         }
         .frame(width: 480)
         .background(Tokens.paper)
-        .onAppear { targets = shell.moveTargets(for: page.id).filter { $0.id != page.parentID } }
+        .onAppear {
+            targets = shell.moveTargets(for: page.id)
+                .filter { $0.id != page.parentID }
+                .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        }
     }
 
     private func move(to parent: UUID?) {

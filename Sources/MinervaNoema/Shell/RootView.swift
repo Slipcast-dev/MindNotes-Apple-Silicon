@@ -16,18 +16,27 @@ struct RootView: View {
             .background(WindowFrameSaver(name: "MinervaNoemaMainWindow"))
             .preferredColorScheme(prefs.isDark ? .dark : .light)
             .toolbar {
+                // Без системных капсул: они обтягивают содержимое почти без отступов, в макете их нет.
                 ToolbarItem(placement: .navigation) {
-                    Text(AppEdition.displayName).font(.system(size: 13, weight: .semibold))
+                    Text(AppEdition.displayName)
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 4)
                 }
-                ToolbarItem(placement: .automatic) { Spacer() }
+                .sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .automatic) { Spacer() } // Прижимает переключатель темы к правому краю.
+                    .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .automatic) {
                     Button { prefs.isDark.toggle() } label: {
                         Image(systemName: "circle.lefthalf.filled")
+                            .font(.system(size: 14))
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("Переключить тему")
                     .accessibilityLabel(Text("Переключить тему"))
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
             .alert("Ошибка", isPresented: Binding(get: { shell.errorMessage != nil }, set: { if !$0 { shell.errorMessage = nil } })) {
                 Button("OK", role: .cancel) {}
