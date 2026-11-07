@@ -1,6 +1,6 @@
 # Статус
 
-Репозиторий: приватный `Slipcast-dev/Minerva-Noema`. Ветка: `personal-ru`. Базовая метка: `baseline-1.4.2`. Последний коммит — см. `git log`. Проверки — см. `TEST_REPORT.md`.
+Репозиторий: приватный `Slipcast-dev/Minerva-Noema-Apple-Silicon`, только Apple Silicon. Версия с поддержкой Intel: `Slipcast-dev/Minerva-Noema`, остановлена на `dbae856`. Ветка: `personal-ru`. Базовая метка: `baseline-1.4.2`. Последний коммит — см. `git log`. Проверки — см. `TEST_REPORT.md`.
 
 Текущий этап: **M6: код и автотесты готовы, закоммичено и отправлено на GitHub.** Ручная проверка M5 и M6 за заказчиком.
 

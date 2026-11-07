@@ -1,6 +1,8 @@
 <p align="center"><img src="docs/assets/logo.png" alt="Значок Minerva Noema" width="128"></p>
 
-# Minerva Noema
+# Minerva Noema (Apple Silicon)
+
+> **Только Apple Silicon: arm64, macOS 26 или новее.** Версия с поддержкой Intel находится в отдельном репозитории [Slipcast-dev/Minerva-Noema](https://github.com/Slipcast-dev/Minerva-Noema).
 
 Личная локальная база знаний для macOS: страницы, блочный редактор, поиск, ссылки, базы данных. Данные хранятся на этом Mac, сеть и аккаунт не нужны.
 
