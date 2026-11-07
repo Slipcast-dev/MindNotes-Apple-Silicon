@@ -16,7 +16,6 @@ test('идентификатор сборки совпадает с AppEdition �
 });
 
 test('каталог данных отдельный, сборка не заявляет себя обработчиком по умолчанию', () => {
-  assert.ok(!/supportDirectoryName = "Grizzly"/.test(read('Sources/MinervaNoema/Core/AppEdition.swift')));
-  assert.ok(!/supportDirectoryName = "GrizzlyNotes"/.test(read('Sources/MinervaNoema/Core/AppEdition.swift')));
+  assert.strictEqual(/officialSupportDirectoryName = "([^"]+)"/.exec(read('Sources/MinervaNoema/Core/AppEdition.swift'))[1], 'MinervaNoema');
   assert.ok(!read('scripts/build-app.sh').includes('<key>LSHandlerRank</key><string>Default</string>'));
 });

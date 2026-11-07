@@ -356,6 +356,19 @@ func runDatabaseTests() async {
         }
     }
 
+    await test("Изоляция: проверочная копия не получает каталог настоящей сборки") {
+        let id = "local.personal.MinervaNoema", name = "MinervaNoema"
+        let dir = { (bundle: String?) in AppDataScope.supportDirectoryName(bundleID: bundle, officialID: id, officialName: name) }
+        check(AppDataScope.isOfficial(bundleID: id, officialID: id))
+        check(!AppDataScope.isOfficial(bundleID: id + ".test", officialID: id))
+        check(!AppDataScope.isOfficial(bundleID: nil, officialID: id), "бинарник вне пакета")
+        checkEqual(dir(id), name, "настоящая сборка сохраняет прежний каталог")
+        checkEqual(dir(id + ".test"), "MinervaNoema-Test-local.personal.MinervaNoema.test")
+        checkEqual(dir(nil), "MinervaNoema-Test-no-bundle")
+        check(dir("a.test") != dir("b.test"), "у разных копий разные каталоги")
+        checkEqual(dir("../../Evil/имя"), "MinervaNoema-Test-.._.._Evil____", "разделители пути не проходят")
+    }
+
     await test("Базы: даты не сдвигаются при смене часового пояса (FR-10)") {
         try await withWorkspace { w in
             let d = try await makeDatabase(w)
