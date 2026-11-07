@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/logo.png" alt="Значок Minerva Noema" width="128"></p>
+
 # Minerva Noema
 
 Личная локальная база знаний для macOS: страницы, блочный редактор, поиск, ссылки, базы данных. Данные хранятся на этом Mac, сеть и аккаунт не нужны.

@@ -12,3 +12,5 @@ docs/reference-style.webp
 # the project website lives in its own repository
 website/
 .build/
+# значок папки в Finder
+Icon?

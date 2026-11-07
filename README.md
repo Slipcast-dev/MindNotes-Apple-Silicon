@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/logo.png" alt="Minerva Noema icon" width="128"></p>
+
 # Minerva Noema
 
 A personal, local knowledge base for macOS: pages, a block editor, search, links and databases. Data stays on this Mac; no network or account is needed.
