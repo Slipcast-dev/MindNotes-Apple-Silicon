@@ -205,7 +205,7 @@ extension SQLiteWorkspace {
         let marks = Array(repeating: "?", count: pages.count).joined(separator: ",")
         let args = pages.map { SQLValue($0) }
         var out: [UUID: [UUID: PropertyValue]] = [:]
-        try db.query("""
+        _ = try db.query("""
         SELECT page_id, property_id, value_text, value_num, value_date, value_date_end, value_ts, value_ts_end, value_tz, unconverted
         FROM property_values WHERE page_id IN (\(marks))
         """, args) { r in
@@ -222,7 +222,7 @@ extension SQLiteWorkspace {
             }
             if let value { out[page, default: [:]][prop] = value }
         }
-        try db.query("""
+        _ = try db.query("""
         SELECT v.page_id, v.property_id, v.option_id FROM property_value_options v JOIN property_options o ON o.id = v.option_id
         WHERE v.page_id IN (\(marks)) ORDER BY o.sort_key, o.id
         """, args) { r in

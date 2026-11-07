@@ -235,7 +235,7 @@ struct SlashMenuView: View {
                 .padding(6)
             }
             .onAppear { proxy.scrollTo(selected) }
-            .onChange(of: selected) { proxy.scrollTo($0) }
+            .onChange(of: selected) { _, new in proxy.scrollTo(new) }
         }
         .background(RoundedRectangle(cornerRadius: 10).fill(Tokens.card))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Tokens.line))

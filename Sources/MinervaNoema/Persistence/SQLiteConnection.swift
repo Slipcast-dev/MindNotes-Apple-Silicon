@@ -42,7 +42,7 @@ struct SQLRow {
 }
 
 /// Соединение SQLite. Не потокобезопасно (THREADSAFE=2): используется только с очереди-владельца.
-final class SQLiteConnection {
+final class SQLiteConnection: @unchecked Sendable {
     private(set) var handle: OpaquePointer?
     let path: String
 

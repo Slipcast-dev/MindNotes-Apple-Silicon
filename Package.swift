@@ -1,15 +1,16 @@
-// swift-tools-version:5.8
+// swift-tools-version:6.2
 import PackageDescription
 
-// The shipped app is built by scripts/build-app.sh (swiftc), which also builds the QuickLook extension.
-// This manifest only serves editors and `swift build` with a full Xcode; tests run via scripts/test.sh.
+// Приложение собирает scripts/build-app.sh, тесты запускает scripts/test.sh.
+// Манифест нужен редакторам. Цель та же: только Apple Silicon, см. scripts/target.sh.
 let package = Package(
     name: "MinervaNoema",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v26)],
     targets: [
         .executableTarget(
             name: "MinervaNoema",
-            path: "Sources/MinervaNoema"
+            path: "Sources/MinervaNoema",
+            swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]
 )

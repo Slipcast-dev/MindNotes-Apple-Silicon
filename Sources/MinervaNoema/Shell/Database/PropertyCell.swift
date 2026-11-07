@@ -28,13 +28,13 @@ struct CommitField: View {
             .font(.system(size: 13, weight: bold ? .semibold : .regular))
             .focused($focused)
             .onAppear { draft = value }
-            .onChange(of: value) {
-                draft = $0
+            .onChange(of: value) { _, new in
+                draft = new
                 committed = nil
             }
-            .onChange(of: draft) { if live, $0 != value { onCommit($0) } }
+            .onChange(of: draft) { _, new in if live, new != value { onCommit(new) } }
             .onSubmit(commit)
-            .onChange(of: focused) { if !$0 { commit() } }
+            .onChange(of: focused) { _, new in if !new { commit() } }
             .onDisappear(perform: commit)
     }
 

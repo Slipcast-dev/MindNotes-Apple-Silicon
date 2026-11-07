@@ -17,7 +17,6 @@ struct SettingsScreen: View {
                     .foregroundColor(Tokens.muted)
                     .padding(.bottom, 24)
                 VStack(spacing: 0) {
-                    Group {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Тема").font(.system(size: 14, weight: .semibold))
                         HStack(spacing: 10) {
@@ -39,11 +38,10 @@ struct SettingsScreen: View {
                         .labelsHidden()
                         .frame(width: 160)
                         .accessibilityLabel(Text("Язык интерфейса"))
-                        .onChange(of: language) { new in
+                        .onChange(of: language) { _, new in
                             new.apply()
                             AppRestart.offer()
                         }
-                    }
                     }
                     if shell.isOpen {
                         divider

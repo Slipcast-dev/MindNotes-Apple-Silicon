@@ -9,6 +9,10 @@ func handleExtraChild() async -> Bool {
         catch { print("seed error \(error)"); exit(7) }
     }
     if args.contains("--bench-editor") { try? await benchEditor(); exit(0) }
+    if let i = args.firstIndex(of: "--bench-large"), args.count > i + 1 {
+        do { try await benchLarge(dir: URL(fileURLWithPath: args[i + 1])); exit(0) }
+        catch { print("bench error \(error)"); exit(7) }
+    }
     if let i = args.firstIndex(of: "--seed-demo"), args.count > i + 1 {
         do { try await seedDemo(dir: URL(fileURLWithPath: args[i + 1])); _exit(0) }
         catch { print("seed error \(error)"); _exit(7) }

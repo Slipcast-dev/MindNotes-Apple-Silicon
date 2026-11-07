@@ -369,6 +369,38 @@ func runDatabaseTests() async {
         checkEqual(dir("../../Evil/имя"), "MinervaNoema-Test-.._.._Evil____", "разделители пути не проходят")
     }
 
+    await test("Дерево страниц: порядок, свёрнутые ветви, скрытые записи, перемещение") {
+        func page(id: UUID = UUID(), parent: UUID? = nil, _ title: String) -> Page {
+            Page(id: id, parentID: parent, sortKey: "a", title: title, createdAt: 1)
+        }
+        let a = page("a"), b = page("b")
+        let a1 = page(parent: a.id, "a1"), a2 = page(parent: a.id, "a2")
+        let deep = page(parent: a1.id, "deep")
+        var record = page(parent: b.id, "запись")
+        record.databaseID = UUID()
+        let tree = PageTree(pages: [a, a1, deep, a2, b, record]) { $0.databaseID != nil }
+
+        checkEqual(tree.children(of: nil).map(\.title), ["a", "b"])
+        checkEqual(tree.children(of: a.id).map(\.title), ["a1", "a2"], "порядок исходного списка")
+        checkEqual(tree.rows().map(\.page.title), ["a", "a1", "deep", "a2", "b"], "обход в глубину")
+        checkEqual(tree.rows().map(\.depth), [0, 1, 2, 1, 0])
+        checkEqual(tree.rows().map(\.hasChildren), [true, true, false, false, false], "скрытая запись не считается ребёнком")
+        checkEqual(tree.rows(collapsed: [a1.id]).map(\.page.title), ["a", "a1", "a2", "b"])
+        checkEqual(tree.rows(collapsed: [a.id]).map(\.page.title), ["a", "b"])
+        checkEqual(tree.subtree(of: a.id), [a.id, a1.id, a2.id, deep.id])
+        checkEqual(tree.subtree(of: deep.id), [deep.id])
+        checkEqual(tree.path(of: deep.id).map(\.title), ["a", "a1"])
+        checkEqual(tree.page(record.id)?.title, "запись", "заголовок скрытой страницы доступен")
+        check(tree.page(UUID()) == nil)
+
+        // Цикл в повреждённых данных не должен подвешивать интерфейс.
+        let x = UUID(), y = UUID()
+        let looped = PageTree(pages: [page(id: x, parent: y, "x"), page(id: y, parent: x, "y")])
+        checkEqual(looped.rows().count, 0)
+        checkEqual(looped.subtree(of: x), [x, y])
+        checkEqual(looped.path(of: x).map(\.title), ["y"])
+    }
+
     await test("Базы: даты не сдвигаются при смене часового пояса (FR-10)") {
         try await withWorkspace { w in
             let d = try await makeDatabase(w)

@@ -3,14 +3,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# swiftc is used directly because `swift build` needs a full Xcode install (PlatformPath lookup fails with Command Line Tools only).
-# ARCH (arm64 | x86_64) and OUT override the defaults: the host architecture and build/.
-ARCH="${ARCH:-$(uname -m)}"
+source scripts/target.sh
+# swiftc напрямую: для сборки хватает Command Line Tools. OUT меняет каталог результата (по умолчанию build/).
 APP="${OUT:-build}/Minerva Noema.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-# SWIFT_OPT=-Onone: быстрая отладочная сборка главного бинарника.
-swiftc "${SWIFT_OPT:--O}" -parse-as-library -target "$ARCH-apple-macos13.0" \
+# Модуль один, поэтому оптимизация всего модуля разом. SWIFT_OPT=-Onone: быстрая отладочная сборка.
+swiftc ${=SWIFT_OPT:--O -wmo} -parse-as-library -target "$TARGET" \
     -o "$APP/Contents/MacOS/MinervaNoema" $(find Sources -name '*.swift')
 
 # Icon and translations (resources/en.lproj, resources/ru.lproj).
@@ -39,7 +38,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleShortVersionString</key><string>$(tr -d "[:space:]" < VERSION)</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Slipcast-dev. All rights reserved.</string>
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>CFBundleDocumentTypes</key>
   <array>

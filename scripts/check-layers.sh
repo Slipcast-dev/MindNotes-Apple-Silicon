@@ -3,6 +3,7 @@
 # запрещённые импорты и символы ищутся grep, а ссылка на верхний слой даёт ошибку typecheck подмножества.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/target.sh
 S=Sources/MinervaNoema
 fail=0
 
@@ -30,7 +31,7 @@ subset() {
     local name=$1; shift
     local files=("${(@f)$(swiftfiles "$@")}")
     [[ -z "${files[1]:-}" ]] && return 0
-    if ! swiftc -typecheck -parse-as-library -target "$(uname -m)-apple-macos13.0" "${files[@]}" 2>&1 | grep -E 'error:'; then
+    if ! swiftc -typecheck -parse-as-library -target "$TARGET" "${files[@]}" 2>&1 | grep -E 'error:'; then
         echo "ok: $name"
     else
         echo "НАРУШЕНИЕ: подмножество $name не компилируется"; fail=1

@@ -15,16 +15,9 @@ final class DispatchSaveScheduler: SaveScheduler {
     }
 
     func schedule(afterMillis: Int64, _ action: @escaping @MainActor () -> Void) -> ScheduledTask {
-        let work = DispatchWorkItem { MainActor.assumeIsolated_compat(action) }
+        let work = DispatchWorkItem { MainActor.assumeIsolated(action) }
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int(max(0, afterMillis))), execute: work)
         return Item(work)
-    }
-}
-
-extension MainActor {
-    /// `assumeIsolated` появился только в Swift 5.9; замыкание гарантированно выполняется на главной очереди.
-    static func assumeIsolated_compat(_ action: @escaping @MainActor () -> Void) {
-        Task { @MainActor in action() }
     }
 }
 

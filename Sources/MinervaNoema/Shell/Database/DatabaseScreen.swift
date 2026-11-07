@@ -12,7 +12,7 @@ struct DatabaseScreen: View {
     @State private var showsProperties = false
     @State private var bulkProperty: PropertyDefinition?
 
-    private var page: Page? { shell.pages.first { $0.id == model.pageID } }
+    private var page: Page? { shell.pageTree.page(model.pageID) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -30,7 +30,7 @@ struct DatabaseScreen: View {
                         .accessibilityLabel(Text("Название базы"))
                         .padding(.top, 8)
                         .padding(.bottom, 6)
-                        .onChange(of: title) { if $0 != page?.title { shell.rename(model.pageID, to: $0) } }
+                        .onChange(of: title) { _, new in if new != page?.title { shell.rename(model.pageID, to: new) } }
                 }
                 Text(L("Записей: %d", model.total)).font(.system(size: 14)).foregroundColor(Tokens.muted).padding(.bottom, 18)
                 toolbar

@@ -30,7 +30,7 @@ struct TopLeadingScroll<Content: View>: View {
                         .background(alignment: .topLeading) { Color.clear.frame(width: 1, height: 1).id("start") }
                 }
                 .onAppear { proxy.scrollTo("start", anchor: .topLeading) }
-                .onChange(of: resetKey) { _ in
+                .onChange(of: resetKey) { _, _ in
                     DispatchQueue.main.async { proxy.scrollTo("start", anchor: .topLeading) }
                 }
             }

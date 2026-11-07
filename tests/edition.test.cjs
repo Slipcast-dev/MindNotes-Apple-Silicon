@@ -19,3 +19,12 @@ test('каталог данных отдельный, сборка не заяв
   assert.strictEqual(/officialSupportDirectoryName = "([^"]+)"/.exec(read('Sources/MinervaNoema/Core/AppEdition.swift'))[1], 'MinervaNoema');
   assert.ok(!read('scripts/build-app.sh').includes('<key>LSHandlerRank</key><string>Default</string>'));
 });
+
+test('сборка только для Apple Silicon: одна цель во всех скриптах', () => {
+  assert.ok(/TARGET="arm64-apple-macos/.test(read('scripts/target.sh')));
+  for (const script of ['scripts/build-app.sh', 'scripts/test-notes.sh', 'scripts/check-layers.sh']) {
+    const text = read(script);
+    assert.ok(text.includes('source scripts/target.sh'), script);
+    assert.ok(!/x86_64|uname -m|ARCH=/.test(text), script);
+  }
+});

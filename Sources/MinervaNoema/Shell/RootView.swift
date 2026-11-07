@@ -11,6 +11,7 @@ struct RootView: View {
             .id(prefs.theme) // Токены читаются при построении: смена темы перестраивает дерево.
             .sheet(isPresented: $shell.showsLookSheet) { WorkspaceLookSheet() }
             .sheet(isPresented: $shell.showsSearch) { SearchSheet() }
+            .sheet(item: $shell.pageToMove) { MovePageSheet(page: $0) }
             .background(WindowChrome(theme: prefs.theme))
             .background(WindowFrameSaver(name: "MinervaNoemaMainWindow"))
             .preferredColorScheme(prefs.isDark ? .dark : .light)
@@ -134,7 +135,7 @@ struct CrumbBar: View {
 
     private var currentTitle: String {
         switch shell.section {
-        case .page(let id), .database(let id): return shell.pages.first { $0.id == id }?.title ?? ""
+        case .page(let id), .database(let id): return shell.pageTree.page(id)?.title ?? ""
         case .backups: return L("Резервные копии")
         case .settings: return L("Настройки")
         case .trash: return L("Корзина")
@@ -170,7 +171,7 @@ struct CrumbBar: View {
             if openID != nil { saveIndicator } else if case .failed = shell.saveStatus { saveIndicator }
             if let id = openID {
                 Menu {
-                    let page = shell.pages.first { $0.id == id }
+                    let page = shell.pageTree.page(id)
                     Button(page?.favoriteKey != nil ? "Убрать из избранного" : "Добавить в избранное") { shell.toggleFavorite(id) }
                     if !shell.isDatabase(id) {
                         Button(page?.fullWidth == true ? "Обычная ширина" : "Во всю ширину") { shell.toggleFullWidth(id) }

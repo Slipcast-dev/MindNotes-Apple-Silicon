@@ -131,6 +131,6 @@ struct TagScreen: View {
             .padding(.bottom, 42)
         }
         .onAppear { name = tag?.name ?? "" }
-        .onChange(of: id) { _ in name = tag?.name ?? "" }
+        .onChange(of: id) { _, _ in name = tag?.name ?? "" }
     }
 }

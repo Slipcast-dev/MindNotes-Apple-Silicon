@@ -99,7 +99,7 @@ struct WorkspaceLookSheet: View {
                                     TextField(L("Emoji"), text: $emoji)
                                         .textFieldStyle(.roundedBorder)
                                         .frame(width: 70)
-                                        .onChange(of: emoji) { value in
+                                        .onChange(of: emoji) { _, value in
                                             guard let first = value.first else { return }
                                             draft.logoKind = .emoji
                                             draft.logoValue = String(first)
@@ -128,7 +128,7 @@ struct WorkspaceLookSheet: View {
                         }
                         TextField(L("Подпись на обложке"), text: $label)
                             .textFieldStyle(.roundedBorder)
-                            .onChange(of: label) { draft.coverLabel = $0 }
+                            .onChange(of: label) { _, new in draft.coverLabel = new }
                     }
                 }
                 .padding(.trailing, 8)

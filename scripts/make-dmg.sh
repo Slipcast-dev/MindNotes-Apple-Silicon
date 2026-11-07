@@ -11,7 +11,7 @@ APP="$OUT/Minerva Noema.app"
 [[ -d "$APP" ]] || ./scripts/build-app.sh
 
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")
-DMG="$OUT/MinervaNoema-$VERSION${ARCH:+-$ARCH}.dmg"
+DMG="$OUT/MinervaNoema-$VERSION.dmg"
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 

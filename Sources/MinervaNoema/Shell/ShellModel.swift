@@ -40,7 +40,7 @@ final class ShellModel: ObservableObject {
     @Published private(set) var backlinks: [Backlink] = []
     @Published private(set) var workspaceName = ""
     @Published private(set) var pages: [Page] = [] {
-        didSet { refreshLiveDatabases() }
+        didSet { refreshPageIndex() }
     }
     @Published private(set) var saveStatus: SaveStatus = .saved
     @Published private(set) var editor: PageEditorModel? {
@@ -62,10 +62,16 @@ final class ShellModel: ObservableObject {
 
     /// Страницы-базы: страница → база.
     @Published private(set) var databaseIndex: [UUID: UUID] = [:] {
-        didSet { refreshLiveDatabases() }
+        didSet { refreshPageIndex() }
     }
     /// Базы не в корзине. Считается заранее: дерево спрашивает об этом для каждой страницы.
     private var liveDatabases: Set<UUID> = []
+    /// Производные от `pages`: интерфейс читает их при каждой перерисовке, поэтому они считаются один раз на изменение.
+    private(set) var pageTree = PageTree()
+    private(set) var favorites: [Page] = []
+    private(set) var recent: [Page] = []
+    /// Страница, для которой открыт выбор нового места.
+    @Published var pageToMove: Page?
     @Published private(set) var databaseModel: DatabaseModel?
     @Published private(set) var userTemplates: [PageTemplate] = []
     /// Предпросмотр на блок: данные блока рядом, изменившийся блок читается заново.
@@ -424,9 +430,13 @@ final class ShellModel: ObservableObject {
 
     func isDatabase(_ id: UUID) -> Bool { databaseIndex[id] != nil }
 
-    private func refreshLiveDatabases() {
+    private func refreshPageIndex() {
         let live = Set(pages.map(\.id))
-        liveDatabases = Set(databaseIndex.filter { live.contains($0.key) }.values)
+        let databases = Set(databaseIndex.filter { live.contains($0.key) }.values)
+        liveDatabases = databases
+        pageTree = PageTree(pages: pages) { $0.databaseID.map(databases.contains) ?? false }
+        favorites = pages.filter { $0.favoriteKey != nil }.sorted { ($0.favoriteKey ?? "") < ($1.favoriteKey ?? "") }
+        recent = pages.filter { $0.lastOpenedAt != nil }.sorted { ($0.lastOpenedAt ?? 0) > ($1.lastOpenedAt ?? 0) }.prefix(5).map { $0 }
     }
 
     /// Открыта ли эта страница или база.
@@ -857,10 +867,6 @@ final class ShellModel: ObservableObject {
         }
     }
 
-    var favorites: [Page] {
-        pages.filter { $0.favoriteKey != nil }.sorted { ($0.favoriteKey ?? "") < ($1.favoriteKey ?? "") }
-    }
-
     func goSettings() {
         leavePage { self.section = .settings }
     }
@@ -1118,7 +1124,7 @@ final class ShellModel: ObservableObject {
         act {
             self.busyMessage = L("Восстановление…")
             defer { self.busyMessage = nil }
-            try await Task.detached(priority: .userInitiated) {
+            _ = try await Task.detached(priority: .userInitiated) {
                 try RestoreService.restore(archive: source, to: url, inspector: SQLiteSnapshotInspector(), newID: UUID(), now: SystemClock().nowMillis())
             }.value
             self.offerToOpen(url)
@@ -1203,7 +1209,7 @@ final class ShellModel: ObservableObject {
     }
 
     func children(of parent: UUID?) -> [Page] {
-        pages.filter { $0.parentID == parent && !isRecordInLiveDatabase($0) }
+        pageTree.children(of: parent)
     }
 
     /// Записи показывает их база. Запись, чья база в корзине, остаётся видна в дереве и не теряется.
@@ -1212,30 +1218,12 @@ final class ShellModel: ObservableObject {
     }
 
     func path(of id: UUID) -> [Page] {
-        var out: [Page] = []
-        var current = pages.first { $0.id == id }?.parentID
-        while let c = current, let page = pages.first(where: { $0.id == c }) {
-            out.insert(page, at: 0)
-            current = page.parentID
-        }
-        return out
+        pageTree.path(of: id)
     }
 
     /// Куда можно переместить страницу: не в неё саму и не в потомков.
     func moveTargets(for id: UUID) -> [Page] {
-        var banned: Set<UUID> = [id]
-        var added = true
-        while added {
-            added = false
-            for p in pages where p.parentID.map({ banned.contains($0) }) == true && !banned.contains(p.id) {
-                banned.insert(p.id)
-                added = true
-            }
-        }
-        return pages.filter { !banned.contains($0.id) && !isDatabase($0.id) }
-    }
-
-    var recent: [Page] {
-        pages.filter { $0.lastOpenedAt != nil }.sorted { ($0.lastOpenedAt ?? 0) > ($1.lastOpenedAt ?? 0) }.prefix(5).map { $0 }
+        let banned = pageTree.subtree(of: id)
+        return pages.filter { !banned.contains($0.id) && !isDatabase($0.id) && !isRecordInLiveDatabase($0) }
     }
 }

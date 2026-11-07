@@ -1,6 +1,6 @@
 # Сборка, запуск и восстановление
 
-Нужны Command Line Tools (`xcode-select --install`) и macOS 13 или новее. Для JS-тестов нужен Node.js.
+Нужны Mac на Apple Silicon, macOS 26 или новее и Command Line Tools (`xcode-select --install`). Для JS-тестов нужен Node.js. Сборка для Intel не поддерживается (ADR-0009).
 
 ## Сборка
 
@@ -8,17 +8,13 @@
 ./scripts/build-app.sh
 ```
 
-Результат: `build/Minerva Noema.app`, архитектура текущей машины, подпись ad-hoc (это не notarization). Другие варианты:
-
-```bash
-ARCH=arm64 OUT=build/arm64 ./scripts/build-app.sh
-```
+Результат: `build/Minerva Noema.app`, arm64, подпись ad-hoc (это не notarization). Отладочная сборка в другой каталог:
 
 ```bash
 SWIFT_OPT=-Onone OUT=build/debug ./scripts/build-app.sh
 ```
 
-Сборка под arm64 на Intel только компилируется; запустить её там нельзя. Установленный Grizzly не заменяется: у этой сборки другое имя, идентификатор и каталог данных (`~/Library/Application Support/MinervaNoema`).
+Установленный Grizzly не заменяется: у этой сборки другое имя, идентификатор и каталог данных (`~/Library/Application Support/MinervaNoema`).
 
 ## Проверочный запуск
 
@@ -50,6 +46,18 @@ SWIFT_OPT=-Onone OUT=build/debug ./scripts/build-app.sh
 
 ```bash
 ./scripts/check-layers.sh
+```
+
+Thread Sanitizer:
+
+```bash
+NOTES_OPT=-sanitize=thread ./scripts/test-notes.sh
+```
+
+Замеры на данных AT-17. Первый запуск создаёт пространство в указанной папке, она должна быть временной. Замер имеет смысл только с оптимизацией: обычный `test-notes.sh` собирает без неё.
+
+```bash
+NOTES_OPT="-O" ./scripts/test-notes.sh --bench-large /tmp/minerva-large
 ```
 
 ## Пространство

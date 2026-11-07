@@ -115,7 +115,7 @@ struct PageScreen: View {
                     .accessibilityLabel(Text("Заголовок страницы"))
                     .padding(.top, 8)
                     .padding(.bottom, 9)
-                    .onChange(of: title) { new in
+                    .onChange(of: title) { _, new in
                         if new != page?.title { shell.rename(editor.pageID, to: new) }
                     }
                 Text(updatedLine)

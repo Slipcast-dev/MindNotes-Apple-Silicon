@@ -44,7 +44,7 @@ struct SearchSheet: View {
                     }
                     .padding(8)
                 }
-                .onChange(of: selected) { proxy.scrollTo($0) }
+                .onChange(of: selected) { _, new in proxy.scrollTo(new) }
             }
             .frame(height: 320)
         }
@@ -104,7 +104,7 @@ struct SearchSheet: View {
     }
 }
 
-/// Поле ввода со стрелками: SwiftUI на macOS 13 не даёт перехватить их в TextField.
+/// Поле ввода AppKit: стрелки и Return перехватываются до редактора поля, фокус ставится сразу при показе.
 struct SearchField: NSViewRepresentable {
     @Binding var text: String
     let placeholder: String

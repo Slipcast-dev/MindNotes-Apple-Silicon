@@ -1241,12 +1241,10 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 }
 
-/// Системный ИИ не входит в продукт (FR-16). API доступен с macOS 15, поэтому свойство задаётся по имени.
+/// Системный ИИ не входит в продукт (FR-16).
 enum SystemAI {
     static func disableWritingTools(on view: NSTextView) {
-        let setter = NSSelectorFromString("setWritingToolsBehavior:")
-        guard view.responds(to: setter) else { return }
-        view.setValue(-1, forKey: "writingToolsBehavior") // NSWritingToolsBehaviorNone
+        view.writingToolsBehavior = .none
     }
 }
 

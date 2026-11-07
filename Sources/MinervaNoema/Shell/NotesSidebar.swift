@@ -55,6 +55,8 @@ struct SidebarGroup: View {
 
 struct NotesSidebar: View {
     @EnvironmentObject private var shell: ShellModel
+    /// Свёрнутые страницы дерева. По умолчанию всё развёрнуто.
+    @State private var collapsed: Set<UUID> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -125,7 +127,8 @@ struct NotesSidebar: View {
             }
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 0) {
+                // Лениво и плоско: на больших пространствах строятся только строки на экране.
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if shell.isOpen, !shell.favorites.isEmpty {
                         SidebarGroup(title: L("Избранное"))
                         ForEach(shell.favorites) { page in
@@ -134,7 +137,11 @@ struct NotesSidebar: View {
                     }
                     if shell.isOpen {
                         SidebarGroup(title: L("Страницы"))
-                        ForEach(shell.children(of: nil)) { PageTreeRow(page: $0, depth: 0) }
+                        ForEach(shell.pageTree.rows(collapsed: collapsed)) { row in
+                            PageTreeRow(row: row, expanded: !collapsed.contains(row.id)) {
+                                if collapsed.remove(row.id) == nil { collapsed.insert(row.id) }
+                            }
+                        }
 
                         if !shell.tags.isEmpty {
                             SidebarGroup(title: L("Теги"))
@@ -171,43 +178,33 @@ struct NotesSidebar: View {
     }
 }
 
-/// Строка дерева страниц с вложенностью.
+/// Строка дерева страниц с отступом по вложенности.
 struct PageTreeRow: View {
     @EnvironmentObject private var shell: ShellModel
-    let page: Page
-    let depth: Int
-    @State private var expanded = true
+    let row: PageTree.Row
+    let expanded: Bool
+    let toggle: () -> Void
 
     var body: some View {
-        let kids = shell.children(of: page.id)
+        let page = row.page
         let isDatabase = shell.isDatabase(page.id)
-        VStack(alignment: .leading, spacing: 0) {
-            SidebarRow(title: page.title.isEmpty ? L("Без названия") : page.title,
-                       symbol: kids.isEmpty ? (isDatabase ? "tablecells" : (page.isFolder ? "folder" : "doc.text")) : (expanded ? "chevron.down" : "chevron.right"),
-                       active: shell.isOpenPage(page.id), indent: CGFloat(depth) * 14, emoji: kids.isEmpty ? page.emoji : nil) {
-                if shell.isOpenPage(page.id), !kids.isEmpty { expanded.toggle() } else { shell.openPage(page.id) }
+        SidebarRow(title: page.title.isEmpty ? L("Без названия") : page.title,
+                   symbol: !row.hasChildren ? (isDatabase ? "tablecells" : (page.isFolder ? "folder" : "doc.text")) : (expanded ? "chevron.down" : "chevron.right"),
+                   active: shell.isOpenPage(page.id), indent: CGFloat(row.depth) * 14, emoji: row.hasChildren ? nil : page.emoji) {
+            if shell.isOpenPage(page.id), row.hasChildren { toggle() } else { shell.openPage(page.id) }
+        }
+        .contextMenu {
+            if !isDatabase {
+                Button("Новая подстраница") { shell.createPage(parent: page.id) }
+                Button("Новая папка") { shell.createFolder(parent: page.id) }
+                Button("Новая база данных") { shell.createDatabase(parent: page.id) }
             }
-            .contextMenu {
-                if !isDatabase {
-                    Button("Новая подстраница") { shell.createPage(parent: page.id) }
-                    Button("Новая папка") { shell.createFolder(parent: page.id) }
-                    Button("Новая база данных") { shell.createDatabase(parent: page.id) }
-                }
-                Button(page.favoriteKey != nil ? "Убрать из избранного" : "Добавить в избранное") { shell.toggleFavorite(page.id) }
-                Button("Дублировать страницу") { shell.duplicatePage(page.id) }
-                if !isDatabase { Button("Сохранить как шаблон…") { shell.saveAsTemplate(page.id) } }
-                Menu("Переместить") {
-                    if page.parentID != nil { Button("В корень") { shell.move(page.id, toParent: nil) } }
-                    ForEach(shell.moveTargets(for: page.id).filter { $0.id != page.parentID }) { target in
-                        Button(target.title.isEmpty ? L("Без названия") : target.title) { shell.move(page.id, toParent: target.id) }
-                    }
-                }
-                Divider()
-                Button("Удалить") { shell.trash(page.id) }
-            }
-            if expanded {
-                ForEach(kids) { PageTreeRow(page: $0, depth: depth + 1) }
-            }
+            Button(page.favoriteKey != nil ? "Убрать из избранного" : "Добавить в избранное") { shell.toggleFavorite(page.id) }
+            Button("Дублировать страницу") { shell.duplicatePage(page.id) }
+            if !isDatabase { Button("Сохранить как шаблон…") { shell.saveAsTemplate(page.id) } }
+            Button("Переместить в…") { shell.pageToMove = page }
+            Divider()
+            Button("Удалить") { shell.trash(page.id) }
         }
     }
 }
