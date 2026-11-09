@@ -72,6 +72,8 @@ final class ShellModel: ObservableObject {
     private(set) var recent: [Page] = []
     /// Страница, для которой открыт выбор нового места.
     @Published var pageToMove: Page?
+    /// Страница, для которой открыта история версий.
+    @Published var historyPage: Page?
     @Published private(set) var databaseModel: DatabaseModel?
     @Published private(set) var userTemplates: [PageTemplate] = []
     /// Предпросмотр на блок: данные блока рядом, изменившийся блок читается заново.
@@ -1190,6 +1192,30 @@ final class ShellModel: ObservableObject {
     // MARK: Служебное
 
     /// Ошибка показывается пользователю; пустое пространство её не маскирует.
+    // MARK: История версий
+
+    func revisions(of page: UUID) async -> [Revision] {
+        (try? await store?.revisions(ofPage: page)) ?? []
+    }
+
+    func revisionBlocks(_ revision: Revision) async -> [Block] {
+        (try? await store?.revisionBlocks(revision.id)) ?? []
+    }
+
+    /// Только для открытой страницы: восстановление идёт через её сессию, чтобы правку можно было отменить.
+    func restore(_ revision: Revision) {
+        enqueue {
+            guard let store = self.store, let editorSession = self.session?.editor, editorSession.pageID == revision.pageID else {
+                self.errorMessage = L("Откройте страницу, чтобы восстановить её версию.")
+                return
+            }
+            let blocks = try await store.revisionBlocks(revision.id)
+            try await editorSession.restore(revisionBlocks: blocks, label: String(format: L("Восстановлено из версии %d"), revision.seq))
+            self.editor?.controller.reloadFromSession()
+            self.notice = String(format: L("Восстановлена версия %d. Прежний текст сохранён в истории."), revision.seq)
+        }
+    }
+
     private func act(_ body: @escaping @MainActor () async throws -> Void) {
         Task { @MainActor in
             do { try await body() }

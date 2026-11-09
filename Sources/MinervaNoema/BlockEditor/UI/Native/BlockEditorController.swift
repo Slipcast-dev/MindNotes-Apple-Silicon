@@ -308,6 +308,12 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         textView.scrollRangeToVisible(r)
     }
 
+    /// Документ сессии заменён целиком (восстановление версии): вид перестраивается по нему.
+    func reloadFromSession() {
+        syncView()
+        restoreSelection()
+    }
+
     func undo() {
         session.undoStep()
         syncView()

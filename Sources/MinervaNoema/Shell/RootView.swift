@@ -12,6 +12,7 @@ struct RootView: View {
             .sheet(isPresented: $shell.showsLookSheet) { WorkspaceLookSheet() }
             .sheet(isPresented: $shell.showsSearch) { SearchSheet() }
             .sheet(item: $shell.pageToMove) { MovePageSheet(page: $0) }
+            .sheet(item: $shell.historyPage) { HistorySheet(page: $0) }
             .background(WindowChrome(theme: prefs.theme))
             .background(WindowFrameSaver(name: "MinervaNoemaMainWindow"))
             .preferredColorScheme(prefs.isDark ? .dark : .light)
@@ -189,6 +190,7 @@ struct CrumbBar: View {
                     }
                     Button("Дублировать страницу") { shell.duplicatePage(id) }
                     if !shell.isDatabase(id) { Button("Сохранить как шаблон…") { shell.saveAsTemplate(id) } }
+                    if !shell.isDatabase(id), let page { Button("История версий…") { shell.historyPage = page } }
                     Divider()
                     Button("Удалить страницу") { shell.trash(id) }
                 } label: { Image(systemName: "ellipsis") }

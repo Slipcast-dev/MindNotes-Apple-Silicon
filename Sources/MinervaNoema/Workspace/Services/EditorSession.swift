@@ -110,6 +110,40 @@ final class EditorSession {
         lastSnapshotAt = now
     }
 
+    /// Восстановление версии (FR-07.9). Текущее состояние сначала уходит в историю, восстановленное становится
+    /// новой версией. Это одна правка: ⌘Z возвращает текст, бывший до восстановления.
+    func restore(revisionBlocks: [Block], label: String) async throws {
+        try await snapshot(reason: "Перед восстановлением")
+        let now = clock.nowMillis()
+        let current = Dictionary(uniqueKeysWithValues: document.blocks.map { ($0.id, $0) })
+        let target = Set(revisionBlocks.map(\.id))
+        var forward: [BlockChange] = []
+        var inverse: [BlockChange] = []
+        for block in document.blocks where !target.contains(block.id) {
+            forward.append(.delete(block.id))
+            inverse.append(.upsert(block))
+        }
+        for var block in revisionBlocks {
+            block.pageID = document.pageID
+            if var same = current[block.id] {
+                same.updatedAt = block.updatedAt
+                if same == block { continue }
+            }
+            block.updatedAt = now
+            forward.append(.upsert(block))
+            inverse.append(current[block.id].map(BlockChange.upsert) ?? .delete(block.id))
+        }
+        guard !forward.isEmpty else { return }
+        var next = document
+        next.apply(forward)
+        undo.record(EditResult(document: next, changes: forward, inverse: inverse, selection: nil, coalesceKey: nil),
+                    selectionBefore: selection, now: now)
+        applyHistory(forward, selection: nil)
+        // Пустой версии нужен абзац, как новой странице; он не входит в отмену.
+        if document.blocks.isEmpty { try perform(.insertBlock(after: nil, type: .paragraph), recordUndo: false) }
+        try await snapshot(reason: label)
+    }
+
     /// Уход со страницы: правки записаны, снимок сделан, если страница менялась.
     func close() async throws {
         await snapshotTask?.value
