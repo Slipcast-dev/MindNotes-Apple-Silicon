@@ -2,7 +2,7 @@
 
 # Minerva Noema (Apple Silicon)
 
-> **Apple Silicon only: arm64, macOS 26 or newer.** The version with Intel support is a separate repository, [Slipcast-dev/Minerva-Noema](https://github.com/Slipcast-dev/Minerva-Noema).
+> **Apple Silicon only: arm64, macOS 26 or newer.** The last version with Intel support is kept as the `intel-last` tag.
 
 A personal, local knowledge base for macOS: pages, a block editor, search, links and databases. Data stays on this Mac; no network or account is needed.
 
