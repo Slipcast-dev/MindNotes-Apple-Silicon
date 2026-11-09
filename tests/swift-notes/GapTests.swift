@@ -24,6 +24,7 @@ final class FlakyStore: WorkspaceStore {
     func saveRevision(pageID: UUID, reason: String, blocks: [Block], id: UUID, now: Int64) async throws -> Revision? { try await inner.saveRevision(pageID: pageID, reason: reason, blocks: blocks, id: id, now: now) }
     func revisions(ofPage id: UUID) async throws -> [Revision] { try await inner.revisions(ofPage: id) }
     func revisionBlocks(_ revisionID: UUID) async throws -> [Block] { try await inner.revisionBlocks(revisionID) }
+    func pruneRevisions(pageID: UUID, keeping: Set<UUID>) async throws { try await inner.pruneRevisions(pageID: pageID, keeping: keeping) }
     func close() { inner.close() }
 }
 

@@ -60,4 +60,41 @@ func runHistoryTests() async {
             try await session.close()
         }
     }
+
+    await test("История: удержание — сутки целиком, час, день, неделя, самый новый всегда") {
+        let h = RevisionRetention.hour, d = RevisionRetention.day
+        let now: Int64 = 1000 * d
+        var seq = 0
+        func rev(_ at: Int64) -> Revision { seq += 1; return Revision(id: UUID(), pageID: UUID(), seq: seq, createdAt: at, reason: "", contentHash: "", byteSize: 0) }
+        let recent = [rev(now - 10), rev(now - h), rev(now - 2 * h)]
+        let hourA = rev(now - 2 * d - 10 * 60_000 - (now % h)), hourB = rev(hourA.createdAt + 5 * 60_000)
+        let dayA = rev(now - 10 * d - (now % d) + 3 * h), dayB = rev(dayA.createdAt + 2 * h)
+        let weekA = rev((now - 100 * d) / (7 * d) * (7 * d) + d), weekB = rev(weekA.createdAt + d) // одна неделя
+        let kept = RevisionRetention.keep(recent + [hourA, hourB, dayA, dayB, weekA, weekB], now: now)
+        check(recent.allSatisfy { kept.contains($0.id) }, "последние сутки целиком")
+        check(kept.contains(hourB.id) && !kept.contains(hourA.id), "в часе — новейший")
+        check(kept.contains(dayB.id) && !kept.contains(dayA.id), "в дне — новейший")
+        check(kept.contains(weekB.id) && !kept.contains(weekA.id), "в неделе — новейший")
+        let old = rev(now - 400 * d)
+        checkEqual(RevisionRetention.keep([old], now: now), [old.id], "единственный старый снимок остаётся")
+        checkEqual(RevisionRetention.keep([], now: now), [])
+    }
+
+    await test("История: прореживание в базе удаляет только лишние снимки") {
+        try await withTempDir { dir in
+            let ws = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "A")
+            let page = UUID()
+            _ = try await ws.createPage(parent: nil, title: "С", id: page, now: 1)
+            var ids: [UUID] = []
+            for i in 0..<4 {
+                let block = Block(id: UUID(), pageID: page, sortKey: "a", content: BlockContent(text: "версия \(i)"), createdAt: 1)
+                ids.append(try await ws.saveRevision(pageID: page, reason: "r", blocks: [block], id: UUID(), now: Int64(i + 1))!.id)
+            }
+            try await ws.pruneRevisions(pageID: page, keeping: [ids[1], ids[3]])
+            checkEqual(Set(try await ws.revisions(ofPage: page).map(\.id)), [ids[1], ids[3]])
+            try await ws.pruneRevisions(pageID: page, keeping: [])
+            checkEqual(try await ws.revisions(ofPage: page).count, 2, "пустой набор ничего не удаляет")
+            ws.close()
+        }
+    }
 }

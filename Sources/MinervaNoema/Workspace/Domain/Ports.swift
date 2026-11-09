@@ -81,6 +81,8 @@ protocol WorkspaceStore: BlockSink {
     func saveRevision(pageID: UUID, reason: String, blocks: [Block], id: UUID, now: Int64) async throws -> Revision?
     func revisions(ofPage id: UUID) async throws -> [Revision]
     func revisionBlocks(_ revisionID: UUID) async throws -> [Block]
+    /// Удаляет снимки страницы, кроме перечисленных.
+    func pruneRevisions(pageID: UUID, keeping: Set<UUID>) async throws
     func close()
 }
 

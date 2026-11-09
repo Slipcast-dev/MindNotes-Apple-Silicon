@@ -108,6 +108,10 @@ final class EditorSession {
             throw error
         }
         lastSnapshotAt = now
+        // Прореживание — уборка: его сбой не должен мешать сохранению.
+        if let all = try? await store.revisions(ofPage: document.pageID) {
+            try? await store.pruneRevisions(pageID: document.pageID, keeping: RevisionRetention.keep(all, now: now))
+        }
     }
 
     /// Восстановление версии (FR-07.9). Текущее состояние сначала уходит в историю, восстановленное становится

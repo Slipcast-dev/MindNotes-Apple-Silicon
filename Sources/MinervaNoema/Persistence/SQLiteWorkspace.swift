@@ -429,6 +429,18 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
         }
     }
 
+    func pruneRevisions(pageID: UUID, keeping: Set<UUID>) async throws {
+        guard !keeping.isEmpty else { return } // Пустой набор — ошибка вызова, а не просьба удалить всё.
+        try await writer.run { db in
+            try db.transaction {
+                let all = try db.query("SELECT id FROM revisions WHERE page_id=?", [SQLValue(pageID)]) { $0.uuid(0) }.compactMap { $0 }
+                for id in all where !keeping.contains(id) {
+                    try db.run("DELETE FROM revisions WHERE id=?", [SQLValue(id)])
+                }
+            }
+        }
+    }
+
     func revisionBlocks(_ revisionID: UUID) async throws -> [Block] {
         try await reader.run { db in
             let rows = try db.query("SELECT page_id, payload FROM revisions WHERE id=?", [SQLValue(revisionID)]) { ($0.uuid(0), $0.blob(1)) }
