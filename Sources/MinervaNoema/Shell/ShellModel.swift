@@ -1192,6 +1192,40 @@ final class ShellModel: ObservableObject {
     // MARK: Служебное
 
     /// Ошибка показывается пользователю; пустое пространство её не маскирует.
+    // MARK: Экспорт
+
+    /// Страница в Markdown; вложения копируются в папку рядом с файлом. Оригинал не меняется.
+    func exportMarkdown(_ id: UUID) {
+        enqueue {
+            guard let store = self.store, let session = self.session else { return }
+            try await session.coordinator.flush() // В файл попадают все подтверждённые правки.
+            let title = self.pageTree.page(id)?.title ?? ""
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = MarkdownExport.safeFileName(title.isEmpty ? L("Без названия") : title) + ".md"
+            panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            let folder = url.deletingPathExtension().lastPathComponent + "_files"
+            let blocks = BlockDocument(pageID: id, blocks: try await store.blocks(ofPage: id)).blocks
+            let result = MarkdownExport.export(title: title, blocks: blocks, assetFolder: folder) { self.pageTree.page($0)?.title }
+            var missing = 0
+            if !result.assets.isEmpty {
+                let fm = FileManager.default
+                try fm.createDirectory(at: url.deletingLastPathComponent().appendingPathComponent(folder), withIntermediateDirectories: true)
+                for asset in result.assets {
+                    let target = url.deletingLastPathComponent().appendingPathComponent(asset.path)
+                    guard let source = try await store.assetURL(asset.id), fm.fileExists(atPath: source.path) else { missing += 1; continue }
+                    if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
+                    try fm.copyItem(at: source, to: target)
+                }
+            }
+            try Data(result.markdown.utf8).write(to: url, options: .atomic)
+            var lines = [L("Страница экспортирована в Markdown.")]
+            lines += result.report.map { "\(L($0.reason)): \($0.count)" }
+            if missing > 0 { lines.append(String(format: L("Не найдено вложений: %d"), missing)) }
+            self.notice = lines.joined(separator: "\n")
+        }
+    }
+
     // MARK: История версий
 
     func revisions(of page: UUID) async -> [Revision] {

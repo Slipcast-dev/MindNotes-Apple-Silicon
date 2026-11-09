@@ -792,3 +792,12 @@
 "Откройте страницу, чтобы восстановить её версию." = "Open the page to restore its version.";
 "Восстановлено из версии %d" = "Restored from version %d";
 "Восстановлена версия %d. Прежний текст сохранён в истории." = "Version %d restored. The previous text is kept in the history.";
+"Экспорт в Markdown…" = "Export to Markdown…";
+"Страница экспортирована в Markdown." = "The page was exported to Markdown.";
+"Не найдено вложений: %d" = "Attachments not found: %d";
+"Сворачиваемые блоки стали пунктами списка" = "Toggle blocks became list items";
+"Вложения без файла" = "Attachments without a file";
+"Встроенные представления баз (экспортируйте базу в CSV)" = "Embedded database views (export the database to CSV)";
+"Неизвестные блоки: сохранён только текст" = "Unknown blocks: only the text was kept";
+"Подчёркивание" = "Underline";
+"Цвет текста и выделение" = "Text color and highlight";

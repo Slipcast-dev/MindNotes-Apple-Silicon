@@ -97,4 +97,41 @@ func runHistoryTests() async {
             ws.close()
         }
     }
+
+    await test("Экспорт Markdown: форматирование, списки, вложенность, задачи, таблица, вложение, отчёт") {
+        let page = UUID(), other = UUID(), asset = UUID()
+        func b(_ type: BlockType, _ runs: [TextRun], parent: UUID? = nil, checked: Bool = false, key: String) -> Block {
+            var block = Block(id: UUID(), pageID: page, parentID: parent, sortKey: key, type: type, content: BlockContent(runs: runs, checked: checked), createdAt: 1)
+            block.pageID = page
+            return block
+        }
+        let list = b(.bullet, [TextRun("пункт")], key: "a2")
+        var blocks = [
+            b(.paragraph, [TextRun("Жирный", marks: ["b"]), TextRun(" и "), TextRun("код", marks: ["code"]), TextRun(" 2*3")], key: "a0"),
+            b(.heading1, [TextRun("Раздел")], key: "a1"),
+            list,
+            b(.bullet, [TextRun("вложенный", marks: ["u"])], parent: list.id, key: "a3"),
+            b(.numbered, [TextRun("один")], key: "a4"),
+            b(.numbered, [TextRun("два")], key: "a5"),
+            b(.task, [TextRun("сделано")], checked: true, key: "a6"),
+            b(.paragraph, [TextRun("ссылка", marks: [PageLink.mark(other)])], key: "a7"),
+        ]
+        blocks.append(Block(id: UUID(), pageID: page, parentID: nil, sortKey: "a8", type: .image, contentVersion: 1,
+                            contentJSON: "{\"asset\":\"\(asset.uuidString.lowercased())\",\"name\":\"фото/1.png\"}", plainText: "фото", createdAt: 1, updatedAt: 1))
+        blocks.append(Block(id: UUID(), pageID: page, parentID: nil, sortKey: "a9", type: .table, contentVersion: 1,
+                            contentJSON: AtomData.tableJSON([["А", "Б"], ["1", "2|3"]]), plainText: "", createdAt: 1, updatedAt: 1))
+        let r = MarkdownExport.export(title: "Заметка #1", blocks: blocks, assetFolder: "Заметка_files") { $0 == other ? "Другая" : nil }
+        let md = r.markdown
+        check(md.hasPrefix("# Заметка \\#1\n"), "заголовок страницы экранирован")
+        check(md.contains("**Жирный** и `код` 2\\*3"), "форматирование и экранирование: \(md)")
+        check(md.contains("\n## Раздел"), "заголовок блока на уровень ниже")
+        check(md.contains("- пункт\n    - вложенный"), "вложенность отступом")
+        check(md.contains("1. один\n2. два"), "нумерация")
+        check(md.contains("- [x] сделано"), "задача")
+        check(md.contains("[[Другая]]"), "ссылка на страницу по заголовку")
+        check(md.contains("![фото/1.png](<Заметка_files/фото_1.png>)"), "изображение с безопасным именем")
+        check(md.contains("| А | Б |\n| --- | --- |\n| 1 | 2\\|3 |"), "таблица")
+        checkEqual(r.assets.map(\.id), [asset])
+        checkEqual(r.report.map(\.reason), ["Подчёркивание"], "потери в отчёте")
+    }
 }
