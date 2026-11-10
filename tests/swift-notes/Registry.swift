@@ -30,4 +30,5 @@ func runAllNotesTests() async {
     await runFolderImportTests()
     await runLocalizationTests()
     await runVideoTests()
+    await runAcceptanceTests()
 }

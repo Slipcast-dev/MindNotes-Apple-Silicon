@@ -13,6 +13,18 @@ func handleExtraChild() async -> Bool {
         do { try await benchLarge(dir: URL(fileURLWithPath: args[i + 1])); exit(0) }
         catch { print("bench error \(error)"); exit(7) }
     }
+    if let i = args.firstIndex(of: "--demo-archive"), args.count > i + 2 {
+        do {
+            let dir = URL(fileURLWithPath: args[i + 1])
+            try await seedDemo(dir: dir)
+            let ws = try SQLiteWorkspace.open(at: dir)
+            let result = try BackupService.create(workspaceRoot: dir, snapshotter: ws, inspector: SQLiteSnapshotInspector(),
+                                                  destination: URL(fileURLWithPath: args[i + 2]), appVersion: "demo", now: SystemClock().nowMillis())
+            ws.close()
+            FileHandle.standardError.write(Data((result.isComplete ? "demo ok\n" : "demo incomplete\n").utf8))
+            _exit(result.isComplete ? 0 : 8)
+        } catch { FileHandle.standardError.write(Data("demo error \(error)\n".utf8)); _exit(7) }
+    }
     if let i = args.firstIndex(of: "--seed-demo"), args.count > i + 1 {
         do { try await seedDemo(dir: URL(fileURLWithPath: args[i + 1])); _exit(0) }
         catch { print("seed error \(error)"); _exit(7) }
@@ -49,6 +61,21 @@ func seedDemo(dir: URL) async throws {
     try add(.task, "Пройти импорт тестового архива")
     let j = try await session.open(journal.id)
     try j.perform(.setPlainText(block: j.document.blocks[0].id, text: "Что получилось сегодня?"))
+
+    // База «Задачи» как на макете доски: статусы и сроки. Данные вымышленные.
+    let template = NewDatabase(title: "Задачи", titleProperty: "Название", statusProperty: "Статус",
+                               statusOptions: ["Запланировано", "В работе", "Готово"], dateProperty: "Срок", viewName: "Таблица",
+                               extraViews: [("Доска", DatabaseView.boardKind), ("Календарь", DatabaseView.calendarKind)])
+    let tasks = try await ws.createDatabase(parent: projects.id, template: template, ids: RandomIDs(), now: 1)
+    let status = tasks.properties.first { $0.type == .status }!, due = tasks.properties.first { $0.type == .date }!
+    let items: [(String, Int, Int)] = [("Проверить сохранение", 0, 9), ("Проверить восстановление", 0, 24), ("Собрать макеты", 1, 6),
+                                       ("Подготовить демо", 1, 17), ("Описать формат импорта", 2, 11)]
+    for (title, state, day) in items {
+        let id = UUID()
+        try await ws.createRecord(database: tasks.id, title: title, id: id, now: 2)
+        try await ws.setValue(pages: [id], property: status.id, value: .options([status.options[state].id]), now: 2)
+        try await ws.setValue(pages: [id], property: due.id, value: .date(DateValue(start: .day(LocalDate(year: 2026, month: 11, day: day)!))), now: 2)
+    }
     try await session.close()
 }
 

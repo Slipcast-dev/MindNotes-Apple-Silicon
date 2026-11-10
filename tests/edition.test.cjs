@@ -28,3 +28,20 @@ test('сборка только для Apple Silicon: одна цель во в�
     assert.ok(!/x86_64|uname -m|ARCH=/.test(text), script);
   }
 });
+
+test('AT-15: в приложении нет сетевых запросов, ИИ, моделей и аккаунтов', () => {
+  const files = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
+      const rel = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(rel); else if (rel.endsWith('.swift')) files.push(rel);
+    }
+  };
+  walk('Sources');
+  const forbidden = /\b(URLSession|NSURLConnection|NWConnection|NWPathMonitor|import Network|CFNetwork|WKWebView|import CoreML|MLModel|NaturalLanguage|import FoundationModels|LanguageModelSession|OpenAI|Anthropic|apiKey|api_key|Sparkle|GoogleSignIn|CloudKit|CKContainer)\b/;
+  for (const file of files) {
+    const text = read(file).split('\n').filter((line) => !line.trim().startsWith('//')).join('\n');
+    assert.ok(!forbidden.test(text), `${file}: ${text.match(forbidden)?.[0]}`);
+  }
+  assert.ok(files.length > 50, 'исходники найдены');
+});
