@@ -94,3 +94,30 @@ func runExportTests() async {
         }
     }
 }
+
+func runLocalizationTests() async {
+    await test("Локализация: подробность ошибки переводится целиком или до двоеточия, путь не трогается") {
+        let table = ["архив обрезан": "the archive is truncated", "недопустимый путь": "invalid path"]
+        let lookup: (String) -> String = { table[$0] ?? $0 }
+        checkEqual(WorkspaceError.translateDetail("архив обрезан", using: lookup), "the archive is truncated")
+        checkEqual(WorkspaceError.translateDetail("недопустимый путь: ../a: b", using: lookup), "invalid path: ../a: b")
+        checkEqual(WorkspaceError.translateDetail("неизвестно: x", using: lookup), "неизвестно: x", "без перевода — как есть")
+    }
+
+    await test("Локализация: у каждой строки ru есть en, ключи совпадают, форматы согласованы") {
+        func load(_ lang: String) -> [String: String] {
+            (NSDictionary(contentsOfFile: "resources/\(lang).lproj/Localizable.strings") as? [String: String]) ?? [:]
+        }
+        let ru = load("ru"), en = load("en")
+        check(ru.count > 500, "словарь прочитан: \(ru.count)")
+        checkEqual(Set(ru.keys).subtracting(en.keys).sorted(), [], "нет английского перевода")
+        checkEqual(Set(en.keys).subtracting(ru.keys).sorted(), [], "лишние английские строки")
+        func specifiers(_ s: String) -> [String] {
+            let regex = try! NSRegularExpression(pattern: "%(?:\\d+\\$)?(?:ll|l)?[@dfsu]|%%")
+            return regex.matches(in: s, range: NSRange(s.startIndex..., in: s)).map { (s as NSString).substring(with: $0.range) }.sorted()
+        }
+        for (key, value) in en where specifiers(key) != specifiers(value) {
+            check(false, "форматы не совпадают: \(key) → \(value)")
+        }
+    }
+}

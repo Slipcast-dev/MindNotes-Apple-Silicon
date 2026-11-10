@@ -85,7 +85,7 @@ struct HistorySheet: View {
     private func row(_ revision: Revision) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(Self.date(revision.createdAt)).font(.system(size: 13, weight: .medium))
-            Text(verbatim: "\(String(format: L("Версия %d"), revision.seq)) · \(revision.reason)")
+            Text(verbatim: "\(String(format: L("Версия %d"), revision.seq)) · \(Self.reason(revision.reason))")
                 .font(.system(size: 11)).foregroundColor(Tokens.muted).lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -93,6 +93,15 @@ struct HistorySheet: View {
         .padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 6).fill(selected?.id == revision.id ? Tokens.soft : Color.clear))
         .contentShape(Rectangle())
+    }
+
+    /// Причина хранится по-русски: это постоянный ключ. Показывается переведённой; номер версии сохраняется.
+    static func reason(_ stored: String) -> String {
+        let prefix = "Восстановлено из версии "
+        if stored.hasPrefix(prefix), let n = Int(stored.dropFirst(prefix.count)) {
+            return String(format: L("Восстановлено из версии %d"), n)
+        }
+        return L(stored)
     }
 
     static func date(_ millis: Int64) -> String {

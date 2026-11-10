@@ -20,6 +20,16 @@ enum WorkspaceError: Error, Equatable, LocalizedError {
 
     private func t(_ key: String) -> String { NSLocalizedString(key, comment: "") }
 
+    /// Подробность: перевод всей строки, иначе части до двоеточия (дальше путь или имя файла, они не переводятся).
+    static func translateDetail(_ detail: String, using lookup: (String) -> String = { NSLocalizedString($0, comment: "") }) -> String {
+        let whole = lookup(detail)
+        if whole != detail { return whole }
+        guard let colon = detail.range(of: ": ") else { return detail }
+        let head = String(detail[..<colon.lowerBound])
+        let translated = lookup(head)
+        return translated == head ? detail : translated + detail[colon.lowerBound...]
+    }
+
     var errorDescription: String? {
         switch self {
         case .notADirectory(let p): return String(format: t("Папка пространства не найдена: %@"), p)
@@ -30,13 +40,13 @@ enum WorkspaceError: Error, Equatable, LocalizedError {
         case .notAWorkspace(let p): return String(format: t("В этой папке нет пространства Minerva Noema: %@"), p)
         case .schemaTooNew(let found, let supported):
             return String(format: t("Пространство создано более новой версией (формат %d, поддерживается %d). Откройте его в новой сборке; данные не изменены."), found, supported)
-        case .corrupted(let d): return String(format: t("База пространства повреждена: %@. Восстановите её из резервной копии."), d)
-        case .migrationFailed(let v, let d): return String(format: t("Не удалось обновить формат до версии %d: %@. Изменения отменены, резервная копия сохранена."), v, d)
+        case .corrupted(let raw): let d = Self.translateDetail(raw); return String(format: t("База пространства повреждена: %@. Восстановите её из резервной копии."), d)
+        case .migrationFailed(let v, let raw): let d = Self.translateDetail(raw); return String(format: t("Не удалось обновить формат до версии %d: %@. Изменения отменены, резервная копия сохранена."), v, d)
         case .wouldCreateCycle: return t("Нельзя переместить страницу в неё саму или в её подстраницу.")
         case .pageNotFound: return t("Страница не найдена.")
-        case .storage(let code, let d): return String(format: t("Ошибка хранилища (%d): %@"), code, d)
+        case .storage(let code, let raw): let d = Self.translateDetail(raw); return String(format: t("Ошибка хранилища (%d): %@"), code, d)
         case .diskFull: return t("Не удалось сохранить: нет свободного места. Правки остаются в приложении.")
-        case .backupInvalid(let d): return String(format: t("Резервная копия не прошла проверку: %@"), d)
+        case .backupInvalid(let raw): let d = Self.translateDetail(raw); return String(format: t("Резервная копия не прошла проверку: %@"), d)
         case .restoreTargetNotEmpty(let p): return String(format: t("Восстанавливать можно только в новую или пустую папку: %@"), p)
         }
     }

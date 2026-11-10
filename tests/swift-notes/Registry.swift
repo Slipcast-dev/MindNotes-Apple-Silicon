@@ -28,4 +28,5 @@ func runAllNotesTests() async {
     await runHistoryTests()
     await runExportTests()
     await runFolderImportTests()
+    await runLocalizationTests()
 }
