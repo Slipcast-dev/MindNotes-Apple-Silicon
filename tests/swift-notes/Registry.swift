@@ -27,4 +27,5 @@ func runAllNotesTests() async {
     await runGapTests()
     await runHistoryTests()
     await runExportTests()
+    await runFolderImportTests()
 }

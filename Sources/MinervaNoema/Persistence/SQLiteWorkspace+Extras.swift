@@ -174,4 +174,4 @@ extension SQLiteWorkspace {
     }
 }
 
-extension SQLiteWorkspace: ExportSource {}
+extension SQLiteWorkspace: ExportSource, ImportTarget {}

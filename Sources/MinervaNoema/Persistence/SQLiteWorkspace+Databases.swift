@@ -286,6 +286,50 @@ extension SQLiteWorkspace {
         }
     }
 
+    func importDatabase(parent: UUID?, title: String, viewName: String, properties: [PropertyDefinition],
+                        records: [ImportedRecord], now: Int64) async throws -> Database {
+        let ids = RandomIDs()
+        return try await writer.run { db in
+            try db.transaction {
+                if let parent, try db.scalarInt("SELECT 1 FROM pages WHERE id=? AND deleted_at IS NULL", [SQLValue(parent)]) == nil { throw WorkspaceError.pageNotFound(parent) }
+                let last = try db.scalarText("SELECT sort_key FROM pages WHERE parent_id IS ? AND deleted_at IS NULL ORDER BY sort_key DESC, id DESC LIMIT 1", [SQLValue(parent)])
+                let page = ids.next(), id = ids.next()
+                try db.run("INSERT INTO pages(id, parent_id, sort_key, title, created_at, updated_at) VALUES(?,?,?,?,?,?)",
+                           [SQLValue(page), SQLValue(parent), .text(SortKey.between(last, nil)), .text(title), .int(now), .int(now)])
+                try SearchIndex.updateTitle(db, page: page, title: title)
+                try db.run("INSERT INTO databases(id, page_id, created_at) VALUES(?,?,?)", [SQLValue(id), SQLValue(page), .int(now)])
+                let keys = SortKey.keys(after: nil, before: nil, count: properties.count)
+                var stored: [PropertyDefinition] = []
+                for (property, key) in zip(properties, keys) {
+                    var def = property
+                    def.databaseID = id
+                    def.sortKey = key
+                    try db.run("INSERT INTO property_definitions(id, database_id, name, type, sort_key, created_at) VALUES(?,?,?,?,?,?)",
+                               [SQLValue(def.id), SQLValue(id), .text(def.name), .text(def.type.rawValue), .text(key), .int(now)])
+                    for (option, optionKey) in zip(def.options, SortKey.keys(after: nil, before: nil, count: def.options.count)) {
+                        try db.run("INSERT INTO property_options(id, property_id, name, color, sort_key) VALUES(?,?,?,?,?)",
+                                   [SQLValue(option.id), SQLValue(def.id), .text(option.name), SQLValue(option.color), .text(optionKey)])
+                    }
+                    stored.append(def)
+                }
+                try db.run("INSERT INTO database_views(id, database_id, name, kind, sort_key, state_json) VALUES(?,?,?,?,?,?)",
+                           [SQLValue(ids.next()), SQLValue(id), .text(viewName), .text(DatabaseView.tableKind), .text(SortKey.between(nil, nil)), .text(try DatabaseViewState().jsonString())])
+                let byID = Dictionary(uniqueKeysWithValues: stored.map { ($0.id, $0) })
+                for (record, key) in zip(records, SortKey.keys(after: nil, before: nil, count: records.count)) {
+                    try db.run("INSERT INTO pages(id, parent_id, database_id, sort_key, title, created_at, updated_at) VALUES(?,?,?,?,?,?,?)",
+                               [SQLValue(record.id), SQLValue(page), SQLValue(id), .text(key), .text(record.title), .int(now), .int(now)])
+                    try SearchIndex.updateTitle(db, page: record.id, title: record.title)
+                    for (propertyID, value) in record.values {
+                        guard let def = byID[propertyID], def.type != .title else { continue }
+                        try Self.writeValue(db, page: record.id, def: def, value: value, now: now)
+                    }
+                }
+                guard let created = try Self.loadDatabase(db, id) else { throw WorkspaceError.corrupted("база не создана") }
+                return created
+            }
+        }
+    }
+
     /// Запись — обычная страница базы: открывается редактором и попадает в корзину как все страницы.
     func createRecord(database: UUID, title: String, id: UUID, now: Int64) async throws {
         try await writer.run { db in

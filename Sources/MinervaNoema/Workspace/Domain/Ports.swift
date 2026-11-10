@@ -86,6 +86,24 @@ protocol WorkspaceStore: BlockSink {
     func close()
 }
 
+/// Запись импортированной базы: заголовок и значения по ID свойств.
+struct ImportedRecord: Equatable {
+    var id: UUID
+    var title: String
+    var values: [UUID: PropertyValue]
+}
+
+/// Запись в пространство при импорте. Каждый метод — отдельная транзакция.
+protocol ImportTarget: AnyObject {
+    func createPage(parent: UUID?, title: String, id: UUID, now: Int64) async throws -> Page
+    func updatePage(_ page: Page) async throws
+    func commit(_ batch: SaveBatch) async throws
+    func addAsset(copying given: URL, id: UUID, now: Int64) async throws -> AssetRecord
+    /// База целиком: свойства, варианты и записи появляются вместе или не появляются.
+    func importDatabase(parent: UUID?, title: String, viewName: String, properties: [PropertyDefinition],
+                        records: [ImportedRecord], now: Int64) async throws -> Database
+}
+
 /// Чтение пространства для переносимого экспорта.
 protocol ExportSource: AnyObject {
     func allPages() async throws -> [Page]
