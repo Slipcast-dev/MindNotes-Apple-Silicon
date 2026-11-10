@@ -4,6 +4,8 @@ import Foundation
 enum AppEdition {
     static let bundleID = "local.personal.MinervaNoema"
     static let displayName = "Minerva Noema"
+    /// Версия Grizzly, на которой основан проект: для уведомления об авторстве, не версия этой сборки.
+    static let baseGrizzlyVersion = "1.4.2"
     /// Каталог настоящей сборки в Application Support. Данные исходного Grizzly не читаются и не меняются.
     static let officialSupportDirectoryName = "MinervaNoema"
     /// Каталог запущенной сборки: у копии с другим идентификатором он свой (`AppDataScope`).

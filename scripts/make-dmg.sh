@@ -24,12 +24,14 @@ ln -s /Applications "$STAGE/Applications"
 cat > "$STAGE/Как открыть первый раз.txt" <<'EOF'
 Перетащите Minerva Noema в папку Applications.
 
-Приложение не нотаризовано Apple, поэтому при первом запуске macOS может его заблокировать.
-Откройте его так: правый клик по Minerva Noema → «Открыть» → «Открыть».
-Или выполните в Терминале:  xattr -dr com.apple.quarantine "/Applications/Minerva Noema.app"
+Приложение не нотаризовано Apple, поэтому при первом запуске macOS его остановит.
+Откройте «Системные настройки» → «Конфиденциальность и безопасность» и нажмите «Всё равно открыть»
+рядом с сообщением о Minerva Noema. Это нужно сделать один раз.
 
-The app is not notarized by Apple. On first launch: right-click Minerva Noema → Open → Open,
-or run:  xattr -dr com.apple.quarantine "/Applications/Minerva Noema.app"
+Нужен Mac на Apple Silicon с macOS 26 или новее.
+
+The app is not notarized by Apple. On first launch open System Settings → Privacy & Security
+and click "Open Anyway" next to the Minerva Noema message. Requires Apple silicon and macOS 26 or later.
 EOF
 
 rm -f "$DMG"

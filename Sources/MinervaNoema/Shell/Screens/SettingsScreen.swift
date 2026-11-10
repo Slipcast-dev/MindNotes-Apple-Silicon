@@ -71,7 +71,8 @@ struct SettingsScreen: View {
                         Chip(text: L("Автообновления выключены"))
                     }
                     divider
-                    row(AppEdition.displayName, String(format: L("На основе Grizzly %@. © 2026 Slipcast-dev. Изменять и распространять без письменного согласия автора запрещено."), (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "")) {
+                    row("\(AppEdition.displayName) \((Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "")",
+                        String(format: L("На основе Grizzly %@. © 2026 Slipcast-dev. Изменять и распространять без письменного согласия автора запрещено."), AppEdition.baseGrizzlyVersion)) {
                         EmptyView()
                     }
                 }
