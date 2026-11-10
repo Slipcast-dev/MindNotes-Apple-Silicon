@@ -2,6 +2,8 @@
 
 # Minerva Noema (Apple Silicon)
 
+**Скачать:** [Minerva Noema 1.0.0](https://github.com/Slipcast-dev/Minerva-Noema-Apple-Silicon/releases/latest) — образ `.dmg` для Mac на Apple Silicon с macOS 26 или новее.
+
 > **Только Apple Silicon: arm64, macOS 26 или новее.** Последняя версия с поддержкой Intel сохранена меткой `intel-last`.
 
 Личная локальная база знаний для macOS: страницы, блочный редактор, поиск, ссылки, базы данных. Данные хранятся на этом Mac, сеть и аккаунт не нужны.
