@@ -201,10 +201,6 @@ struct CrumbBar: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .accessibilityLabel(Text("Действия со страницей"))
-            } else if shell.section != .settings {
-                Button("Настройки") { shell.goSettings() }
-                    .buttonStyle(.plain)
-                    .foregroundColor(Tokens.muted)
             }
         }
         .font(.system(size: 12))

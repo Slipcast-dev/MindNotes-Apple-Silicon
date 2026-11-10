@@ -418,13 +418,16 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     /// Копирует файлы в пространство и вставляет блоки: сначала файл, затем ссылка (FR-08).
-    func insertFiles(_ urls: [URL], type: BlockType? = nil, removingAfterCopy: Bool = false) {
-        guard let add = addAttachment else { return }
+    /// `cleanup` — временная папка с полученными файлами: удаляется, когда они скопированы в пространство.
+    func insertFiles(_ urls: [URL], type: BlockType? = nil, cleanup: URL? = nil) {
+        guard let add = addAttachment else {
+            if let cleanup { try? FileManager.default.removeItem(at: cleanup) }
+            return
+        }
         Task { @MainActor in
             var fragments: [BlockFragment] = []
+            defer { if let cleanup { try? FileManager.default.removeItem(at: cleanup) } }
             for url in urls {
-                // Временная копия из буфера обмена не должна оставаться.
-                defer { if removingAfterCopy { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) } }
                 do {
                     let asset = try await add(url)
                     let isImage = type == .image || (type == nil && UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true)
@@ -435,6 +438,66 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             }
             if !fragments.isEmpty { self.insertFragments(fragments) }
         }
+    }
+
+    /// Что редактор принимает при перетаскивании: файлы с диска, «обещанные» файлы (Фото, браузер, снимки экрана)
+    /// и данные изображения.
+    static let droppableTypes: [NSPasteboard.PasteboardType] =
+        [.fileURL, .png, .tiff] + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
+
+    /// Курсор в конец страницы: туда встаёт то, что брошено ниже текста.
+    func moveCaretToEnd() {
+        textView.window?.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+    }
+
+    /// Файлы и картинки из перетаскивания или буфера становятся вложениями на месте курсора.
+    /// `imageData: false` — данные изображения не берутся (при вставке, где рядом есть текст).
+    @discardableResult
+    func receiveFiles(from pasteboard: NSPasteboard, imageData: Bool = true) -> Bool {
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            insertFiles(urls)
+            return true
+        }
+        let fm = FileManager.default
+        if let promises = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self]) as? [NSFilePromiseReceiver], !promises.isEmpty {
+            let dir = fm.temporaryDirectory.appendingPathComponent("drop-\(UUID().uuidString)", isDirectory: true)
+            guard (try? fm.createDirectory(at: dir, withIntermediateDirectories: true)) != nil else { return false }
+            let queue = OperationQueue()
+            queue.qualityOfService = .userInitiated
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var received: [URL] = []
+            for promise in promises {
+                // Обработчик вызывается для каждого файла обещания.
+                for _ in 0..<max(1, promise.fileNames.count) { group.enter() }
+                promise.receivePromisedFiles(atDestination: dir, options: [:], operationQueue: queue) { url, error in
+                    if error == nil { lock.lock(); received.append(url); lock.unlock() }
+                    group.leave()
+                }
+            }
+            group.notify(queue: .main) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { try? fm.removeItem(at: dir); return }
+                    if received.isEmpty {
+                        try? fm.removeItem(at: dir)
+                        self.onError?(NSLocalizedString("Не удалось получить файл от другого приложения.", comment: ""))
+                    } else {
+                        self.insertFiles(received.sorted { $0.lastPathComponent < $1.lastPathComponent }, cleanup: dir)
+                    }
+                }
+            }
+            return true
+        }
+        if imageData, let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff) {
+            let dir = fm.temporaryDirectory.appendingPathComponent("drop-\(UUID().uuidString)", isDirectory: true)
+            let file = dir.appendingPathComponent(NSLocalizedString("Изображение", comment: "") + ".png")
+            let png = NSBitmapImageRep(data: data)?.representation(using: .png, properties: [:]) ?? data
+            guard (try? fm.createDirectory(at: dir, withIntermediateDirectories: true)) != nil, (try? png.write(to: file)) != nil else { return false }
+            insertFiles([file], type: .image, cleanup: dir)
+            return true
+        }
+        return false
     }
 
     /// Программы и сценарии не запускаются одним нажатием: файл показывается в Finder.
@@ -1040,19 +1103,9 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     func paste(from pasteboard: NSPasteboard) {
-        // Файлы и картинки из буфера становятся вложениями.
-        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
-            return insertFiles(urls)
-        }
-        if pasteboard.data(forType: Self.pasteboardType) == nil, pasteboard.string(forType: .string) == nil,
-           let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff) {
-            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
-            let png = NSBitmapImageRep(data: data)?.representation(using: .png, properties: [:]) ?? data
-            if (try? png.write(to: tmp)) != nil {
-                insertFiles([tmp], type: .image)
-                return
-            }
-        }
+        // Файлы и картинки из буфера становятся вложениями; картинка — только если рядом нет текста.
+        let onlyImage = pasteboard.data(forType: Self.pasteboardType) == nil && pasteboard.string(forType: .string) == nil
+        if receiveFiles(from: pasteboard, imageData: onlyImage) { return }
         if pasteboard.data(forType: Self.pasteboardType) == nil, let text = pasteboard.string(forType: .string) {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if let url = URL(string: trimmed), let page = PageLink.page(from: url) {
@@ -1283,17 +1336,16 @@ final class BlockTextView: NSTextView {
     override func changeAttributes(_ sender: Any?) {}
 
     // Текст не перетаскивается: штатное удаляет источник по устаревшему диапазону. Принимаются только файлы.
-    override var acceptableDragTypes: [NSPasteboard.PasteboardType] { [.fileURL] }
+    override var acceptableDragTypes: [NSPasteboard.PasteboardType] { BlockEditorController.droppableTypes }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { .copy }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty else { return false }
+        guard let controller else { return false }
         let at = characterIndexForInsertion(at: convert(sender.draggingLocation, from: nil))
         setSelectedRange(NSRange(location: at, length: 0))
-        run { $0.insertFiles(urls) }
-        return true
+        return controller.receiveFiles(from: sender.draggingPasteboard)
     }
     override func dragSelection(with event: NSEvent, offset mouseOffset: NSSize, slideBack: Bool) -> Bool { false }
 
@@ -1432,4 +1484,28 @@ final class BlockTextView: NSTextView {
 final class EditorActionBox: NSObject {
     let action: EditorAction
     init(_ action: EditorAction) { self.action = action }
+}
+
+/// Место под текстом страницы: принимает файлы и картинки и ставит курсор в конец по нажатию.
+/// Без него у короткой страницы почти вся площадь не принимала перетаскивание.
+final class EditorTailView: NSView {
+    weak var controller: BlockEditorController?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes(BlockEditorController.droppableTypes)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { controller == nil ? [] : .copy }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { controller == nil ? [] : .copy }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let controller else { return false }
+        controller.moveCaretToEnd()
+        return controller.receiveFiles(from: sender.draggingPasteboard)
+    }
+
+    override func mouseDown(with event: NSEvent) { controller?.moveCaretToEnd() }
 }

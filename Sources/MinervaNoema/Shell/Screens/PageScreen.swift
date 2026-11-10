@@ -164,6 +164,8 @@ struct PageScreen: View {
                     .sheet(item: $editor.editingEmbed, onDismiss: { shell.refreshEmbeds() }) { block in
                         EmbeddedDatabaseSheet(block: block, editor: editor)
                     }
+                EditorTail(controller: editor.controller)
+                    .frame(maxWidth: .infinity, minHeight: 160)
                 let kids = shell.children(of: editor.pageID)
                 if !kids.isEmpty {
                     Text("Подстраницы").font(.system(size: 17, weight: .semibold)).padding(.top, 24).padding(.bottom, 10)

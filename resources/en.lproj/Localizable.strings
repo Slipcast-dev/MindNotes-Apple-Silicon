@@ -901,3 +901,6 @@
 "По умолчанию" = "Default";
 "Выберите папку на другом диске: копия на том же диске не защищает от его отказа." = "Choose a folder on another disk: a backup on the same disk doesn't protect against its failure.";
 "Автоматическая копия не создана: %@" = "The automatic backup was not created: %@";
+"Не удалось получить файл от другого приложения." = "Could not receive the file from the other app.";
+"Это не текстовый файл. Чтобы добавить картинку или файл, откройте страницу и перетащите его в неё или выберите «/» → «Изображение»." = "This is not a text file. To add an image or a file, open a page and drag it in, or choose “/” → “Image”.";
+"«%@» добавлен на страницу." = "“%@” was added to the page.";

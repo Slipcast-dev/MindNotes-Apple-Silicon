@@ -121,6 +121,19 @@ struct TableEditorSheet: View {
 }
 
 /// Единый текстовый вид страницы.
+/// Пустое место под текстом страницы.
+struct EditorTail: NSViewRepresentable {
+    let controller: BlockEditorController
+
+    func makeNSView(context: Context) -> EditorTailView {
+        let view = EditorTailView(frame: .zero)
+        view.controller = controller
+        return view
+    }
+
+    func updateNSView(_ view: EditorTailView, context: Context) { view.controller = controller }
+}
+
 struct NativeBlockEditor: NSViewRepresentable {
     @ObservedObject var editor: PageEditorModel
 

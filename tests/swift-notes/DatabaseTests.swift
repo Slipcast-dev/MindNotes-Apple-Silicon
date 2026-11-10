@@ -405,6 +405,16 @@ func runDatabaseTests() async {
         check(tree.placement(moving: a2.id, onto: a1.id, upperHalf: false) == nil, "уже стоит после a1")
         check(tree.placement(moving: a1.id, onto: a2.id, upperHalf: true) == nil, "уже стоит перед a2")
         check(tree.placement(moving: a1.id, onto: a2.id, upperHalf: false) != nil, "после a2 — перестановка")
+        let into = tree.placement(moving: b.id, onto: a1.id, zone: .into)
+        check(into?.parent == a1.id && into?.after == deep.id, "внутрь — последним ребёнком")
+        let intoEmpty = tree.placement(moving: b.id, onto: a2.id, zone: .into)
+        check(intoEmpty?.parent == a2.id && intoEmpty?.after == nil, "внутрь пустой — первым")
+        check(tree.placement(moving: deep.id, onto: a1.id, zone: .into) == nil, "уже последний ребёнок")
+        check(tree.placement(moving: a.id, onto: a1.id, zone: .into) == nil, "в своего потомка нельзя")
+        checkEqual(PageTree.DropZone.at(fraction: 0.1, allowsInto: true), .before)
+        checkEqual(PageTree.DropZone.at(fraction: 0.5, allowsInto: true), .into)
+        checkEqual(PageTree.DropZone.at(fraction: 0.9, allowsInto: true), .after)
+        checkEqual(PageTree.DropZone.at(fraction: 0.5, allowsInto: false), .after, "в базу внутрь нельзя")
 
         // Цикл в повреждённых данных не должен подвешивать интерфейс.
         let x = UUID(), y = UUID()

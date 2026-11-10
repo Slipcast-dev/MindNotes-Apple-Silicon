@@ -68,21 +68,43 @@ struct PageTree {
         return out
     }
 
-    /// Куда встанет страница, брошенная на строку `target`: перед ней (верхняя половина) или после, на том же уровне.
-    /// nil — перемещение невозможно (в себя или в своё поддерево) или ничего не меняет.
-    func placement(moving id: UUID, onto target: UUID, upperHalf: Bool) -> (parent: UUID?, after: UUID?)? {
-        guard id != target, let targetPage = byID[target], byID[id] != nil, !subtree(of: id).contains(target) else { return nil }
-        let parent = targetPage.parentID
-        let siblings = children(of: parent).map(\.id).filter { $0 != id }
-        guard let index = siblings.firstIndex(of: target) else { return nil }
-        let after: UUID? = upperHalf ? (index > 0 ? siblings[index - 1] : nil) : target
+    /// Куда бросили страницу относительно строки.
+    enum DropZone: Equatable {
+        case before, into, after
+
+        /// Верхняя и нижняя четверти строки — между строками, середина — внутрь.
+        static func at(fraction: Double, allowsInto: Bool) -> DropZone {
+            if !allowsInto { return fraction < 0.5 ? .before : .after }
+            return fraction < 0.25 ? .before : (fraction > 0.75 ? .after : .into)
+        }
+    }
+
+    /// Новый родитель и предыдущий сосед для страницы, брошенной на строку `target`.
+    /// nil — нельзя (в себя или своё поддерево) или ничего не изменится.
+    func placement(moving id: UUID, onto target: UUID, zone: DropZone) -> (parent: UUID?, after: UUID?)? {
+        guard id != target, let targetPage = byID[target], let moving = byID[id], !subtree(of: id).contains(target) else { return nil }
+        let parent: UUID?
+        let after: UUID?
+        switch zone {
+        case .into:
+            parent = target
+            after = children(of: target).map(\.id).filter { $0 != id }.last
+        case .before, .after:
+            parent = targetPage.parentID
+            let siblings = children(of: parent).map(\.id).filter { $0 != id }
+            guard let index = siblings.firstIndex(of: target) else { return nil }
+            after = zone == .after ? target : (index > 0 ? siblings[index - 1] : nil)
+        }
         // Уже на этом месте: тот же родитель и тот же предыдущий сосед.
-        let current = children(of: parent).map(\.id)
-        if byID[id]?.parentID == parent, let at = current.firstIndex(of: id) {
-            let previous = at > 0 ? current[at - 1] : nil
-            if previous == after { return nil }
+        if moving.parentID == parent {
+            let current = children(of: parent).map(\.id)
+            if let at = current.firstIndex(of: id), (at > 0 ? current[at - 1] : nil) == after { return nil }
         }
         return (parent, after)
+    }
+
+    func placement(moving id: UUID, onto target: UUID, upperHalf: Bool) -> (parent: UUID?, after: UUID?)? {
+        placement(moving: id, onto: target, zone: upperHalf ? .before : .after)
     }
 
     /// Предки от корня к странице. Обход ограничен на случай повреждённых данных с циклом.

@@ -53,10 +53,49 @@ struct SidebarGroup: View {
     }
 }
 
+/// Рамки видимых строк дерева в системе координат панели: по ним находится строка под курсором.
+struct RowFramesKey: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) { value.merge(nextValue()) { $1 } }
+}
+
 struct NotesSidebar: View {
+    static let treeSpace = "pageTree"
     @EnvironmentObject private var shell: ShellModel
     /// Свёрнутые страницы дерева. По умолчанию всё развёрнуто.
     @State private var collapsed: Set<UUID> = []
+    /// Перетаскивание страницы внутри панели: свой жест, без системного буфера обмена.
+    @State private var drag: TreeDrag?
+    @State private var rowFrames: [UUID: CGRect] = [:]
+
+    struct TreeDrag: Equatable {
+        var page: UUID
+        var title: String
+        var location: CGPoint
+        var target: UUID?
+        var zone: PageTree.DropZone?
+    }
+
+    private func updateDrag(_ page: Page, at location: CGPoint) {
+        var state = drag ?? TreeDrag(page: page.id, title: page.title.isEmpty ? L("Без названия") : page.title, location: location)
+        state.location = location
+        state.target = nil
+        state.zone = nil
+        if let (id, frame) = rowFrames.first(where: { $0.value.contains(location) }), id != page.id {
+            let zone = PageTree.DropZone.at(fraction: Double((location.y - frame.minY) / max(frame.height, 1)), allowsInto: !shell.isDatabase(id))
+            if shell.pageTree.placement(moving: page.id, onto: id, zone: zone) != nil {
+                state.target = id
+                state.zone = zone
+            }
+        }
+        drag = state
+    }
+
+    private func finishDrag() {
+        defer { drag = nil }
+        guard let state = drag, let target = state.target, let zone = state.zone else { return }
+        if shell.reorder(state.page, onto: target, zone: zone), zone == .into { collapsed.remove(target) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -138,9 +177,19 @@ struct NotesSidebar: View {
                     if shell.isOpen {
                         SidebarGroup(title: L("Страницы"))
                         ForEach(shell.pageTree.rows(collapsed: collapsed)) { row in
-                            PageTreeRow(row: row, expanded: !collapsed.contains(row.id)) {
+                            PageTreeRow(row: row, expanded: !collapsed.contains(row.id),
+                                        dropZone: drag?.target == row.id ? drag?.zone : nil,
+                                        isDragged: drag?.page == row.id) {
                                 if collapsed.remove(row.id) == nil { collapsed.insert(row.id) }
                             }
+                            .background(GeometryReader { geometry in
+                                Color.clear.preference(key: RowFramesKey.self, value: [row.id: geometry.frame(in: .named(Self.treeSpace))])
+                            })
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.treeSpace))
+                                    .onChanged { updateDrag(row.page, at: $0.location) }
+                                    .onEnded { _ in finishDrag() }
+                            )
                         }
 
                         if !shell.tags.isEmpty {
@@ -158,6 +207,18 @@ struct NotesSidebar: View {
                         SidebarRow(title: L("Корзина"), symbol: "trash", active: shell.section == .trash) { shell.goTrash() }
                     }
                     SidebarRow(title: L("Настройки"), symbol: "gearshape", active: shell.section == .settings) { shell.goSettings() }
+                }
+                .coordinateSpace(name: Self.treeSpace)
+                .onPreferenceChange(RowFramesKey.self) { rowFrames = $0 }
+                .overlay(alignment: .topLeading) {
+                    if let drag {
+                        Text(drag.title)
+                            .font(.system(size: 12, weight: .medium))
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Tokens.card).shadow(radius: 3))
+                            .offset(x: drag.location.x + 12, y: drag.location.y - 10)
+                            .allowsHitTesting(false)
+                    }
                 }
             }
 
@@ -184,16 +245,28 @@ struct PageTreeRow: View {
     @EnvironmentObject private var shell: ShellModel
     let row: PageTree.Row
     let expanded: Bool
+    var dropZone: PageTree.DropZone? = nil
+    var isDragged = false
     let toggle: () -> Void
-    @State private var dropTarget = false
 
     var body: some View {
         let page = row.page
         let isDatabase = shell.isDatabase(page.id)
+        let inset = CGFloat(row.depth) * 14 + 10
         SidebarRow(title: page.title.isEmpty ? L("Без названия") : page.title,
                    symbol: !row.hasChildren ? (isDatabase ? "tablecells" : (page.isFolder ? "folder" : "doc.text")) : (expanded ? "chevron.down" : "chevron.right"),
                    active: shell.isOpenPage(page.id), indent: CGFloat(row.depth) * 14, emoji: row.hasChildren ? nil : page.emoji) {
             if shell.isOpenPage(page.id), row.hasChildren { toggle() } else { shell.openPage(page.id) }
+        }
+        .opacity(isDragged ? 0.45 : 1)
+        // Куда упадёт страница: линия между строками или рамка «внутрь».
+        .overlay(alignment: dropZone == .before ? .top : .bottom) {
+            if dropZone == .before || dropZone == .after {
+                Rectangle().fill(Tokens.accent).frame(height: 2).padding(.leading, inset)
+            }
+        }
+        .overlay {
+            if dropZone == .into { RoundedRectangle(cornerRadius: 8).stroke(Tokens.accent, lineWidth: 2) }
         }
         .contextMenu {
             if !isDatabase {
@@ -207,16 +280,6 @@ struct PageTreeRow: View {
             Button("Переместить в…") { shell.pageToMove = page }
             Divider()
             Button("Удалить") { shell.trash(page.id) }
-        }
-        // Порядок перетаскиванием: верхняя половина строки — перед ней, нижняя — после.
-        .draggable(page.id.uuidString)
-        .dropDestination(for: String.self) { items, location in
-            guard let raw = items.first, let dragged = UUID(uuidString: raw) else { return false }
-            shell.reorder(dragged, onto: page.id, upperHalf: location.y < 16)
-            return true
-        } isTargeted: { dropTarget = $0 }
-        .overlay(alignment: .bottom) {
-            if dropTarget { Rectangle().fill(Tokens.accent).frame(height: 2).padding(.leading, CGFloat(row.depth) * 14 + 10) }
         }
     }
 }

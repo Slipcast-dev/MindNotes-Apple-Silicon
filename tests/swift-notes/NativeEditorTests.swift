@@ -388,7 +388,9 @@ func runNativeEditorReviewTests() async {
             let many = [NSValue(range: NSRange(location: 0, length: 1)), NSValue(range: NSRange(location: 7, length: 1))]
             check(!r.controller.textView(r.tv, shouldChangeTextInRanges: many, replacementStrings: ["x", "y"]), "правка в двух местах отклонена")
             check(!r.controller.textView(r.tv, shouldChangeTextIn: NSRange(location: 0, length: 2), replacementString: nil), "только атрибуты")
-            checkEqual(r.tv.acceptableDragTypes, [.fileURL], "текст не перетаскивается, файлы принимаются")
+            let accepted = Set(r.tv.acceptableDragTypes)
+            check(accepted.contains(.fileURL) && accepted.contains(.png) && accepted.contains(.tiff), "файлы и картинки принимаются")
+            check(!accepted.contains(.string) && !accepted.contains(.rtf), "текст не перетаскивается")
             checkEqual(r.doc, before)
             r.checkSync()
             try await r.close()

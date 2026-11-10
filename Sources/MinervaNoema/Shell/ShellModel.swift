@@ -702,7 +702,8 @@ final class ShellModel: ObservableObject {
         editor?.controller.addAttachment = { [weak self] url in
             guard let store = self?.store else { throw WorkspaceError.storage(code: 0, detail: "пространство закрыто") }
                         let size = (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-                        guard size <= 512 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
+                        // Видео бывает большим; предел защищает от случайного копирования образа диска.
+                        guard size <= 4 << 30 else { throw CocoaError(.fileReadTooLarge) }
             return try await store.addAsset(copying: url, now: SystemClock().nowMillis())
         }
         editor?.controller.assetURL = { [weak self] id in self?.assetFileURL(id) }
@@ -989,7 +990,19 @@ final class ShellModel: ObservableObject {
         pages = session.pages
     }
 
-    /// Перетаскивание в боковой панели: перед строкой или после неё, на том же уровне.
+    /// Перетаскивание в боковой панели: перед строкой, внутрь неё или после. В базу страницу положить нельзя.
+    @discardableResult
+    func reorder(_ id: UUID, onto target: UUID, zone: PageTree.DropZone) -> Bool {
+        if zone == .into, isDatabase(target) { return false }
+        guard let place = pageTree.placement(moving: id, onto: target, zone: zone) else { return false }
+        act {
+            guard let session = self.session else { return }
+            try await session.move(id, toParent: place.parent, afterSibling: place.after)
+            self.pages = session.pages
+        }
+        return true
+    }
+
     func reorder(_ id: UUID, onto target: UUID, upperHalf: Bool) {
         guard let place = pageTree.placement(moving: id, onto: target, upperHalf: upperHalf) else { return }
         act {
@@ -1021,8 +1034,19 @@ final class ShellModel: ObservableObject {
         previewFile(url)
     }
 
-    /// Показывает файл без изменений и без импорта.
+    /// Показывает файл без изменений и без импорта. Картинка или другой нетекстовый файл
+    /// (⌘O, перетаскивание на значок в Dock) добавляется на открытую страницу.
     func previewFile(_ url: URL) {
+        if !Self.isTextFile(url) {
+            guard let editor else {
+                errorMessage = L("Это не текстовый файл. Чтобы добавить картинку или файл, откройте страницу и перетащите его в неё или выберите «/» → «Изображение».")
+                return
+            }
+            editor.controller.moveCaretToEnd()
+            editor.controller.insertFiles([url])
+            notice = String(format: L("«%@» добавлен на страницу."), url.lastPathComponent)
+            return
+        }
         do {
             let file = try TextFileReader.read(url)
             rememberFile(url)
@@ -1031,6 +1055,16 @@ final class ShellModel: ObservableObject {
         } catch {
             errorMessage = String(format: L("Не удалось прочитать файл: %@"), Self.describe(error))
         }
+    }
+
+    /// Текст по расширению или типу файла; неизвестное расширение проверяется чтением.
+    static func isTextFile(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        if ["md", "markdown", "txt", "text", "csv", "tsv", "json", "yaml", "yml", "log", ""].contains(ext) { return true }
+        // Картинки, видео, звук, PDF, архивы и прочие известные двоичные форматы — не текст.
+        if let type = UTType(filenameExtension: ext), type.isDeclared { return type.conforms(to: .text) }
+        // Неизвестное расширение: текст, если читается как текст (размер ограничен читателем).
+        return (try? TextFileReader.read(url)) != nil
     }
 
     private func rememberFile(_ url: URL) {
