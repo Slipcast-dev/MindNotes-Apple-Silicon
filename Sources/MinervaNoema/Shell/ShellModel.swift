@@ -1226,6 +1226,53 @@ final class ShellModel: ObservableObject {
         }
     }
 
+    /// База в CSV: все записи без фильтра, значения в виде, который принимает импорт.
+    func exportDatabaseCSV(page id: UUID) {
+        enqueue {
+            guard let store = self.store, let session = self.session, let databaseID = self.databaseIndex[id],
+                  let database = try await store.database(databaseID) else { return }
+            try await session.coordinator.flush()
+            let title = self.pageTree.page(id)?.title ?? ""
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = WorkspaceExport.fileName(title, untitled: L("Без названия")) + ".csv"
+            panel.allowedContentTypes = [.commaSeparatedText]
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            let rows = try await WorkspaceExport.databaseRows(source: store, database: database)
+            try Data(("\u{FEFF}" + CSV.write(rows)).utf8).write(to: url, options: .atomic)
+            self.notice = String(format: L("Экспортировано записей: %d."), rows.count - 1)
+        }
+    }
+
+    /// Всё пространство в новую папку: Markdown, CSV и вложения. Резервную копию не заменяет.
+    func exportWorkspace() {
+        enqueue {
+            guard let store = self.store, let session = self.session else { return }
+            try await session.coordinator.flush()
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.canCreateDirectories = true
+            panel.prompt = L("Экспортировать")
+            panel.message = L("Выберите папку. В ней появится новая папка с экспортом; существующие файлы не меняются.")
+            guard panel.runModal() == .OK, let dir = panel.url else { return }
+            let name = WorkspaceExport.fileName(self.workspaceName, untitled: L("Без названия"))
+            let root = dir.appendingPathComponent("\(name) — \(L("экспорт")) \(Self.stamp(Date()))", isDirectory: true)
+            self.busyMessage = L("Экспорт…")
+            defer { self.busyMessage = nil }
+            let untitled = L("Без названия")
+            let summary = try await Task.detached(priority: .userInitiated) {
+                try await WorkspaceExport.exportAll(source: store, to: root, untitled: untitled)
+            }.value
+            var lines = [String(format: L("Страниц: %d, баз: %d, записей: %d, вложений: %d."), summary.pages, summary.databases, summary.records, summary.assets)]
+            if summary.missingAssets > 0 { lines.append(String(format: L("Не найдено вложений: %d"), summary.missingAssets)) }
+            lines += summary.losses.sorted { $0.key < $1.key }.map { "\(L($0.key)): \($0.value)" }
+            let report = [L("Экспорт не заменяет резервную копию: история версий, представления баз и корзина в него не входят.")] + lines
+            try Data(report.joined(separator: "\n").appending("\n").utf8).write(to: root.appendingPathComponent(L("Отчёт об экспорте") + ".txt"))
+            self.notice = ([L("Экспорт завершён.")] + lines).joined(separator: "\n")
+            NSWorkspace.shared.activateFileViewerSelecting([root])
+        }
+    }
+
     // MARK: История версий
 
     func revisions(of page: UUID) async -> [Revision] {

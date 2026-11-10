@@ -801,3 +801,15 @@
 "Неизвестные блоки: сохранён только текст" = "Unknown blocks: only the text was kept";
 "Подчёркивание" = "Underline";
 "Цвет текста и выделение" = "Text color and highlight";
+"Экспорт в CSV…" = "Export to CSV…";
+"Экспортировано записей: %d." = "Records exported: %d.";
+"Экспортировать" = "Export";
+"Экспортировать…" = "Export…";
+"Выберите папку. В ней появится новая папка с экспортом; существующие файлы не меняются." = "Choose a folder. A new folder with the export will be created in it; existing files are not changed.";
+"экспорт" = "export";
+"Экспорт" = "Export";
+"Страниц: %d, баз: %d, записей: %d, вложений: %d." = "Pages: %d, databases: %d, records: %d, attachments: %d.";
+"Экспорт не заменяет резервную копию: история версий, представления баз и корзина в него не входят." = "An export does not replace a backup: version history, database views and the trash are not included.";
+"Отчёт об экспорте" = "Export report";
+"Экспорт завершён." = "Export finished.";
+"Markdown, CSV и вложения в выбранную папку. Не заменяет резервную копию." = "Markdown, CSV and attachments to a folder you choose. Does not replace a backup.";

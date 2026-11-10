@@ -55,6 +55,10 @@ struct SettingsScreen: View {
                             Button("Управлять") { shell.goBackups() }.buttonStyle(NotesButtonStyle())
                         }
                         divider
+                        row(L("Экспорт"), L("Markdown, CSV и вложения в выбранную папку. Не заменяет резервную копию.")) {
+                            Button("Экспортировать…") { shell.exportWorkspace() }.buttonStyle(NotesButtonStyle())
+                        }
+                        divider
                         row(L("Данные пространства"), shell.workspaceRoot?.path ?? "") {
                             Button("Показать в Finder") {
                                 if let url = shell.workspaceRoot { NSWorkspace.shared.activateFileViewerSelecting([url]) }

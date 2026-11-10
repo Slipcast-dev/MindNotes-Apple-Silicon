@@ -173,3 +173,5 @@ extension SQLiteWorkspace {
         return layout.root.appendingPathComponent(rel)
     }
 }
+
+extension SQLiteWorkspace: ExportSource {}

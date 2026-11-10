@@ -192,6 +192,7 @@ struct CrumbBar: View {
                     if !shell.isDatabase(id) { Button("Сохранить как шаблон…") { shell.saveAsTemplate(id) } }
                     if !shell.isDatabase(id), let page { Button("История версий…") { shell.historyPage = page } }
                     if !shell.isDatabase(id) { Button("Экспорт в Markdown…") { shell.exportMarkdown(id) } }
+                    if shell.isDatabase(id) { Button("Экспорт в CSV…") { shell.exportDatabaseCSV(page: id) } }
                     Divider()
                     Button("Удалить страницу") { shell.trash(id) }
                 } label: { Image(systemName: "ellipsis") }

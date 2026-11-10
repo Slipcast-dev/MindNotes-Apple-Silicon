@@ -86,6 +86,16 @@ protocol WorkspaceStore: BlockSink {
     func close()
 }
 
+/// Чтение пространства для переносимого экспорта.
+protocol ExportSource: AnyObject {
+    func allPages() async throws -> [Page]
+    func blocks(ofPage id: UUID) async throws -> [Block]
+    func assetURL(_ id: UUID) async throws -> URL?
+    func databaseIndex() async throws -> [UUID: UUID]
+    func database(_ id: UUID) async throws -> Database?
+    func queryRecords(database: Database, state: DatabaseViewState, limit: Int, offset: Int) async throws -> RecordPage
+}
+
 /// Согласованный снимок базы и его проверка. Реализация в Persistence: слой Backup не знает об SQLite.
 protocol DatabaseSnapshotter {
     /// Снимает копию работающей базы средствами SQLite; обычное копирование файла при WAL некорректно.
