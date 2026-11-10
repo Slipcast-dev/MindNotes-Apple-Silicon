@@ -56,6 +56,7 @@ struct BlockType: RawRepresentable, Hashable {
     static let divider = BlockType(rawValue: "divider")
     static let image = BlockType(rawValue: "image")
     static let file = BlockType(rawValue: "file")
+    static let video = BlockType(rawValue: "video")
     static let table = BlockType(rawValue: "table")
     static let databaseView = BlockType(rawValue: "database_view")
 
@@ -63,7 +64,7 @@ struct BlockType: RawRepresentable, Hashable {
     static let known: Set<BlockType> = [.paragraph, .heading1, .heading2, .heading3, .task, .bullet, .numbered, .quote, .callout, .toggle, .code]
     var isKnown: Bool { Self.known.contains(self) }
     /// Известные неделимые блоки: у них нет текста, данные лежат в JSON.
-    static let atoms: Set<BlockType> = [.divider, .image, .file, .table, .databaseView]
+    static let atoms: Set<BlockType> = [.divider, .image, .video, .file, .table, .databaseView]
     var isAtom: Bool { Self.atoms.contains(self) }
     var isHeading: Bool { self == .heading1 || self == .heading2 || self == .heading3 }
 }
@@ -188,7 +189,7 @@ struct Block: Equatable, Identifiable {
 
     /// Вложение изображения или файла.
     var assetID: UUID? {
-        guard type == .image || type == .file, case .string(let s)? = atomJSON["asset"] else { return nil }
+        guard type == .image || type == .video || type == .file, case .string(let s)? = atomJSON["asset"] else { return nil }
         return UUID(uuidString: s)
     }
 

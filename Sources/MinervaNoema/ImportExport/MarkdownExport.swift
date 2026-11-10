@@ -50,7 +50,7 @@ enum MarkdownExport {
             case .callout: line = "> 💡 " + text
             case .code: line = "```\n" + block.plainText + "\n```"
             case .divider: line = "---"
-            case .image, .file:
+            case .image, .video, .file:
                 let name = AtomData.name(of: block)
                 if case .string(let raw)? = block.atomJSON["asset"], let id = UUID(uuidString: raw) {
                     let path = assetFolder + "/" + unique(safeFileName(name), in: &usedNames)

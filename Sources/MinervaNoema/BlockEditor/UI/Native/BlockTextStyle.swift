@@ -204,6 +204,77 @@ final class ImageBlockCell: NSTextAttachmentCell {
     }
 }
 
+/// Видео: кадр-обложка со значком воспроизведения и длительностью; нажатие открывает проигрыватель.
+final class VideoBlockCell: NSTextAttachmentCell {
+    private let poster: NSImage?
+    private let loading: Bool
+    private let name: String
+    private let duration: String?
+    private let ink: NSColor
+    private let muted: NSColor
+    private let line: NSColor
+    private let soft: NSColor
+
+    init(poster: NSImage?, loading: Bool, name: String, duration: String?, ink: NSColor, muted: NSColor, line: NSColor, soft: NSColor) {
+        self.poster = poster
+        self.loading = loading
+        self.name = name
+        self.duration = duration
+        self.ink = ink
+        self.muted = muted
+        self.line = line
+        self.soft = soft
+        super.init(textCell: "")
+    }
+
+    required init(coder: NSCoder) { fatalError("не используется") }
+
+    override func cellFrame(for textContainer: NSTextContainer, proposedLineFragment lineFrag: NSRect, glyphPosition position: NSPoint, characterIndex charIndex: Int) -> NSRect {
+        let width = min(max(40, lineFrag.width - position.x - 1), 560)
+        let aspect = poster.map { $0.size.width > 0 ? $0.size.height / $0.size.width : 9.0 / 16 } ?? 9.0 / 16
+        return NSRect(x: 0, y: 0, width: width, height: (width * aspect).rounded())
+    }
+
+    override func draw(withFrame frame: NSRect, in view: NSView?) {
+        let shape = NSBezierPath(roundedRect: frame, xRadius: 8, yRadius: 8)
+        NSGraphicsContext.saveGraphicsState()
+        shape.addClip()
+        if let poster {
+            poster.draw(in: frame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        } else {
+            soft.setFill()
+            frame.fill()
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        if poster == nil, !loading {
+            line.setStroke()
+            NSBezierPath(roundedRect: frame.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8).stroke()
+            let text = String(format: NSLocalizedString("Видео недоступно: %@", comment: ""), name) as NSString
+            text.draw(at: NSPoint(x: frame.minX + 12, y: frame.minY + 12), withAttributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: ink])
+        }
+        // Кнопка воспроизведения по центру.
+        let radius: CGFloat = 26
+        let center = NSPoint(x: frame.midX, y: frame.midY)
+        NSColor.black.withAlphaComponent(0.55).setFill()
+        NSBezierPath(ovalIn: NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)).fill()
+        let triangle = NSBezierPath()
+        triangle.move(to: NSPoint(x: center.x - 8, y: center.y - 12))
+        triangle.line(to: NSPoint(x: center.x - 8, y: center.y + 12))
+        triangle.line(to: NSPoint(x: center.x + 13, y: center.y))
+        triangle.close()
+        NSColor.white.setFill()
+        triangle.fill()
+        // Имя и длительность внизу, на тёмной плашке.
+        let caption = ([name] + (duration.map { [$0] } ?? [])).joined(separator: " · ") as NSString
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.white]
+        let size = caption.size(withAttributes: attributes)
+        let badge = NSRect(x: frame.minX + 8, y: frame.maxY - size.height - 14, width: min(size.width + 12, frame.width - 16), height: size.height + 6)
+        NSColor.black.withAlphaComponent(0.55).setFill()
+        NSBezierPath(roundedRect: badge, xRadius: 5, yRadius: 5).fill()
+        caption.draw(with: badge.insetBy(dx: 6, dy: 3), options: [.truncatesLastVisibleLine, .usesLineFragmentOrigin], attributes: attributes)
+    }
+}
+
 /// Файл: значок, имя и размер; нажатие открывает его системным приложением.
 final class FileBlockCell: NSTextAttachmentCell {
     private let name: String

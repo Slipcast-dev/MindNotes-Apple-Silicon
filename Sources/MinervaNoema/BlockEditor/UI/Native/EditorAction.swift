@@ -60,6 +60,7 @@ enum EditorAction: Equatable {
         [Item(title: t("Разделитель"), action: .insert(.divider), aliases: ["линия", "divider", "черта"]),
          Item(title: t("Ссылка на страницу"), action: .beginPageLink, aliases: ["link", "страница"]),
          Item(title: t("Изображение"), action: .attach(.image), aliases: ["картинка", "фото", "image"]),
+         Item(title: t("Видео"), action: .attach(.video), aliases: ["ролик", "фильм", "кино", "video"]),
          Item(title: t("Файл"), action: .attach(.file), aliases: ["вложение", "документ", "file"]),
          Item(title: t("Таблица"), action: .insertTable, aliases: ["table", "сетка"]),
          Item(title: t("Представление базы"), action: .insertDatabaseView, aliases: ["база", "database", "view"])]

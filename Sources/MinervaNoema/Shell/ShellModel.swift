@@ -75,6 +75,8 @@ final class ShellModel: ObservableObject {
     @Published var pageToMove: Page?
     /// Страница, для которой открыта история версий.
     @Published var historyPage: Page?
+    /// Видео, открытое в проигрывателе.
+    @Published var playingVideo: PlayingVideo?
     /// CSV, ожидающий предпросмотра.
     @Published var csvImport: CSVImportRequest?
     @Published private(set) var databaseModel: DatabaseModel?
@@ -699,6 +701,7 @@ final class ShellModel: ObservableObject {
         editor?.controller.embedSummary = { [weak self] in self?.embedSummary($0) }
         embedCache = [:]
         editor?.controller.onOpenLink = { [weak self] page, block in self?.followLink(to: page, block: block) }
+        editor?.controller.onPlayVideo = { [weak self] url, name in self?.playingVideo = PlayingVideo(url: url, name: name) }
         editor?.controller.addAttachment = { [weak self] url in
             guard let store = self?.store else { throw WorkspaceError.storage(code: 0, detail: "пространство закрыто") }
                         let size = (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
@@ -712,6 +715,7 @@ final class ShellModel: ObservableObject {
             panel.canChooseFiles = true
             panel.canChooseDirectories = false
             if type == .image { panel.allowedContentTypes = [.image] }
+            if type == .video { panel.allowedContentTypes = [.movie] }
             panel.prompt = L("Выбрать")
             return panel.runModal() == .OK ? panel.url : nil
         }

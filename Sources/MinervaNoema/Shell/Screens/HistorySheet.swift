@@ -123,6 +123,7 @@ struct HistorySheet: View {
         case .numbered: return "1. " + text
         case .quote, .callout: return "> " + text
         case .divider: return "———"
+        case .video: return L("[Видео]") + (text.isEmpty ? "" : " " + text)
         case .image: return L("[Изображение]") + (text.isEmpty ? "" : " " + text)
         case .file: return L("[Файл]") + (text.isEmpty ? "" : " " + text)
         case .table: return L("[Таблица]")

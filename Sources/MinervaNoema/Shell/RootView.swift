@@ -14,6 +14,7 @@ struct RootView: View {
             .sheet(item: $shell.pageToMove) { MovePageSheet(page: $0) }
             .sheet(item: $shell.historyPage) { HistorySheet(page: $0) }
             .sheet(item: $shell.csvImport) { CSVImportSheet(request: $0) }
+            .sheet(item: $shell.playingVideo) { VideoPlayerSheet(video: $0) }
             .background(WindowChrome(theme: prefs.theme))
             .background(WindowFrameSaver(name: "MinervaNoemaMainWindow"))
             .preferredColorScheme(prefs.isDark ? .dark : .light)

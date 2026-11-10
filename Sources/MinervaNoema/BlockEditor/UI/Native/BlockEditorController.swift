@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import ImageIO
 import UniformTypeIdentifiers
 
@@ -54,6 +55,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     var pickFile: ((BlockType) -> URL?)?
     /// Открыть таблицу в редакторе.
     var onEditTable: ((Block) -> Void)?
+    /// Нажатие на видео: проигрыватель в окне приложения.
+    var onPlayVideo: ((URL, String) -> Void)?
     /// Выбор базы для встроенного представления; nil — отменено.
     var pickDatabaseView: (() -> BlockFragment?)?
     /// Предпросмотр встроенного представления: nil, пока данные не загружены.
@@ -67,6 +70,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }()
     private var loadingImages: Set<UUID> = []
     private var failedImages: Set<UUID> = []
+    /// Длительность видео по вложению, секунды.
+    private var videoDurations: [UUID: Double] = [:]
 
     private(set) var spans: [Span] = []
     private(set) var visible: [Block] = []
@@ -430,8 +435,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             for url in urls {
                 do {
                     let asset = try await add(url)
-                    let isImage = type == .image || (type == nil && UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true)
-                    fragments.append(AtomData.attachment(type: isImage ? .image : .file, asset: asset))
+                    fragments.append(AtomData.attachment(type: type ?? Self.attachmentType(for: url), asset: asset))
                 } catch {
                     self.onError?((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
                 }
@@ -516,8 +520,28 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         }
     }
 
+    /// Тип блока для файла: картинка, видео или файл.
+    static func attachmentType(for url: URL) -> BlockType {
+        guard let type = UTType(filenameExtension: url.pathExtension.lowercased()) else { return .file }
+        if type.conforms(to: .image) { return .image }
+        if type.conforms(to: .movie) { return .video }
+        return .file
+    }
+
+    /// Видео: новый блок или карточка файла с видео, вставленная до появления проигрывателя.
+    static func isVideo(_ block: Block) -> Bool {
+        block.type == .video || (block.type == .file && attachmentType(for: URL(fileURLWithPath: AtomData.name(of: block))) == .video)
+    }
+
     /// Плашка неделимого блока.
     private func cell(for block: Block) -> NSTextAttachmentCell? {
+        if Self.isVideo(block) {
+            let poster = poster(for: block)
+            let failed = block.assetID.map(failedImages.contains) ?? true
+            let duration = block.assetID.flatMap { videoDurations[$0] }.map(Self.durationText)
+            return VideoBlockCell(poster: poster, loading: poster == nil && !failed, name: AtomData.name(of: block), duration: duration,
+                                  ink: style.ink, muted: style.muted, line: style.line, soft: style.soft)
+        }
         switch block.type {
         case .image:
             let picture = picture(for: block)
@@ -555,6 +579,46 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             guard let self else { return }
             self.loadingImages.remove(id)
             if let image { self.imageCache.setObject(image, forKey: id as NSUUID) } else { self.failedImages.insert(id) }
+            self.reloadAtoms(asset: id)
+        }
+        return nil
+    }
+
+    static func durationText(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        return total >= 3600 ? String(format: "%d:%02d:%02d", total / 3600, total / 60 % 60, total % 60) : String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    /// Кадр-обложка видео: из кэша или загружается вне главного потока, затем плашка заменяется.
+    private func poster(for block: Block) -> NSImage? {
+        guard let id = block.assetID else { return nil }
+        if let cached = imageCache.object(forKey: id as NSUUID) { return cached }
+        guard !loadingImages.contains(id), !failedImages.contains(id) else { return nil }
+        guard let url = assetURL?(id) else {
+            failedImages.insert(id)
+            return nil
+        }
+        loadingImages.insert(id)
+        Task { @MainActor [weak self] in
+            let result = await Task.detached(priority: .userInitiated) { () -> (NSImage, Double)? in
+                let asset = AVURLAsset(url: url)
+                guard let duration = try? await asset.load(.duration), duration.seconds.isFinite else { return nil }
+                let generator = AVAssetImageGenerator(asset: asset)
+                generator.appliesPreferredTrackTransform = true
+                generator.maximumSize = CGSize(width: 1200, height: 1200)
+                // Первый кадр часто чёрный: берётся кадр через секунду, у коротких — из середины.
+                let at = CMTime(seconds: min(1, duration.seconds / 2), preferredTimescale: 600)
+                guard let frame = try? await generator.image(at: at).image else { return nil }
+                return (NSImage(cgImage: frame, size: NSSize(width: CGFloat(frame.width) / 2, height: CGFloat(frame.height) / 2)), duration.seconds)
+            }.value
+            guard let self else { return }
+            self.loadingImages.remove(id)
+            if let (image, seconds) = result {
+                self.imageCache.setObject(image, forKey: id as NSUUID)
+                self.videoDurations[id] = seconds
+            } else {
+                self.failedImages.insert(id)
+            }
             self.reloadAtoms(asset: id)
         }
         return nil
@@ -1178,6 +1242,12 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         guard let block = document.block(span.id), true else { return false }
         if block.content == nil {
             guard let rect = blockRect(for: span), rect.contains(point) else { return false }
+            if Self.isVideo(block) {
+                if let id = block.assetID, let url = assetURL?(id) {
+                    if let play = onPlayVideo { play(url, AtomData.name(of: block)) } else { openAttachment(url) }
+                }
+                return true
+            }
             switch block.type {
             case .file:
                 if let id = block.assetID, let url = assetURL?(id) { openAttachment(url) }

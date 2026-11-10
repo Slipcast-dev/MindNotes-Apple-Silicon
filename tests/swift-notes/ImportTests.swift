@@ -254,3 +254,28 @@ func storedZip(_ entries: [(String, String)]) -> [UInt8] {
     out += le32(0x06054b50) + le16(0) + le16(0) + le16(entries.count) + le16(entries.count) + le32(UInt32(central.count)) + le32(start) + le16(0)
     return out
 }
+
+@MainActor
+func runVideoTests() async {
+    await test("Видео: тип по файлу, старые карточки-видео, экспорт, длительность") {
+        checkEqual(BlockEditorController.attachmentType(for: URL(fileURLWithPath: "/x/клип.MOV")), .video)
+        checkEqual(BlockEditorController.attachmentType(for: URL(fileURLWithPath: "/x/a.mp4")), .video)
+        checkEqual(BlockEditorController.attachmentType(for: URL(fileURLWithPath: "/x/a.heic")), .image)
+        checkEqual(BlockEditorController.attachmentType(for: URL(fileURLWithPath: "/x/a.mp3")), .file, "звук — файл")
+        checkEqual(BlockEditorController.attachmentType(for: URL(fileURLWithPath: "/x/a.pdf")), .file)
+        let page = UUID(), asset = UUID()
+        func atom(_ type: BlockType, _ name: String) -> Block {
+            Block(id: UUID(), pageID: page, parentID: nil, sortKey: "a", type: type, contentVersion: 1,
+                  contentJSON: "{\"asset\":\"\(asset.uuidString.lowercased())\",\"name\":\"\(name)\",\"size\":10}", plainText: name, createdAt: 1, updatedAt: 1)
+        }
+        let video = atom(.video, "клип.mov"), legacy = atom(.file, "старое.mp4"), doc = atom(.file, "отчёт.pdf")
+        check(BlockEditorController.isVideo(video) && BlockEditorController.isVideo(legacy) && !BlockEditorController.isVideo(doc))
+        checkEqual(video.assetID, asset, "вложение видео защищено от уборки как у картинки")
+        check(BlockType.video.isAtom)
+        let md = MarkdownExport.export(title: "Т", blocks: [video], assetFolder: "f") { _ in nil }
+        check(md.markdown.contains("[клип.mov](<f/клип.mov>)") && !md.markdown.contains("!["), "видео — ссылкой на файл")
+        checkEqual(md.assets.map(\.id), [asset])
+        checkEqual(BlockEditorController.durationText(65.4), "1:05")
+        checkEqual(BlockEditorController.durationText(3725), "1:02:05")
+    }
+}
