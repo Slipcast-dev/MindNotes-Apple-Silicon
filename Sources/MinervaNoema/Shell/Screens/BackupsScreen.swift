@@ -6,7 +6,7 @@ struct BackupsScreen: View {
 
     private func detail(_ item: ShellModel.BackupItem) -> String {
         let size = ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file)
-        return "\(L("Ручная копия")) · \(size)"
+        return "\(item.automatic ? L("Автоматическая копия") : L("Ручная копия")) · \(size)"
     }
 
     private func dateText(_ date: Date) -> String {
@@ -31,6 +31,27 @@ struct BackupsScreen: View {
                     Button("Восстановить из архива…") { shell.presentRestore() }.buttonStyle(NotesButtonStyle())
                 }
                 .disabled(shell.busyMessage != nil)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("Автоматические копии", isOn: $shell.autoBackupEnabled)
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Раз в сутки, пока пространство открыто. Хранятся 7 дневных и 4 недельные копии; ручные копии не удаляются.")
+                        .font(.system(size: 12)).foregroundColor(Tokens.muted)
+                    HStack(spacing: 9) {
+                        Text(shell.autoBackupFolder?.path ?? L("Папка приложения на этом диске"))
+                            .font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                        Spacer()
+                        Button("Другая папка…") { shell.chooseAutoBackupFolder() }.buttonStyle(NotesButtonStyle())
+                        if shell.autoBackupFolder != nil {
+                            Button("По умолчанию") { shell.resetAutoBackupFolder() }.buttonStyle(NotesButtonStyle(kind: .plain))
+                        }
+                    }
+                    .disabled(!shell.autoBackupEnabled)
+                }
+                .padding(18)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Tokens.card))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Tokens.line))
+                .padding(.top, 24)
 
                 if !shell.backups.isEmpty {
                     VStack(spacing: 0) {

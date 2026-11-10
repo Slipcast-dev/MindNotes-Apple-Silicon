@@ -102,8 +102,18 @@ final class ShellModel: ObservableObject {
         var url: URL
         var date: Date
         var size: Int64
+        var automatic = false
         var id: URL { url }
     }
+
+    /// Автоматические копии: включены по умолчанию; папку можно перенести на другой диск.
+    @Published var autoBackupEnabled = UserDefaults.standard.object(forKey: "autoBackupEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoBackupEnabled, forKey: "autoBackupEnabled") }
+    }
+    @Published private(set) var autoBackupFolder: URL? = UserDefaults.standard.string(forKey: "autoBackupFolder").map { URL(fileURLWithPath: $0) }
+    private var autoBackupTask: Task<Void, Never>?
+    private var autoBackupTimer: Timer?
+    static let autoPrefix = "auto-"
 
     // MARK: Пространства
 
@@ -394,6 +404,7 @@ final class ShellModel: ObservableObject {
             if section != .files { section = .home }
             UserDefaults.standard.set(store.layout.root.path, forKey: lastWorkspaceKey)
             try await reloadBackups()
+            startAutoBackups()
             // После перезапуска пользователь возвращается к той же странице.
             if section != .files, let raw = UserDefaults.standard.string(forKey: lastPageKey), let id = UUID(uuidString: raw), pages.contains(where: { $0.id == id }) {
                 try await show(id)
@@ -415,6 +426,10 @@ final class ShellModel: ObservableObject {
     }
 
     private func closeSession() async throws {
+        // Копия читает базу: сначала дождаться её, потом закрывать.
+        autoBackupTimer?.invalidate()
+        autoBackupTimer = nil
+        await autoBackupTask?.value
         // Модель редактора живёт до подтверждённой записи: при отказе нужен аварийный экспорт.
         if let session { try await session.close() }
         editor = nil
@@ -1068,12 +1083,85 @@ final class ShellModel: ObservableObject {
 
     func reloadBackups() async throws {
         guard let store else { backups = []; return }
-        let dir = backupDirectory(for: try await store.workspaceID())
-        let urls = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey])) ?? []
-        backups = urls.filter { Self.backupExtensions.contains($0.pathExtension) }.compactMap { url in
-            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-            return BackupItem(url: url, date: values?.contentModificationDate ?? .distantPast, size: Int64(values?.fileSize ?? 0))
-        }.sorted { $0.date > $1.date }
+        let id = try await store.workspaceID()
+        func list(_ dir: URL, automatic: Bool) -> [BackupItem] {
+            let urls = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey])) ?? []
+            return urls.filter { Self.backupExtensions.contains($0.pathExtension) && (!automatic || $0.lastPathComponent.hasPrefix(Self.autoPrefix)) }.compactMap { url in
+                let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+                return BackupItem(url: url, date: values?.contentModificationDate ?? .distantPast, size: Int64(values?.fileSize ?? 0), automatic: automatic)
+            }
+        }
+        var all = list(backupDirectory(for: id), automatic: false)
+        all += list(autoBackupDirectory(for: id), automatic: true)
+        backups = all.sorted { $0.date > $1.date }
+    }
+
+    /// Папка автоматических копий пространства: своя для каждого, чтобы ротация не задела чужие копии.
+    private func autoBackupDirectory(for id: UUID) -> URL {
+        if let folder = autoBackupFolder {
+            return folder.appendingPathComponent("Minerva Noema \(id.lowercasedString.prefix(8))", isDirectory: true)
+        }
+        return backupDirectory(for: id).appendingPathComponent("auto", isDirectory: true)
+    }
+
+    func chooseAutoBackupFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.prompt = L("Выбрать")
+        panel.message = L("Выберите папку на другом диске: копия на том же диске не защищает от его отказа.")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        autoBackupFolder = url
+        UserDefaults.standard.set(url.path, forKey: "autoBackupFolder")
+        act { try await self.reloadBackups() }
+    }
+
+    func resetAutoBackupFolder() {
+        autoBackupFolder = nil
+        UserDefaults.standard.removeObject(forKey: "autoBackupFolder")
+        act { try await self.reloadBackups() }
+    }
+
+    /// Проверка при открытии и раз в час: копия создаётся, если прошлой больше суток.
+    private func startAutoBackups() {
+        autoBackupTimer?.invalidate()
+        autoBackupTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.runAutoBackupIfDue() }
+        }
+        runAutoBackupIfDue()
+    }
+
+    private func runAutoBackupIfDue() {
+        guard autoBackupEnabled, autoBackupTask == nil, let store, let session else { return }
+        autoBackupTask = Task { @MainActor in
+            defer { self.autoBackupTask = nil }
+            do {
+                let id = try await store.workspaceID()
+                let dir = self.autoBackupDirectory(for: id)
+                let last = self.backups.filter(\.automatic).map(\.date).max()
+                guard BackupSchedule.isDue(last: last, now: Date()) else { return }
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try await session.coordinator.flush()
+                let url = dir.appendingPathComponent("\(Self.autoPrefix)\(Self.stamp(Date())).\(Self.backupExtension)")
+                let root = store.layout.root
+                _ = try await Task.detached(priority: .utility) {
+                    try BackupService.create(workspaceRoot: root, snapshotter: store, inspector: SQLiteSnapshotInspector(), destination: url,
+                                             appVersion: (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev",
+                                             now: SystemClock().nowMillis())
+                }.value
+                try await self.reloadBackups()
+                // Удаляются только собственные автоматические копии, ручные не трогаются.
+                let automatic = self.backups.filter(\.automatic)
+                let doomed = BackupSchedule.toDelete(automatic.map { (id: $0.url.path, date: $0.date) })
+                for item in automatic where doomed.contains(item.url.path) {
+                    try? FileManager.default.removeItem(at: item.url)
+                }
+                try await self.reloadBackups()
+            } catch {
+                self.notice = String(format: L("Автоматическая копия не создана: %@"), Self.describe(error))
+            }
+        }
     }
 
     func makeBackup() {

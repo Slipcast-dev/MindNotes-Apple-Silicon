@@ -893,3 +893,11 @@
 "неверное имя файла" = "invalid file name";
 "неверный размер" = "invalid size";
 "Не удалось прочитать как текст" = "Could not be read as text";
+"Автоматическая копия" = "Automatic backup";
+"Автоматические копии" = "Automatic Backups";
+"Раз в сутки, пока пространство открыто. Хранятся 7 дневных и 4 недельные копии; ручные копии не удаляются." = "Once a day while the workspace is open. 7 daily and 4 weekly backups are kept; manual backups are never deleted.";
+"Папка приложения на этом диске" = "App folder on this disk";
+"Другая папка…" = "Other Folder…";
+"По умолчанию" = "Default";
+"Выберите папку на другом диске: копия на том же диске не защищает от его отказа." = "Choose a folder on another disk: a backup on the same disk doesn't protect against its failure.";
+"Автоматическая копия не создана: %@" = "The automatic backup was not created: %@";

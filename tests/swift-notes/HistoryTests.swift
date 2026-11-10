@@ -134,4 +134,27 @@ func runHistoryTests() async {
         checkEqual(r.assets.map(\.id), [asset])
         checkEqual(r.report.map(\.reason), ["Подчёркивание"], "потери в отчёте")
     }
+
+    await test("Расписание копий: раз в сутки, 7 дневных и 4 недельные, новейшая всегда") {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Moscow")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 11, day: 10, hour: 12))!
+        func day(_ n: Int, hour: Int = 9) -> Date { calendar.date(byAdding: DateComponents(day: -n, hour: hour - 12), to: now)! }
+        check(BackupSchedule.isDue(last: nil, now: now))
+        check(!BackupSchedule.isDue(last: now.addingTimeInterval(-3600), now: now))
+        check(BackupSchedule.isDue(last: now.addingTimeInterval(-25 * 3600), now: now))
+        check(BackupSchedule.isDue(last: now.addingTimeInterval(48 * 3600), now: now), "дата из будущего — часы переводили")
+
+        // Ежедневные копии за 60 дней и вторая копия сегодня.
+        var items = (0..<60).map { (id: "d\($0)", date: day($0)) }
+        items.append((id: "today-late", date: day(0, hour: 11)))
+        let doomed = BackupSchedule.toDelete(items, calendar: calendar)
+        let kept = Set(items.map(\.id)).subtracting(doomed)
+        checkEqual(kept.count, 11, "7 дневных + 4 недельные")
+        check(kept.contains("today-late") && !kept.contains("d0"), "в дне — новейшая")
+        check((1...6).allSatisfy { kept.contains("d\($0)") }, "дни подряд")
+        check(!kept.contains("d59"), "старые удаляются")
+        checkEqual(BackupSchedule.toDelete([(id: "one", date: day(400))], calendar: calendar), [], "единственная копия остаётся")
+        checkEqual(BackupSchedule.toDelete([], calendar: calendar), [])
+    }
 }
