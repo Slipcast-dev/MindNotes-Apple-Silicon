@@ -393,6 +393,19 @@ func runDatabaseTests() async {
         checkEqual(tree.page(record.id)?.title, "запись", "заголовок скрытой страницы доступен")
         check(tree.page(UUID()) == nil)
 
+        // Перетаскивание: перед строкой, после, в другую ветвь; в себя и в потомка — нельзя; без изменений — nil.
+        let p = tree.placement(moving: b.id, onto: a2.id, upperHalf: true)
+        check(p?.parent == a.id && p?.after == a1.id, "перед a2 — после a1 в ветви a")
+        let q = tree.placement(moving: b.id, onto: a1.id, upperHalf: true)
+        check(q?.parent == a.id && q?.after == nil, "перед первым — первой")
+        let r = tree.placement(moving: a2.id, onto: b.id, upperHalf: false)
+        check(r != nil && r?.parent == nil && r?.after == b.id, "после b в корне")
+        check(tree.placement(moving: a.id, onto: deep.id, upperHalf: false) == nil, "в своё поддерево нельзя")
+        check(tree.placement(moving: a.id, onto: a.id, upperHalf: true) == nil)
+        check(tree.placement(moving: a2.id, onto: a1.id, upperHalf: false) == nil, "уже стоит после a1")
+        check(tree.placement(moving: a1.id, onto: a2.id, upperHalf: true) == nil, "уже стоит перед a2")
+        check(tree.placement(moving: a1.id, onto: a2.id, upperHalf: false) != nil, "после a2 — перестановка")
+
         // Цикл в повреждённых данных не должен подвешивать интерфейс.
         let x = UUID(), y = UUID()
         let looped = PageTree(pages: [page(id: x, parent: y, "x"), page(id: y, parent: x, "y")])

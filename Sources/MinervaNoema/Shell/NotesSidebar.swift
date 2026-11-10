@@ -185,6 +185,7 @@ struct PageTreeRow: View {
     let row: PageTree.Row
     let expanded: Bool
     let toggle: () -> Void
+    @State private var dropTarget = false
 
     var body: some View {
         let page = row.page
@@ -206,6 +207,16 @@ struct PageTreeRow: View {
             Button("Переместить в…") { shell.pageToMove = page }
             Divider()
             Button("Удалить") { shell.trash(page.id) }
+        }
+        // Порядок перетаскиванием: верхняя половина строки — перед ней, нижняя — после.
+        .draggable(page.id.uuidString)
+        .dropDestination(for: String.self) { items, location in
+            guard let raw = items.first, let dragged = UUID(uuidString: raw) else { return false }
+            shell.reorder(dragged, onto: page.id, upperHalf: location.y < 16)
+            return true
+        } isTargeted: { dropTarget = $0 }
+        .overlay(alignment: .bottom) {
+            if dropTarget { Rectangle().fill(Tokens.accent).frame(height: 2).padding(.leading, CGFloat(row.depth) * 14 + 10) }
         }
     }
 }

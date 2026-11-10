@@ -989,6 +989,16 @@ final class ShellModel: ObservableObject {
         pages = session.pages
     }
 
+    /// Перетаскивание в боковой панели: перед строкой или после неё, на том же уровне.
+    func reorder(_ id: UUID, onto target: UUID, upperHalf: Bool) {
+        guard let place = pageTree.placement(moving: id, onto: target, upperHalf: upperHalf) else { return }
+        act {
+            guard let session = self.session else { return }
+            try await session.move(id, toParent: place.parent, afterSibling: place.after)
+            self.pages = session.pages
+        }
+    }
+
     func move(_ id: UUID, toParent parent: UUID?) {
         act {
             guard let session = self.session else { return }

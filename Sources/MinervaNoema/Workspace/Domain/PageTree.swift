@@ -68,6 +68,23 @@ struct PageTree {
         return out
     }
 
+    /// Куда встанет страница, брошенная на строку `target`: перед ней (верхняя половина) или после, на том же уровне.
+    /// nil — перемещение невозможно (в себя или в своё поддерево) или ничего не меняет.
+    func placement(moving id: UUID, onto target: UUID, upperHalf: Bool) -> (parent: UUID?, after: UUID?)? {
+        guard id != target, let targetPage = byID[target], byID[id] != nil, !subtree(of: id).contains(target) else { return nil }
+        let parent = targetPage.parentID
+        let siblings = children(of: parent).map(\.id).filter { $0 != id }
+        guard let index = siblings.firstIndex(of: target) else { return nil }
+        let after: UUID? = upperHalf ? (index > 0 ? siblings[index - 1] : nil) : target
+        // Уже на этом месте: тот же родитель и тот же предыдущий сосед.
+        let current = children(of: parent).map(\.id)
+        if byID[id]?.parentID == parent, let at = current.firstIndex(of: id) {
+            let previous = at > 0 ? current[at - 1] : nil
+            if previous == after { return nil }
+        }
+        return (parent, after)
+    }
+
     /// Предки от корня к странице. Обход ограничен на случай повреждённых данных с циклом.
     func path(of id: UUID) -> [Page] {
         var out: [Page] = []
