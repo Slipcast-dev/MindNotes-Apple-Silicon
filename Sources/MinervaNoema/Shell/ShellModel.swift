@@ -1,3 +1,4 @@
+import CryptoKit
 import AppKit
 import ImageIO
 import SwiftUI
@@ -74,6 +75,8 @@ final class ShellModel: ObservableObject {
     @Published var pageToMove: Page?
     /// Страница, для которой открыта история версий.
     @Published var historyPage: Page?
+    /// CSV, ожидающий предпросмотра.
+    @Published var csvImport: CSVImportRequest?
     @Published private(set) var databaseModel: DatabaseModel?
     @Published private(set) var userTemplates: [PageTemplate] = []
     /// Предпросмотр на блок: данные блока рядом, изменившийся блок читается заново.
@@ -1271,6 +1274,148 @@ final class ShellModel: ObservableObject {
             self.notice = ([L("Экспорт завершён.")] + lines).joined(separator: "\n")
             NSWorkspace.shared.activateFileViewerSelecting([root])
         }
+    }
+
+    // MARK: Импорт
+
+    /// Одна точка входа: Markdown или текст — страница, CSV — база, папка или .zip — экспорт Notion и папки Markdown.
+    func presentImport() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = L("Импортировать")
+        panel.message = L("Файл Markdown, CSV, папка или архив экспорта Notion (.zip). Оригиналы не меняются.")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        switch url.pathExtension.lowercased() {
+        case _ where isDirectory: importFolder(url, archive: false)
+        case "zip": importFolder(url, archive: true)
+        case "csv", "tsv":
+            do {
+                let data = try Data(contentsOf: url)
+                guard data.count <= TextFileReader.maxSize else { throw CocoaError(.fileReadTooLarge) }
+                csvImport = CSVImportRequest(url: url, data: data)
+            } catch { errorMessage = Self.describe(error) }
+        default: importFile(url)
+        }
+    }
+
+    /// Повторный импорт того же содержимого: спросить, прежде чем создавать копии.
+    private func confirmRepeat(_ fingerprint: String) async throws -> Bool {
+        guard let store, let when = try await store.meta("import." + fingerprint) else { return true }
+        let alert = NSAlert()
+        alert.messageText = L("Это уже импортировалось")
+        alert.informativeText = String(format: L("То же содержимое импортировано %@. Повторный импорт создаст копии страниц."), when)
+        alert.addButton(withTitle: L("Импортировать ещё раз"))
+        alert.addButton(withTitle: L("Отмена"))
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func rememberImport(_ fingerprint: String) async {
+        let f = DateFormatter()
+        f.locale = Locale.current
+        f.setLocalizedDateFormatFromTemplate("dMMMMyyyyHHmm")
+        try? await store?.setMeta("import." + fingerprint, f.string(from: Date()))
+    }
+
+    private func afterImport(open page: UUID) async throws {
+        guard let session, let store else { return }
+        try await session.refreshPages()
+        databaseIndex = try await store.databaseIndex()
+        pages = session.pages
+        try await show(page)
+    }
+
+    func importCSV(_ request: CSVImportRequest, plan: CSVImport.Plan, title: String) {
+        enqueue {
+            guard let store = self.store else { return }
+            let fingerprint = "csv." + SHA256.hash(data: request.data).map { String(format: "%02x", $0) }.joined()
+            guard try await self.confirmRepeat(fingerprint) else { return }
+            let zone = TimeZone.current.identifier
+            let built = CSVImport.build(plan, zone: zone, ids: RandomIDs())
+            let name = title.trimmingCharacters(in: .whitespaces)
+            let database = try await store.importDatabase(parent: nil, title: name, viewName: L("Таблица"),
+                                                          properties: built.properties, records: built.records, now: SystemClock().nowMillis())
+            await self.rememberImport(fingerprint)
+            try await self.afterImport(open: database.pageID)
+            var text = String(format: L("Импортировано записей: %d. Файл не изменён."), built.records.count)
+            if built.unconverted > 0 { text += "\n" + String(format: L("Не подошли к типу столбца и сохранены как есть: %d."), built.unconverted) }
+            self.notice = text
+        }
+    }
+
+    func importFolder(_ url: URL, archive: Bool) {
+        enqueue {
+            guard let store = self.store else { return }
+            var source = url
+            var extracted: URL?
+            defer { if let extracted { try? FileManager.default.removeItem(at: extracted) } }
+            if archive {
+                self.busyMessage = L("Распаковка архива…")
+                let temp = FileManager.default.temporaryDirectory
+                let result = await Task.detached(priority: .userInitiated) { Result { try ArchiveExtract.extract(url, into: temp) } }.value
+                self.busyMessage = nil
+                source = try result.get()
+                extracted = source
+            }
+            let root = source
+            let plan = try await Task.detached(priority: .userInitiated) { try FolderImport.scan(root) }.value
+            guard !plan.markdown.isEmpty || !plan.csv.isEmpty else {
+                self.errorMessage = L("Не найдено файлов Markdown и CSV.")
+                return
+            }
+            let confirm = NSAlert()
+            confirm.messageText = String(format: L("Импортировать «%@»?"), url.lastPathComponent)
+            confirm.informativeText = String(format: L("Страниц: %d, таблиц: %d, других файлов: %d, пропущено: %d. Всё появится под новой страницей импорта; оригиналы не изменятся."),
+                                             plan.markdown.count, plan.csv.count, plan.files.count, plan.skipped.count)
+            confirm.addButton(withTitle: L("Импортировать"))
+            confirm.addButton(withTitle: L("Отмена"))
+            guard confirm.runModal() == .alertFirstButtonReturn else { return }
+            guard try await self.confirmRepeat("folder." + plan.fingerprint) else { return }
+
+            let title = String(format: L("Импорт — %@"), FolderImport.cleanTitle(url.deletingPathExtension().lastPathComponent))
+            self.busyMessage = L("Импорт…")
+            defer { self.busyMessage = nil }
+            let untitled = L("Без названия"), viewName = L("Таблица"), zone = TimeZone.current.identifier
+            let (page, report) = try await FolderImport.run(plan, into: store, title: title, untitled: untitled, viewName: viewName,
+                                                            zone: zone, now: SystemClock().nowMillis()) { done, total in
+                Task { @MainActor in self.busyMessage = String(format: L("Импорт… %d из %d"), done, total) }
+            }
+            try await FolderImport.commit(Self.reportFragments(report, source: url.lastPathComponent), to: page, target: store,
+                                          ids: RandomIDs(), now: SystemClock().nowMillis())
+            await self.rememberImport("folder." + plan.fingerprint)
+            try await self.afterImport(open: page)
+            self.notice = String(format: L("Импорт завершён: страниц %d, баз %d, записей %d. Отчёт — в начале страницы импорта."),
+                                 report.pages + report.folders, report.databases, report.records)
+        }
+    }
+
+    /// Журнал импорта (FR-14.6): итог и потери в начале страницы импорта.
+    static func reportFragments(_ r: FolderImport.Report, source: String) -> [BlockFragment] {
+        var out = [BlockFragment(type: .callout, content: BlockContent(text: String(format: L("Импорт из «%@». Чтобы отменить его, отправьте эту страницу в корзину."), source)))]
+        func line(_ key: String, _ value: Int) {
+            guard value > 0 else { return }
+            out.append(BlockFragment(type: .bullet, content: BlockContent(text: String(format: L(key), value))))
+        }
+        line("Страниц: %d", r.pages)
+        line("Папок: %d", r.folders)
+        line("Баз: %d", r.databases)
+        line("Записей: %d", r.records)
+        line("Вложений: %d", r.assets)
+        line("Ссылок без цели (оставлен текст): %d", r.unresolvedLinks)
+        line("Картинок без файла (оставлена подпись): %d", r.missingImages)
+        line("Значений, не подошедших к типу столбца: %d", r.unconvertedValues)
+        line("Файлов без ссылок на них (не импортированы): %d", r.unusedFiles)
+        if !r.skipped.isEmpty {
+            out.append(BlockFragment(type: .heading3, content: BlockContent(text: L("Пропущено"))))
+            for item in r.skipped.prefix(50) {
+                out.append(BlockFragment(type: .bullet, content: BlockContent(text: "\(item.path) — \(L(item.reason))")))
+            }
+            if r.skipped.count > 50 { line("И ещё: %d", r.skipped.count - 50) }
+        }
+        out.append(BlockFragment(type: BlockType.divider.rawValue, contentVersion: 1, json: "{}", plain: ""))
+        return out
     }
 
     // MARK: История версий

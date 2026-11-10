@@ -154,6 +154,7 @@ struct NotesSidebar: View {
                     SidebarGroup(title: L("Пространство"))
                     if shell.isOpen {
                         SidebarRow(title: L("Шаблоны"), symbol: "square.on.square", active: shell.section == .templates) { shell.goTemplates() }
+                        SidebarRow(title: L("Импорт"), symbol: "square.and.arrow.down") { shell.presentImport() }
                         SidebarRow(title: L("Корзина"), symbol: "trash", active: shell.section == .trash) { shell.goTrash() }
                     }
                     SidebarRow(title: L("Настройки"), symbol: "gearshape", active: shell.section == .settings) { shell.goSettings() }
