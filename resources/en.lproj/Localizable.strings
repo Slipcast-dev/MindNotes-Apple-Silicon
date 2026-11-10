@@ -892,3 +892,4 @@
 "запись не является обычным файлом" = "the entry is not a regular file";
 "неверное имя файла" = "invalid file name";
 "неверный размер" = "invalid size";
+"Не удалось прочитать как текст" = "Could not be read as text";

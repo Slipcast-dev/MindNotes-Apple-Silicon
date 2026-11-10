@@ -40,6 +40,8 @@ struct CSVImportSheet: View {
     @State private var title = ""
     @State private var plan: CSVImportPlanState?
     @State private var error: String?
+    /// Разделитель определяется один раз, дальше его выбирает пользователь.
+    @State private var detectedDelimiter = false
 
     /// План и выбор типов; пересчитывается при смене кодировки, разделителя или заголовков.
     private struct CSVImportPlanState {
@@ -102,28 +104,41 @@ struct CSVImportSheet: View {
         }
         .frame(width: 760)
         .background(Tokens.paper)
-        .onAppear {
-            title = FolderImport.cleanTitle(request.url.lastPathComponent)
-            if let text = try? TextFileReader.decode(request.data).text { delimiter = CSV.detectDelimiter(text) }
-            reload()
-        }
-        .onChange(of: encoding) { _, _ in reload() }
-        .onChange(of: delimiter) { _, _ in reload() }
-        .onChange(of: hasHeader) { _, _ in reload() }
+        .onAppear { title = FolderImport.cleanTitle(request.url.lastPathComponent) }
+        // Разбор большого файла — вне главного потока; новый выбор отменяет прежний разбор.
+        .task(id: Settings(encoding: encoding, delimiter: delimiter, hasHeader: hasHeader)) { await reload() }
     }
 
-    private func reload() {
-        do {
-            let decoded = try TextFileReader.decode(request.data, as: encoding.value)
-            let table = CSV.parse(decoded.text, delimiter: delimiter)
-            var fresh = CSVImport.plan(table, hasHeader: hasHeader, zone: TimeZone.current.identifier)
+    private struct Settings: Equatable {
+        var encoding: Encoding
+        var delimiter: Character
+        var hasHeader: Bool
+    }
+
+    private func reload() async {
+        let data = request.data, chosen = encoding.value, header = hasHeader, zone = TimeZone.current.identifier
+        let first = !detectedDelimiter
+        let separator = delimiter
+        let result = await Task.detached(priority: .userInitiated) { () -> Result<(CSVImport.Plan, String, Character), Error> in
+            Result {
+                let decoded = try TextFileReader.decode(data, as: chosen)
+                let used = first ? CSV.detectDelimiter(decoded.text) : separator
+                let table = CSV.parse(decoded.text, delimiter: used)
+                return (CSVImport.plan(table, hasHeader: header, zone: zone), decoded.encoding, used)
+            }
+        }.value
+        guard !Task.isCancelled else { return }
+        switch result {
+        case .success(let (fresh, detected, used)):
+            var fresh = fresh
             // Выбранные вручную типы сохраняются, если столбцы те же.
             if let old = plan?.plan, old.headers == fresh.headers { fresh.types = old.types }
-            plan = CSVImportPlanState(plan: fresh, detected: decoded.encoding)
+            plan = CSVImportPlanState(plan: fresh, detected: detected)
             error = nil
-        } catch {
+            if first { detectedDelimiter = true; delimiter = used }
+        case .failure:
             plan = nil
-            self.error = L("Файл не читается в этой кодировке. Выберите другую.")
+            error = L("Файл не читается в этой кодировке. Выберите другую.")
         }
     }
 

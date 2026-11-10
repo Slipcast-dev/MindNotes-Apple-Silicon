@@ -159,7 +159,11 @@ enum FolderImport {
                 try Task.checkCancellation()
                 done += 1
                 progress?(done, total)
-                let text = try TextFileReader.read(plan.root.appendingPathComponent(rel)).text
+                // Нечитаемый файл пропускается с записью в отчёт, а не обрывает весь импорт.
+                guard let text = try? TextFileReader.read(plan.root.appendingPathComponent(rel)).text else {
+                    report.skipped.append(Skipped(path: rel, reason: "Не удалось прочитать как текст"))
+                    continue
+                }
                 let table = CSV.parse(text, delimiter: CSV.detectDelimiter(text))
                 guard !table.isEmpty else { report.skipped.append(Skipped(path: rel, reason: "Пустая таблица")); continue }
                 let csvPlan = CSVImport.plan(table, hasHeader: true, zone: zone)
@@ -223,7 +227,10 @@ enum FolderImport {
             try Task.checkCancellation()
             done += 1
             progress?(done, total)
-            let source = try TextFileReader.read(plan.root.appendingPathComponent(rel)).text
+            guard let source = try? TextFileReader.read(plan.root.appendingPathComponent(rel)).text else {
+                report.skipped.append(Skipped(path: rel, reason: "Не удалось прочитать как текст"))
+                continue
+            }
             let dir = parent(of: rel)
             func resolve(_ href: String) -> String? {
                 let decoded = href.removingPercentEncoding ?? href

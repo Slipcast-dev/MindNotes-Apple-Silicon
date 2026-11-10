@@ -216,8 +216,41 @@ func runFolderImportTests() async {
             let before = try fm.contentsOfDirectory(atPath: dir.path).count
             await checkThrows("ссылка в архиве") { try ArchiveExtract.extract(badZip, into: dir) }
             checkEqual(try fm.contentsOfDirectory(atPath: dir.path).count, before, "папка неудачной распаковки удалена")
+            // Записи «../x» и «/abs» ditto кладёт внутрь целевой папки: проверено на этой системе и закреплено тестом.
+            let slip = dir.appendingPathComponent("slip.zip")
+            let absolute = "/tmp/minerva-abs-\(UUID().uuidString).md"
+            try Data(storedZip([("ok.md", "ok"), ("../escaped.md", "e"), (absolute, "a")])).write(to: slip)
+            let inside = try ArchiveExtract.extract(slip, into: dir)
+            check(!fm.fileExists(atPath: dir.appendingPathComponent("escaped.md").path), "../ не вышел из папки распаковки")
+            check(fm.fileExists(atPath: inside.appendingPathComponent("escaped.md").path), "запись ../ осталась внутри")
+            check(!fm.fileExists(atPath: absolute), "абсолютный путь не записан в /tmp")
+            check(fm.fileExists(atPath: inside.appendingPathComponent(String(absolute.dropFirst())).path), "абсолютный путь стал путём внутри")
             try Data("не архив".utf8).write(to: dir.appendingPathComponent("broken.zip"))
             await checkThrows("повреждённый архив") { try ArchiveExtract.extract(dir.appendingPathComponent("broken.zip"), into: dir) }
         }
     }
+}
+
+/// Простейший zip без сжатия: чтобы проверить враждебные имена записей, которые не создать обычными средствами.
+func storedZip(_ entries: [(String, String)]) -> [UInt8] {
+    var table = [UInt32](repeating: 0, count: 256)
+    for i in 0..<256 {
+        var c = UInt32(i)
+        for _ in 0..<8 { c = (c & 1) != 0 ? 0xEDB88320 ^ (c >> 1) : c >> 1 }
+        table[i] = c
+    }
+    func crc(_ bytes: [UInt8]) -> UInt32 { ~bytes.reduce(UInt32.max) { table[Int(($0 ^ UInt32($1)) & 0xFF)] ^ ($0 >> 8) } }
+    func le16(_ v: Int) -> [UInt8] { [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF)] }
+    func le32(_ v: UInt32) -> [UInt8] { (0..<4).map { UInt8((v >> (8 * $0)) & 0xFF) } }
+    var out: [UInt8] = [], central: [UInt8] = []
+    for (name, text) in entries {
+        let n = Array(name.utf8), body = Array(text.utf8), sum = crc(body), offset = UInt32(out.count)
+        let common = le16(20) + le16(0) + le16(0) + le16(0) + le16(0) + le32(sum) + le32(UInt32(body.count)) + le32(UInt32(body.count)) + le16(n.count) + le16(0)
+        out += le32(0x04034b50) + common + n + body
+        central += le32(0x02014b50) + le16(20) + common + le16(0) + le16(0) + le16(0) + le32(0) + le32(offset) + n
+    }
+    let start = UInt32(out.count)
+    out += central
+    out += le32(0x06054b50) + le16(0) + le16(0) + le16(entries.count) + le16(entries.count) + le32(UInt32(central.count)) + le32(start) + le16(0)
+    return out
 }

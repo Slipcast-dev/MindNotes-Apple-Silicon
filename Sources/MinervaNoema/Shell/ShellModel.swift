@@ -1207,17 +1207,23 @@ final class ShellModel: ObservableObject {
             panel.nameFieldStringValue = MarkdownExport.safeFileName(title.isEmpty ? L("Без названия") : title) + ".md"
             panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
             guard panel.runModal() == .OK, let url = panel.url else { return }
-            let folder = url.deletingPathExtension().lastPathComponent + "_files"
+            // Папка вложений всегда новая: чужие файлы рядом с выбранным местом не перезаписываются.
+            let fm = FileManager.default
+            let base = url.deletingPathExtension().lastPathComponent + "_files"
+            var folder = base
+            var n = 1
+            while fm.fileExists(atPath: url.deletingLastPathComponent().appendingPathComponent(folder).path) {
+                n += 1
+                folder = "\(base) \(n)"
+            }
             let blocks = BlockDocument(pageID: id, blocks: try await store.blocks(ofPage: id)).blocks
             let result = MarkdownExport.export(title: title, blocks: blocks, assetFolder: folder) { self.pageTree.page($0)?.title }
             var missing = 0
             if !result.assets.isEmpty {
-                let fm = FileManager.default
-                try fm.createDirectory(at: url.deletingLastPathComponent().appendingPathComponent(folder), withIntermediateDirectories: true)
+                try fm.createDirectory(at: url.deletingLastPathComponent().appendingPathComponent(folder), withIntermediateDirectories: false)
                 for asset in result.assets {
                     let target = url.deletingLastPathComponent().appendingPathComponent(asset.path)
                     guard let source = try await store.assetURL(asset.id), fm.fileExists(atPath: source.path) else { missing += 1; continue }
-                    if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
                     try fm.copyItem(at: source, to: target)
                 }
             }
@@ -1333,7 +1339,8 @@ final class ShellModel: ObservableObject {
             let fingerprint = "csv." + SHA256.hash(data: request.data).map { String(format: "%02x", $0) }.joined()
             guard try await self.confirmRepeat(fingerprint) else { return }
             let zone = TimeZone.current.identifier
-            let built = CSVImport.build(plan, zone: zone, ids: RandomIDs())
+            // Сборка десятков тысяч записей — не на главном потоке.
+            let built = await Task.detached(priority: .userInitiated) { CSVImport.build(plan, zone: zone, ids: RandomIDs()) }.value
             let name = title.trimmingCharacters(in: .whitespaces)
             let database = try await store.importDatabase(parent: nil, title: name, viewName: L("Таблица"),
                                                           properties: built.properties, records: built.records, now: SystemClock().nowMillis())
