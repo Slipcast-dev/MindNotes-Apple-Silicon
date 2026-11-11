@@ -76,6 +76,25 @@ struct NotesSidebar: View {
         var zone: PageTree.DropZone?
     }
 
+    /// Строки дерева одного раздела: страницы верхнего уровня этого раздела и их потомки.
+    @ViewBuilder private func treeRows(in section: UUID?) -> some View {
+        ForEach(shell.treeRows(collapsed: collapsed, section: section)) { row in
+            PageTreeRow(row: row, expanded: !collapsed.contains(row.id),
+                        dropZone: drag?.target == row.id ? drag?.zone : nil,
+                        isDragged: drag?.page == row.id) {
+                if collapsed.remove(row.id) == nil { collapsed.insert(row.id) }
+            }
+            .background(GeometryReader { geometry in
+                Color.clear.preference(key: RowFramesKey.self, value: [row.id: geometry.frame(in: .named(Self.treeSpace))])
+            })
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.treeSpace))
+                    .onChanged { updateDrag(row.page, at: $0.location) }
+                    .onEnded { _ in finishDrag() }
+            )
+        }
+    }
+
     private func updateDrag(_ page: Page, at location: CGPoint) {
         var state = drag ?? TreeDrag(page: page.id, title: page.title.isEmpty ? L("Без названия") : page.title, location: location)
         state.location = location
@@ -185,21 +204,25 @@ struct NotesSidebar: View {
                                 if shell.pagesTitle != nil { Button("Вернуть «Страницы»") { shell.setPagesTitle(nil) } }
                             }
                             .help(L("Двойной щелчок — переименовать раздел"))
-                        ForEach(shell.pageTree.rows(collapsed: collapsed)) { row in
-                            PageTreeRow(row: row, expanded: !collapsed.contains(row.id),
-                                        dropZone: drag?.target == row.id ? drag?.zone : nil,
-                                        isDragged: drag?.page == row.id) {
-                                if collapsed.remove(row.id) == nil { collapsed.insert(row.id) }
-                            }
-                            .background(GeometryReader { geometry in
-                                Color.clear.preference(key: RowFramesKey.self, value: [row.id: geometry.frame(in: .named(Self.treeSpace))])
-                            })
-                            .simultaneousGesture(
-                                DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.treeSpace))
-                                    .onChanged { updateDrag(row.page, at: $0.location) }
-                                    .onEnded { _ in finishDrag() }
-                            )
+                        treeRows(in: nil)
+                        // Свои разделы: каждый со своими страницами верхнего уровня (схема v9).
+                        ForEach(shell.sections) { section in
+                            SidebarGroup(title: section.name)
+                                .contentShape(Rectangle())
+                                .onTapGesture(count: 2) { shell.renameSection(section) }
+                                .contextMenu {
+                                    Button("Новая страница в разделе") { shell.createPage(inSection: section.id) }
+                                    Button("Переименовать раздел…") { shell.renameSection(section) }
+                                    Button("Выше") { shell.moveSection(section, by: -1) }.disabled(shell.sections.first?.id == section.id)
+                                    Button("Ниже") { shell.moveSection(section, by: 1) }.disabled(shell.sections.last?.id == section.id)
+                                    Divider()
+                                    Button("Удалить раздел…") { shell.deleteSection(section) }
+                                }
+                                .help(L("Двойной щелчок — переименовать раздел"))
+                            treeRows(in: section.id)
                         }
+                        SidebarRow(title: L("Новый раздел"), symbol: "plus.rectangle.on.folder") { shell.addSection() }
+                            .padding(.top, 4)
 
                         if !shell.tags.isEmpty {
                             SidebarGroup(title: L("Теги"))
@@ -278,6 +301,12 @@ struct PageTreeRow: View {
             Button("Дублировать страницу") { shell.duplicatePage(page.id) }
             if !isDatabase { Button("Сохранить как шаблон…") { shell.saveAsTemplate(page.id) } }
             Button("Переместить в…") { shell.pageToMove = page }
+            if page.parentID == nil, !shell.sections.isEmpty {
+                Menu("В раздел") {
+                    Button(shell.pagesTitle ?? L("Страницы")) { shell.moveToSection(page.id, nil) }
+                    ForEach(shell.sections) { section in Button(section.name) { shell.moveToSection(page.id, section.id) } }
+                }
+            }
             Divider()
             Button("Удалить") { shell.trash(page.id) }
         }

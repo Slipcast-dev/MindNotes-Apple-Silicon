@@ -11,9 +11,29 @@ enum Migrations {
     static let applicationID: Int64 = 0x47525A4E // "GRZN"
 
     /// Полный список миграций. Изменять уже выпущенные миграции нельзя: только добавлять новые и fixture прошлой версии.
-    static let all: [Migration] = [v1, v2, v3, v4, v5, v6, v7, v8]
+    static let all: [Migration] = [v1, v2, v3, v4, v5, v6, v7, v8, v9]
 
     static var supportedVersion: Int { all.last?.version ?? 0 }
+
+    private static let v9 = Migration(version: 9, name: "разделы страниц") { db in
+        try db.execute(schemaV9)
+    }
+
+    /// Свои разделы боковой панели (как «Страницы»): страница верхнего уровня входит в один раздел.
+    /// Страница без строки — в стандартном разделе; удалённый раздел отпускает свои страницы туда же.
+    static let schemaV9 = """
+    CREATE TABLE page_sections (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        sort_key TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    CREATE TABLE page_section_members (
+        page_id TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+        section_id TEXT NOT NULL REFERENCES page_sections(id) ON DELETE CASCADE
+    );
+    CREATE INDEX page_section_members_section ON page_section_members(section_id);
+    """
 
     private static let v8 = Migration(version: 8, name: "люди, файлы, ручной порядок") { db in
         try db.execute(schemaV8)

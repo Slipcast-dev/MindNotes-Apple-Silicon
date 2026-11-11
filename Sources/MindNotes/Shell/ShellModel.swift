@@ -51,6 +51,9 @@ final class ShellModel: ObservableObject {
     @Published private(set) var recentFiles: [URL] = []
     /// Своё название раздела «Страницы» у открытого пространства; nil — стандартное.
     @Published private(set) var pagesTitle: String?
+    /// Свои разделы боковой панели и раздел каждой страницы верхнего уровня (схема v9).
+    @Published private(set) var sections: [PageSection] = []
+    @Published private(set) var sectionOf: [UUID: UUID] = [:]
     private static let pagesTitleKey = "ui.pagesSectionTitle"
     @Published private(set) var look = WorkspaceLook()
     @Published var showsLookSheet = false
@@ -393,6 +396,8 @@ final class ShellModel: ObservableObject {
             let name = try await store.workspaceName()
             let loadedLook = try await store.look()
             let loadedPagesTitle = try await store.meta(Self.pagesTitleKey).flatMap { $0.isEmpty ? nil : $0 }
+            let loadedSections = try await store.sections()
+            let loadedMembers = try await store.sectionMembers()
             let session = WorkspaceSession(store: store, name: name)
             session.coordinator.onStatusChange = { [weak self] in self?.saveStatus = $0 }
             try await session.refreshPages()
@@ -415,6 +420,8 @@ final class ShellModel: ObservableObject {
             imageCache = [:]
             look = loadedLook
             pagesTitle = loadedPagesTitle
+            sections = loadedSections
+            sectionOf = loadedMembers
             tags = loadedTags
             pageTags = loadedPageTags
             databaseIndex = loadedDatabases
@@ -438,6 +445,90 @@ final class ShellModel: ObservableObject {
         }
     }
 
+    // MARK: Разделы боковой панели
+
+    /// Строки дерева раздела: страницы верхнего уровня этого раздела (nil — стандартного) с потомками.
+    func treeRows(collapsed: Set<UUID>, section: UUID?) -> [PageTree.Row] {
+        let known = Set(sections.map(\.id))
+        var out: [PageTree.Row] = []
+        var include = false
+        for row in pageTree.rows(collapsed: collapsed) {
+            if row.depth == 0 {
+                let own = sectionOf[row.page.id].flatMap { known.contains($0) ? $0 : nil }
+                include = own == section
+            }
+            if include { out.append(row) }
+        }
+        return out
+    }
+
+    private func reloadSections() async throws {
+        guard let store else { return }
+        sections = try await store.sections()
+        sectionOf = try await store.sectionMembers()
+    }
+
+    func addSection() {
+        guard let name = PromptAlert.ask(L("Название раздела"), value: ""), let clean = PageSection.clean(name) else { return }
+        enqueue {
+            try await self.store?.addSection(name: clean, id: UUID(), now: SystemClock().nowMillis())
+            try await self.reloadSections()
+        }
+    }
+
+    func renameSection(_ section: PageSection) {
+        guard let name = PromptAlert.ask(L("Название раздела"), value: section.name), let clean = PageSection.clean(name) else { return }
+        enqueue {
+            try await self.store?.renameSection(section.id, to: clean)
+            try await self.reloadSections()
+        }
+    }
+
+    /// Удаление раздела страниц не удаляет: они возвращаются в стандартный раздел.
+    func deleteSection(_ section: PageSection) {
+        let alert = NSAlert()
+        alert.messageText = String(format: L("Удалить раздел «%@»?"), section.name)
+        alert.informativeText = String(format: L("Страницы раздела не удаляются: они перейдут в «%@»."), pagesTitle ?? L("Страницы"))
+        alert.addButton(withTitle: L("Удалить раздел"))
+        alert.addButton(withTitle: L("Отмена"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        enqueue {
+            try await self.store?.deleteSection(section.id)
+            try await self.reloadSections()
+        }
+    }
+
+    func moveSection(_ section: PageSection, by delta: Int) {
+        guard let i = sections.firstIndex(of: section) else { return }
+        let target = i + delta
+        guard sections.indices.contains(target) else { return }
+        let others = sections.filter { $0.id != section.id }
+        // Место в списке без самого раздела: встать после соседа слева (nil — первым).
+        let after: UUID? = target > 0 ? others[target - 1].id : nil
+        enqueue {
+            try await self.store?.moveSection(section.id, after: after)
+            try await self.reloadSections()
+        }
+    }
+
+    func moveToSection(_ page: UUID, _ section: UUID?) {
+        enqueue {
+            try await self.store?.setSection(page: page, section: section)
+            try await self.reloadSections()
+        }
+    }
+
+    func createPage(inSection section: UUID) {
+        enqueue {
+            guard let session = self.session, let store = self.store else { return }
+            let page = try await session.createPage(parent: nil, title: L("Без названия"))
+            try await store.setSection(page: page.id, section: section)
+            try await self.reloadSections()
+            self.pages = session.pages
+            try await self.show(page.id)
+        }
+    }
+
     func renamePagesSection() {
         guard let name = PromptAlert.ask(L("Название раздела страниц"), value: pagesTitle ?? L("Страницы")) else { return }
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -456,6 +547,8 @@ final class ShellModel: ObservableObject {
         enqueue {
             try await self.closeSession()
             self.pagesTitle = nil
+            self.sections = []
+            self.sectionOf = [:]
             UserDefaults.standard.removeObject(forKey: self.lastWorkspaceKey)
             self.backStack = []
             self.forwardStack = []
@@ -1088,6 +1181,30 @@ final class ShellModel: ObservableObject {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
             try await store.deletePerson(person.id, now: SystemClock().nowMillis())
             try await self.reloadPeople()
+        }
+    }
+
+    /// Очистка корзины целиком: одно подтверждение с числом страниц, затем каждая группа удаляется навсегда.
+    func emptyTrash() {
+        let items = trashItems
+        guard !items.isEmpty else { return }
+        let total = items.reduce(0) { $0 + 1 + $1.descendants }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L("Очистить корзину?")
+        alert.informativeText = String(format: L("Будет удалено навсегда страниц: %d. Это действие нельзя отменить."), total)
+        alert.addButton(withTitle: L("Удалить все навсегда"))
+        alert.addButton(withTitle: L("Отмена"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        enqueue {
+            for batch in Set(items.map(\.batchID)) { try await self.session?.store.purgeTrash(batch: batch) }
+            try await self.reloadTrash()
+            try await self.reloadDatabases()
+            if let session = self.session {
+                try await session.refreshPages()
+                self.pages = session.pages
+                if let store = self.store { self.userTemplates = try await store.templates() }
+            }
         }
     }
 

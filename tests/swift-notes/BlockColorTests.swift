@@ -82,3 +82,40 @@ func runPagesTitleTests() async {
         }
     }
 }
+
+/// Свои разделы боковой панели (схема v9).
+func runSectionTests() async {
+    await test("Разделы: создание, переименование, порядок, страницы, удаление без потери страниц") {
+        try await withTempDir { dir in
+            let w = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "T")
+            defer { w.close() }
+            let work = try await w.addSection(name: "  Работа ", id: UUID(), now: 1)
+            let home = try await w.addSection(name: "Личное", id: UUID(), now: 2)
+            checkEqual(work.name, "Работа", "пробелы сняты")
+            await checkThrows("пустое имя") { try await w.addSection(name: "   ", id: UUID(), now: 3) }
+            checkEqual(try await w.sections().map(\.name), ["Работа", "Личное"], "порядок добавления")
+            try await w.moveSection(home.id, after: nil)
+            checkEqual(try await w.sections().map(\.name), ["Личное", "Работа"], "раздел поднят первым")
+            try await w.moveSection(home.id, after: work.id)
+            checkEqual(try await w.sections().map(\.name), ["Работа", "Личное"])
+            try await w.renameSection(work.id, to: "Проекты")
+            let page = try await w.createPage(parent: nil, title: "План", id: UUID(), now: 4)
+            try await w.setSection(page: page.id, section: work.id)
+            checkEqual(try await w.sectionMembers()[page.id], work.id)
+            try await w.setSection(page: page.id, section: UUID())
+            checkEqual(try await w.sectionMembers()[page.id], nil, "несуществующий раздел — стандартный")
+            try await w.setSection(page: page.id, section: home.id)
+            try await w.deleteSection(home.id)
+            checkEqual(try await w.sectionMembers()[page.id], nil, "страница удалённого раздела — в стандартном")
+            let alive = try await w.page(page.id)
+            check(alive != nil, "сама страница цела")
+            checkEqual(try await w.sections().map(\.name), ["Проекты"])
+            try await w.setSection(page: page.id, section: work.id)
+            let batch = UUID()
+            try await w.trashPage(page.id, batch: batch, now: 5)
+            checkEqual(try await w.sectionMembers()[page.id], work.id, "в корзине раздел помнится — восстановится на место")
+            try await w.purgeTrash(batch: batch)
+            checkEqual(try await w.sectionMembers()[page.id], nil, "удалённая навсегда страница уходит из раздела")
+        }
+    }
+}

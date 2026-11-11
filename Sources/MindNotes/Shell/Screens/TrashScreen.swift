@@ -18,10 +18,18 @@ struct TrashScreen: View {
             VStack(alignment: .leading, spacing: 0) {
                 Eyebrow(text: L("Пространство"))
                 ScreenTitle(text: L("Корзина")).padding(.top, 8).padding(.bottom, 9)
-                Text("Страницы можно вернуть вместе с подстраницами.")
-                    .font(.system(size: 14))
-                    .foregroundColor(Tokens.muted)
-                    .padding(.bottom, 24)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Страницы можно вернуть вместе с подстраницами.")
+                        .font(.system(size: 14))
+                        .foregroundColor(Tokens.muted)
+                    Spacer()
+                    if !shell.trashItems.isEmpty {
+                        Button { shell.emptyTrash() } label: { Text("Удалить все…").foregroundColor(Tokens.danger) }
+                            .buttonStyle(NotesButtonStyle())
+                            .help(L("Удалить навсегда всё, что лежит в корзине"))
+                    }
+                }
+                .padding(.bottom, 24)
                 VStack(spacing: 0) {
                     if shell.trashItems.isEmpty {
                         Text("Корзина пуста.")

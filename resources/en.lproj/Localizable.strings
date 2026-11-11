@@ -1160,3 +1160,18 @@
 "Вернуть «Страницы»" = "Restore “Pages”";
 "Двойной щелчок — переименовать раздел" = "Double-click to rename the section";
 "Название раздела страниц" = "Pages section name";
+
+/* Разделы и очистка корзины */
+"Удалить все…" = "Delete all…";
+"Удалить навсегда всё, что лежит в корзине" = "Permanently delete everything in the trash";
+"Очистить корзину?" = "Empty the trash?";
+"Будет удалено навсегда страниц: %d. Это действие нельзя отменить." = "%d pages will be deleted permanently. This cannot be undone.";
+"Удалить все навсегда" = "Delete all permanently";
+"Новый раздел" = "New section";
+"Название раздела" = "Section name";
+"Новая страница в разделе" = "New page in section";
+"Удалить раздел…" = "Delete section…";
+"Удалить раздел «%@»?" = "Delete section “%@”?";
+"Страницы раздела не удаляются: они перейдут в «%@»." = "Pages in the section are kept: they move to “%@”.";
+"Удалить раздел" = "Delete section";
+"В раздел" = "Move to section";
