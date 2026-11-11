@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Все автотесты: границы слоёв, приложение без UI и настоящий NSTextView, порт Electron (node --test).
+# Все автотесты: границы слоёв, приложение без UI и настоящий NSTextView, проверки сборки (node --test).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ./scripts/check-layers.sh

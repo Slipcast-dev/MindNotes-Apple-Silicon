@@ -13,7 +13,7 @@ enum AppEdition {
         AppDataScope.supportDirectoryName(bundleID: Bundle.main.bundleIdentifier, officialID: bundleID, officialName: officialSupportDirectoryName)
     }
 
-    /// Прежние имена по порядку: сначала Minerva Noema (ADR-0007), затем Grizzly Notes — для того, кто обновляется прямо с него.
+    /// Прежние имена по порядку: сначала версия 1.0.0, затем исходный Grizzly Notes — для того, кто обновляется прямо с него (ADR-0010).
     static let previousNames: [(domain: String, directory: String, marker: String)] = [
         ("local.personal.MinervaNoema", "MinervaNoema", "migratedFromMinervaNoema"),
         ("local.personal.GrizzlyNotes", "GrizzlyNotes", LegacyDataMigration.marker),

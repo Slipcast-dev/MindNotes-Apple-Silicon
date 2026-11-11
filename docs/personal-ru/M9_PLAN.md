@@ -105,7 +105,7 @@ round(prop("Часы") / 8, 1)
 
 ### Реализация — чистый слой без UI
 
-Каталог `Sources/MinervaNoema/Workspace/Domain/Formula/` (входит в подмножество `Domain` из `check-layers.sh`):
+Каталог `Sources/MindNotes/Workspace/Domain/Formula/` (входит в подмножество `Domain` из `check-layers.sh`):
 
 | Файл | Что делает |
 |---|---|

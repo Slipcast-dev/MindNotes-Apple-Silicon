@@ -1,4 +1,4 @@
-// VERSION — единственный источник номера версии. Порт Grizzly для Windows в electron/ ведёт свою версию (ADR-0007).
+// VERSION — единственный источник номера версии.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');

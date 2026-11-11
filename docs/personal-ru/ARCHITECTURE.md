@@ -80,7 +80,7 @@ UUID — TEXT в нижнем регистре, время — INTEGER (мс UTC
 
 ## 4. Резервная копия
 
-Формат: один файл `.mindnotesbackup` (архивы `.minervabackup` и `.grizzlybackup` того же формата читаются), несжатый ustar (см. `adr/0003-backup-format.md`).
+Формат: один файл `.mindnotesbackup` (архивы прежних версий того же формата тоже читаются), несжатый ustar (см. `adr/0003-backup-format.md`).
 
 Создание: `sqlite3_backup` во временный файл → `integrity_check`, `foreign_key_check` на копии → список вложений из копии → потоковая запись в `.partial` с SHA-256 и сверкой с `assets.sha256` → `manifest.json` и `manifest.sha256` последними → `fsync`, `rename`. Нет манифеста — архив обрезан. Отсутствующие файлы попадают в `missing`, и копия не считается полной.
 
