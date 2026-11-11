@@ -58,7 +58,7 @@ final class Updater: ObservableObject {
         timer?.invalidate()
         guard canUpdate else { return }
         timer = Timer.scheduledTimer(withTimeInterval: UpdateMode.checkInterval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { Task { await self?.check(silent: true) } }
+            Task { @MainActor in await self?.check(silent: true) }
         }
     }
 
