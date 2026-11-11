@@ -16,12 +16,14 @@ enum WorkspaceExport {
     static let pageSize = 500
 
     /// Таблица базы: первая строка — названия свойств. Значения в том же виде, в каком их принимает импорт.
-    static func databaseRows(source: ExportSource, database: Database, titles: [UUID: String] = [:]) async throws -> [[String]] {
+    /// `each` получает каждую запись: экспорт папки берёт из неё карточки, не читая записи второй раз.
+    static func databaseRows(source: ExportSource, database: Database, titles: [UUID: String] = [:], each: (RecordRow) -> Void = { _ in }) async throws -> [[String]] {
         var rows = [database.properties.map(\.name)]
         var offset = 0
         while true {
             let page = try await source.queryRecords(database: database, state: DatabaseViewState(), limit: pageSize, offset: offset)
             for record in page.rows {
+                each(record)
                 rows.append(database.properties.map { property in
                     if property.type == .title { return titles[record.id] ?? record.title }
                     return record.values[property.id].map { PropertyConversion.text(of: $0, options: property.options) } ?? ""
@@ -48,12 +50,12 @@ enum WorkspaceExport {
         var summary = Summary()
         var done = 0
 
-        func writeMarkdown(_ page: Page, name: String, in dir: URL, used: inout Set<String>) async throws -> Bool {
+        func writeMarkdown(_ page: Page, name: String, in dir: URL, used: inout Set<String>, card: [String] = []) async throws -> Bool {
             let blocks = BlockDocument(pageID: page.id, blocks: try await source.blocks(ofPage: page.id)).blocks
             let hasContent = blocks.contains { !$0.plainText.isEmpty || $0.type.isAtom }
             guard hasContent || !page.isFolder else { return false }
             let folder = unique(name + "_files", in: &used)
-            let result = MarkdownExport.export(title: page.title.isEmpty ? untitled : page.title, blocks: blocks, assetFolder: folder) { tree.page($0)?.title }
+            let result = MarkdownExport.export(title: page.title.isEmpty ? untitled : page.title, card: card, blocks: blocks, assetFolder: folder) { tree.page($0)?.title }
             for asset in result.assets {
                 guard let from = try await source.assetURL(asset.id), fm.fileExists(atPath: from.path) else { summary.missingAssets += 1; continue }
                 try fm.createDirectory(at: dir.appendingPathComponent(folder), withIntermediateDirectories: true)
@@ -73,7 +75,8 @@ enum WorkspaceExport {
             var childUsed: Set<String> = []
             let childDir = dir.appendingPathComponent(name)
             if let databaseID = index[page.id], let database = try await source.database(databaseID) {
-                let rows = try await databaseRows(source: source, database: database)
+                var values: [UUID: [UUID: PropertyValue]] = [:]
+                let rows = try await databaseRows(source: source, database: database) { values[$0.id] = $0.values }
                 // С меткой порядка байтов: без неё Excel читает кириллицу неверно.
                 try Data(("\u{FEFF}" + CSV.write(rows)).utf8).write(to: dir.appendingPathComponent(name + ".csv"), options: .atomic)
                 summary.databases += 1
@@ -84,7 +87,8 @@ enum WorkspaceExport {
                     guard blocks.contains(where: { !$0.plainText.isEmpty || $0.type.isAtom }) else { continue }
                     try fm.createDirectory(at: childDir, withIntermediateDirectories: true)
                     let recordName = unique(fileName(record.title, untitled: untitled), in: &childUsed)
-                    _ = try await writeMarkdown(record, name: recordName, in: childDir, used: &childUsed)
+                    let card = MarkdownExport.propertyCard(database, values: values[record.id] ?? [:], untitled: untitled)
+                    _ = try await writeMarkdown(record, name: recordName, in: childDir, used: &childUsed, card: card)
                 }
                 return
             }

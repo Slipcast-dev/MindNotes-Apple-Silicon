@@ -16,9 +16,10 @@ enum MarkdownExport {
     }
 
     /// `pageTitle` — заголовок страницы по ссылке; `assetFolder` — папка вложений рядом с файлом.
-    static func export(title: String, blocks: [Block], assetFolder: String, pageTitle: (UUID) -> String?) -> Result {
+    /// `card` — строки свойств записи (`propertyCard`), они идут сразу под заголовком.
+    static func export(title: String, card: [String] = [], blocks: [Block], assetFolder: String, pageTitle: (UUID) -> String?) -> Result {
         var depth: [UUID: Int] = [:]
-        var out: [String] = ["# " + escape(title)]
+        var out: [String] = ["# " + escape(title)] + card.map { "\n" + $0 }
         var assets: [(UUID, String)] = []
         var usedNames: Set<String> = []
         var lost: [String: Int] = [:]
@@ -76,6 +77,21 @@ enum MarkdownExport {
         }
         let report = lost.sorted { $0.key < $1.key }.map { (reason: $0.key, count: $0.value) }
         return Result(markdown: out.joined(separator: "\n") + "\n", assets: assets, report: report)
+    }
+
+    /// Карточка записи: `Имя: значение` на каждое непустое свойство, связи — ссылками `[[Заголовок]]`, как в тексте.
+    /// Так же записывает свойства Notion; при импорте такие строки снимаются, если свойство есть в базе.
+    static func propertyCard(_ database: Database, values: [UUID: PropertyValue], untitled: String) -> [String] {
+        database.properties.compactMap { property in
+            guard property.type != .title, let value = values[property.id] else { return nil }
+            let text: String
+            if case .relation(let pages) = value {
+                text = pages.map { "[[" + ($0.title.isEmpty ? untitled : $0.title) + "]]" }.joined(separator: ", ")
+            } else {
+                text = escape(PropertyConversion.text(of: value, options: property.options)).replacingOccurrences(of: "\n", with: " ")
+            }
+            return text.isEmpty ? nil : escape(property.name) + ": " + text
+        }
     }
 
     private static func inline(_ block: Block, pageTitle: (UUID) -> String?, lost: inout [String: Int]) -> String {

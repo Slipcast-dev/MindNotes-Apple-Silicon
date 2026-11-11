@@ -39,6 +39,10 @@ enum FolderImport {
         var records = 0
         var assets = 0
         var unresolvedLinks = 0
+        /// Связи Notion: восстановленные свойства, столбцы, оставленные текстом, и ссылки на записи не из архива.
+        var relations = 0
+        var textRelations = 0
+        var unresolvedRelationLinks = 0
         var missingImages = 0
         var unconvertedValues = 0
         var unusedFiles = 0
@@ -133,6 +137,11 @@ enum FolderImport {
         var pageOf: [String: UUID] = [:]           // Markdown-файл → страница
         var titleIndex: [String: [UUID]] = [:]      // заголовок → страницы, для ссылок [[…]]
         var recordsOfDirectory: [String: [String: UUID]] = [:]  // папка строк Notion → заголовок записи → запись
+        var titlesOfDirectory: [String: [String: UUID]] = [:]   // то же, но не расходуется: для связей
+        var databaseOfRecord: [UUID: UUID] = [:]
+        var propertyNames: [UUID: Set<String>] = [:]            // запись → имена свойств её базы
+        var notionPage: [String: UUID] = [:]                    // ID Notion из имени файла → страница
+        var pendingRelations: [PendingRelation] = []
         let total = plan.markdown.count + plan.csv.count
         var done = 0
 
@@ -166,7 +175,10 @@ enum FolderImport {
                 }
                 let table = CSV.parse(text, delimiter: CSV.detectDelimiter(text))
                 guard !table.isEmpty else { report.skipped.append(Skipped(path: rel, reason: "Пустая таблица")); continue }
-                let csvPlan = CSVImport.plan(table, hasHeader: true, zone: zone)
+                var csvPlan = CSVImport.plan(table, hasHeader: true, zone: zone)
+                // Столбец связей Notion пока текст: цели появятся, когда будут созданы все базы.
+                let relationColumns = (1..<max(1, csvPlan.headers.count)).filter { i in NotionRelations.isRelationColumn(csvPlan.rows.map { $0[i] }) }
+                for i in relationColumns { csvPlan.types[i] = .text }
                 let built = CSVImport.build(csvPlan, zone: zone, ids: ids)
                 let database = try await target.importDatabase(parent: parentPage, title: display(name(of: rel)), viewName: viewName,
                                                                properties: built.properties, records: built.records, now: now)
@@ -180,6 +192,12 @@ enum FolderImport {
                     byTitle[SearchText.normalize(record.title)] = byTitle[SearchText.normalize(record.title)] ?? record.id
                 }
                 stemDatabase[stemKey(name(of: rel))] = byTitle
+                let names = Set(built.properties.map { SearchText.normalize($0.name) })
+                for record in built.records { databaseOfRecord[record.id] = database.id; propertyNames[record.id] = names }
+                for i in relationColumns where i < database.properties.count {
+                    let cells = zip(built.records, csvPlan.rows).map { (record: $0.id, text: $1[i]) }
+                    pendingRelations.append(PendingRelation(database: database.id, property: database.properties[i].id, directory: dir, cells: cells))
+                }
                 stemPage[stemKey(name(of: rel))] = database.pageID
             }
             for rel in plan.markdown where inDir(rel) {
@@ -188,6 +206,7 @@ enum FolderImport {
                 // Страница строки Notion: её текст достаётся записи с тем же заголовком.
                 if let records = recordsOfDirectory[dir], let record = records[key] {
                     pageOf[rel] = record
+                    if let notion = NotionRelations.id(in: name(of: rel)) { notionPage[notion] = record }
                     recordsOfDirectory[dir]?[key] = nil
                     stemPage[stemKey(name(of: rel))] = record
                     continue
@@ -195,6 +214,7 @@ enum FolderImport {
                 let id = ids.next()
                 _ = try await target.createPage(parent: parentPage, title: display(name(of: rel)), id: id, now: now)
                 pageOf[rel] = id
+                if let notion = NotionRelations.id(in: name(of: rel)) { notionPage[notion] = id }
                 remember(id, display(name(of: rel)))
                 stemPage[stemKey(name(of: rel))] = stemPage[stemKey(name(of: rel))] ?? id
                 report.pages += 1
@@ -202,7 +222,7 @@ enum FolderImport {
             for sub in plan.directories where inDir(sub) {
                 try Task.checkCancellation()
                 let key = stemKey(name(of: sub))
-                if let records = stemDatabase[key] { recordsOfDirectory[sub] = records }
+                if let records = stemDatabase[key] { recordsOfDirectory[sub] = records; titlesOfDirectory[sub] = records }
                 let pageForSub: UUID
                 if let existing = stemPage[key] {
                     pageForSub = existing
@@ -218,6 +238,51 @@ enum FolderImport {
             }
         }
         try await importDirectory("", parentPage: rootID)
+
+        // Связи Notion: каждая ссылка ищется по пути к файлу записи, по ID Notion, затем по заголовку в папке строк.
+        func record(for reference: NotionRelations.Reference, from dir: String) -> UUID? {
+            let decoded = reference.target.removingPercentEncoding ?? reference.target
+            if !decoded.contains("://") {
+                let path = dir.isEmpty ? decoded : dir + "/" + decoded
+                if let rel = relativePath(plan.root.appendingPathComponent(path), base: plan.root) {
+                    if let page = pageOf[rel], databaseOfRecord[page] != nil { return page }
+                    if let page = titlesOfDirectory[parent(of: rel)]?[SearchText.normalize(reference.title)] { return page }
+                }
+            }
+            if let notion = NotionRelations.id(in: decoded), let page = notionPage[notion], databaseOfRecord[page] != nil { return page }
+            return nil
+        }
+        var resolved: [(pending: PendingRelation, target: UUID, links: [(from: UUID, to: UUID)], missing: Int)] = []
+        for pending in pendingRelations {
+            var links: [(from: UUID, to: UUID)] = []
+            var missing = 0
+            for cell in pending.cells {
+                var seen: Set<UUID> = []
+                for reference in NotionRelations.references(cell.text) ?? [] {
+                    guard let page = record(for: reference, from: pending.directory) else { missing += 1; continue }
+                    if seen.insert(page).inserted { links.append((cell.record, page)) }
+                }
+            }
+            let targets = Set(links.compactMap { databaseOfRecord[$0.to] })
+            // Ссылки в разные базы или ни одной найденной: столбец остаётся текстом, данные не теряются.
+            guard targets.count == 1, let target = targets.first else { report.textRelations += 1; continue }
+            resolved.append((pending, target, links, missing))
+        }
+        // Двусторонняя связь Notion выгружается двумя столбцами; они становятся одной парой, если строки совпадают.
+        var paired: Set<Int> = []
+        for (i, a) in resolved.enumerated() where !paired.contains(i) {
+            let forward = Set(a.links.map { "\($0.from)>\($0.to)" })
+            let match = resolved.indices.first { j in
+                j != i && !paired.contains(j) && resolved[j].pending.database == a.target && resolved[j].target == a.pending.database
+                    && Set(resolved[j].links.map { "\($0.to)>\($0.from)" }) == forward
+            }
+            paired.insert(i)
+            if let match { paired.insert(match) }
+            try await target.importRelation(property: a.pending.property, target: a.target, pair: match.map { resolved[$0].pending.property },
+                                            links: a.links, now: now)
+            report.relations += 1
+            report.unresolvedRelationLinks += a.missing + (match.map { resolved[$0].missing } ?? 0)
+        }
 
         // Второй проход: текст, картинки и ссылки. Все страницы уже существуют, поэтому ссылки разрешаются.
         var assetOf: [String: AssetRecord] = [:]
@@ -271,10 +336,19 @@ enum FolderImport {
                SearchText.normalize(first.plain) == SearchText.normalize(cleanTitle(name(of: rel))) {
                 fragments.removeFirst()
             }
+            if let names = propertyNames[page] { fragments = NotionRelations.dropPropertyCard(fragments, names: names) }
             try await commit(fragments, to: page, target: target, ids: ids, now: now)
         }
         report.unusedFiles = plan.files.subtracting(usedFiles).count
         return (rootID, report)
+    }
+
+    struct PendingRelation {
+        var database: UUID
+        var property: UUID
+        /// Папка CSV: пути в ячейках отсчитываются от неё.
+        var directory: String
+        var cells: [(record: UUID, text: String)]
     }
 
     /// Блоки страницы одним пакетом: страница появляется с текстом целиком.

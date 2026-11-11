@@ -1365,7 +1365,12 @@ final class ShellModel: ObservableObject {
                 folder = "\(base) \(n)"
             }
             let blocks = BlockDocument(pageID: id, blocks: try await store.blocks(ofPage: id)).blocks
-            let result = MarkdownExport.export(title: title, blocks: blocks, assetFolder: folder) { self.pageTree.page($0)?.title }
+            // Запись базы выгружается с карточкой свойств: связи — ссылками [[Заголовок]].
+            var card: [String] = []
+            if let databaseID = self.pageTree.page(id)?.databaseID, let database = try await store.database(databaseID) {
+                card = MarkdownExport.propertyCard(database, values: try await store.recordValues(page: id, database: database), untitled: L("Без названия"))
+            }
+            let result = MarkdownExport.export(title: title, card: card, blocks: blocks, assetFolder: folder) { self.pageTree.page($0)?.title }
             var missing = 0
             if !result.assets.isEmpty {
                 try fm.createDirectory(at: url.deletingLastPathComponent().appendingPathComponent(folder), withIntermediateDirectories: false)
@@ -1559,6 +1564,9 @@ final class ShellModel: ObservableObject {
         line("Записей: %d", r.records)
         line("Вложений: %d", r.assets)
         line("Ссылок без цели (оставлен текст): %d", r.unresolvedLinks)
+        line("Связей Notion восстановлено: %d", r.relations)
+        line("Столбцов связей Notion, оставленных текстом: %d", r.textRelations)
+        line("Связей с записями не из архива (не перенесены): %d", r.unresolvedRelationLinks)
         line("Картинок без файла (оставлена подпись): %d", r.missingImages)
         line("Значений, не подошедших к типу столбца: %d", r.unconvertedValues)
         line("Файлов без ссылок на них (не импортированы): %d", r.unusedFiles)

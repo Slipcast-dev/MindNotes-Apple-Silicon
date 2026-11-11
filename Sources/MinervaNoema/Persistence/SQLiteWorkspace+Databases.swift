@@ -621,6 +621,46 @@ extension SQLiteWorkspace {
         }
     }
 
+    /// Импорт: текстовое свойство становится связью с базой `target`, на его месте и под тем же именем.
+    /// `pair` — текстовое свойство целевой базы, которое станет обратной стороной (Notion выгружает обе).
+    /// `links` — пары «запись → связанная запись» в порядке ячеек. Одна транзакция: всё или ничего.
+    func importRelation(property: UUID, target: UUID, pair: UUID?, links: [(from: UUID, to: UUID)], now: Int64) async throws {
+        try await writer.run { db in
+            try db.transaction {
+                let def = try Self.definition(db, property)
+                guard def.type == .text else { throw Self.storageError("Связью становится только текстовое свойство.") }
+                var sides = [(def, PropertyConfig(target: target, pair: pair))]
+                if let pair {
+                    let other = try Self.definition(db, pair)
+                    guard other.type == .text, other.databaseID == target, other.id != property else { throw Self.storageError("Связью становится только текстовое свойство.") }
+                    sides.append((other, PropertyConfig(target: def.databaseID, pair: property, isBackSide: true)))
+                }
+                for (side, config) in sides {
+                    try db.run("DELETE FROM property_values WHERE property_id=?", [SQLValue(side.id)])
+                    try db.run("DELETE FROM property_value_options WHERE property_id=?", [SQLValue(side.id)])
+                    try db.run("UPDATE property_definitions SET type=?, config_json=? WHERE id=?",
+                               [.text(PropertyType.relation.rawValue), .text(try config.jsonString()), SQLValue(side.id)])
+                }
+                var counts: [UUID: Int] = [:]
+                var last: [UUID: String] = [:]
+                var touched: Set<UUID> = []
+                for link in links {
+                    guard try db.scalarInt("SELECT 1 FROM pages WHERE id=? AND database_id=? AND deleted_at IS NULL", [SQLValue(link.from), SQLValue(def.databaseID)]) != nil,
+                          try db.scalarInt("SELECT 1 FROM pages WHERE id=? AND database_id=? AND deleted_at IS NULL", [SQLValue(link.to), SQLValue(target)]) != nil else {
+                        throw Self.storageError("Связанная запись недоступна.")
+                    }
+                    guard counts[link.from, default: 0] < RelationLimits.maxLinks else { continue }
+                    let key = SortKey.between(last[link.from], nil)
+                    try db.run("INSERT OR IGNORE INTO relation_links(from_page, property_id, to_page, sort_key) VALUES(?,?,?,?)",
+                               [SQLValue(link.from), SQLValue(property), SQLValue(link.to), .text(key)])
+                    if db.changes > 0 { counts[link.from, default: 0] += 1; last[link.from] = key }
+                    touched.formUnion([link.from, link.to])
+                }
+                try Self.recalcRollups(db, touched: touched, properties: Set(sides.map(\.0.id)), now: now)
+            }
+        }
+    }
+
     /// Снимает парность: оставшаяся сторона становится односторонней связью и сохраняет все строки.
     /// Если остаётся обратная сторона, строки переходят под неё с обменом направлений.
     private static func detachRelation(_ db: SQLiteConnection, removing def: PropertyDefinition) throws {

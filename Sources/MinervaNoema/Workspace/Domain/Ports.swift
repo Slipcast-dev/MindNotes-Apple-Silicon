@@ -105,6 +105,8 @@ protocol ImportTarget: AnyObject {
     /// База целиком: свойства, варианты и записи появляются вместе или не появляются.
     func importDatabase(parent: UUID?, title: String, viewName: String, properties: [PropertyDefinition],
                         records: [ImportedRecord], now: Int64) async throws -> Database
+    /// Текстовое свойство (и, если задано, парное в целевой базе) становится связью с готовыми строками.
+    func importRelation(property: UUID, target: UUID, pair: UUID?, links: [(from: UUID, to: UUID)], now: Int64) async throws
 }
 
 /// Чтение пространства для переносимого экспорта.

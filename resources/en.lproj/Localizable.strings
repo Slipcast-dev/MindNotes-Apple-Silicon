@@ -1032,3 +1032,8 @@
 "Изменить…" = "Edit…";
 "Свойство, на которое ссылается формула, удалено. Откройте формулу и исправьте её." = "A property used by the formula was deleted. Open the formula and fix it.";
 "удалённое свойство" = "deleted property";
+
+/* M9.5: связи Notion */
+"Связей Notion восстановлено: %d" = "Notion relations restored: %d";
+"Столбцов связей Notion, оставленных текстом: %d" = "Notion relation columns kept as text: %d";
+"Связей с записями не из архива (не перенесены): %d" = "Links to records outside the archive (not carried over): %d";
