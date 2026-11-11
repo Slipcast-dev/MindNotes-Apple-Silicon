@@ -13,6 +13,9 @@ extension PropertyType {
         case .select: return L("Выбор")
         case .multiSelect: return L("Множественный выбор")
         case .url: return L("Ссылка")
+        case .relation: return L("Связь")
+        case .createdTime: return L("Создано")
+        case .editedTime: return L("Изменено")
         default: return rawValue
         }
     }
@@ -20,16 +23,17 @@ extension PropertyType {
 
 extension FilterOp {
     func title(for type: PropertyType) -> String {
+        let isDate = type == .date || type.isTimestamp
         switch self {
-        case .contains: return L("содержит")
-        case .notContains: return L("не содержит")
-        case .equals: return type == .date ? L("в этот день") : L("равно")
+        case .contains: return type == .relation ? L("содержит запись") : L("содержит")
+        case .notContains: return type == .relation ? L("не содержит запись") : L("не содержит")
+        case .equals: return isDate ? L("в этот день") : L("равно")
         case .notEquals: return L("не равно")
         case .startsWith: return L("начинается с")
-        case .less: return type == .date ? L("раньше") : L("меньше")
-        case .lessOrEqual: return type == .date ? L("не позже") : L("не больше")
-        case .greater: return type == .date ? L("позже") : L("больше")
-        case .greaterOrEqual: return type == .date ? L("не раньше") : L("не меньше")
+        case .less: return isDate ? L("раньше") : L("меньше")
+        case .lessOrEqual: return isDate ? L("не позже") : L("не больше")
+        case .greater: return isDate ? L("позже") : L("больше")
+        case .greaterOrEqual: return isDate ? L("не раньше") : L("не меньше")
         case .isTrue: return L("отмечено")
         case .isFalse: return L("не отмечено")
         case .isEmpty: return L("пусто")
@@ -348,8 +352,19 @@ enum PropertyDisplay {
         case .options(let ids)?:
             let names = ids.compactMap { id in property.options.first { $0.id == id }?.name }
             return names.isEmpty ? nil : names.joined(separator: ", ")
+        case .relation(let links)?: return links.isEmpty ? nil : links.map { $0.title.isEmpty ? L("Без названия") : $0.title }.joined(separator: ", ")
+        case .time(let ms)?: return time(ms)
         case nil: return nil
         }
+    }
+
+    /// «Создано» и «Изменено»: момент в поясе пользователя.
+    static func time(_ ms: Int64) -> String {
+        let f = DateFormatter()
+        f.locale = Locale.current
+        f.timeZone = .current
+        f.setLocalizedDateFormatFromTemplate("dMMMMyyyyHHmm")
+        return f.string(from: Date(timeIntervalSince1970: Double(ms) / 1000))
     }
 
     static func number(_ value: Double) -> String {

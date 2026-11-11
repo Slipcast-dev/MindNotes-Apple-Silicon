@@ -14,11 +14,78 @@ struct PropertyType: RawRepresentable, Hashable, Codable {
     static let select = PropertyType(rawValue: "select")
     static let multiSelect = PropertyType(rawValue: "multi_select")
     static let url = PropertyType(rawValue: "url")
+    /// Связь с записями другой или той же базы.
+    static let relation = PropertyType(rawValue: "relation")
+    /// Время создания и последнего изменения записи: берутся из страницы, вручную не меняются.
+    static let createdTime = PropertyType(rawValue: "created_time")
+    static let editedTime = PropertyType(rawValue: "edited_time")
 
     /// Типы, которые можно выбрать; заголовок у базы один и создаётся вместе с ней.
-    static let creatable: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url]
+    static let creatable: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url, .relation, .createdTime, .editedTime]
+    /// Типы с собственными значениями, между которыми возможна смена типа с предпросмотром.
+    static let convertible: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url]
     var isKnown: Bool { self == .title || Self.creatable.contains(self) }
     var usesOptions: Bool { self == .status || self == .select || self == .multiSelect }
+    /// Значение вычисляется из страницы: правка вручную невозможна.
+    var isComputed: Bool { self == .createdTime || self == .editedTime }
+    var isTimestamp: Bool { self == .createdTime || self == .editedTime }
+}
+
+/// Настройки свойства, которые не умещаются в тип. Неизвестные поля более новой версии сохраняются.
+struct PropertyConfig: Equatable {
+    /// Связь: база, на записи которой она указывает.
+    var target: UUID?
+    /// Связь: парное свойство в целевой базе. nil — связь односторонняя.
+    var pair: UUID?
+    /// Обратная сторона двусторонней связи: строки хранятся под парным (прямым) свойством.
+    var isBackSide = false
+    var extra: [String: JSONValue] = [:]
+
+    private struct Known: Codable {
+        var target: UUID?
+        var pair: UUID?
+        var back: Bool?
+    }
+
+    init(target: UUID? = nil, pair: UUID? = nil, isBackSide: Bool = false) {
+        self.target = target
+        self.pair = pair
+        self.isBackSide = isBackSide
+    }
+
+    /// Испорченные настройки дают пустые: свойство показывается, но связь не читается.
+    init(json: String?) {
+        guard let json, let data = json.data(using: .utf8), case .object(var object)? = try? JSONDecoder().decode(JSONValue.self, from: data) else { return }
+        if let known = try? JSONDecoder().decode(Known.self, from: data) {
+            target = known.target
+            pair = known.pair
+            isBackSide = known.back ?? false
+            for key in ["target", "pair", "back"] { object[key] = nil }
+        }
+        extra = object
+    }
+
+    var isEmpty: Bool { target == nil && pair == nil && !isBackSide && extra.isEmpty }
+
+    func jsonString() throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let known = try encoder.encode(Known(target: target, pair: pair, back: isBackSide ? true : nil))
+        guard case .object(let fields) = try JSONDecoder().decode(JSONValue.self, from: known) else { return "{}" }
+        return String(decoding: try encoder.encode(JSONValue.object(extra.merging(fields) { _, new in new })), as: UTF8.self)
+    }
+}
+
+/// Связанная запись: ID и то, что нужно для показа без отдельного чтения.
+struct LinkedPage: Hashable, Identifiable {
+    var id: UUID
+    var title: String
+    var icon: String? = nil
+}
+
+enum RelationLimits {
+    /// Предел связей в одной ячейке: защита от случайной массовой вставки.
+    static let maxLinks = 1000
 }
 
 /// Вариант выбора. Постоянный ID: переименование не меняет значения записей.
@@ -36,6 +103,10 @@ struct PropertyDefinition: Equatable, Identifiable {
     var type: PropertyType
     var sortKey: String
     var options: [PropertyOption] = []
+    var config = PropertyConfig()
+
+    /// Свойство, под которым хранятся строки связи: у обратной стороны — парное.
+    var linkOwner: UUID { config.isBackSide ? (config.pair ?? id) : id }
 }
 
 /// Дата без времени. Хранится строкой, поэтому смена часового пояса не сдвигает день.
@@ -185,6 +256,10 @@ enum PropertyValue: Hashable {
     case url(String)
     /// Прежнее значение, которое не удалось преобразовать при смене типа: не теряется и видно пользователю.
     case unconverted(String)
+    /// Связанные записи в порядке связи. Записи из корзины не показываются.
+    case relation([LinkedPage])
+    /// Время создания или изменения записи, мс UTC.
+    case time(Int64)
 }
 
 /// Разбор пользовательского ввода и текста при смене типа.
@@ -264,6 +339,8 @@ enum PropertyConversion {
         case .checkbox(let b): return b ? "true" : "false"
         case .options(let ids): return ids.compactMap { id in options.first { $0.id == id }?.name }.joined(separator: ", ")
         case .date(let d): return d.end.map { "\(d.start.localText) — \($0.localText)" } ?? d.start.localText
+        case .relation(let pages): return pages.map(\.title).joined(separator: ", ")
+        case .time(let ms): return DatePoint.moment(ms: ms, zone: TimeZone.current.identifier).localText
         }
     }
 
@@ -340,6 +417,8 @@ struct FilterOp: RawRepresentable, Hashable, Codable {
         case .checkbox: return [.isTrue, .isFalse]
         case .status, .select: return [.equals, .notEquals, .isEmpty, .isNotEmpty]
         case .multiSelect: return [.contains, .notContains, .isEmpty, .isNotEmpty]
+        case .relation: return [.contains, .notContains, .isEmpty, .isNotEmpty]
+        case .createdTime, .editedTime: return [.equals, .less, .lessOrEqual, .greater, .greaterOrEqual]
         default: return []
         }
     }
@@ -350,7 +429,7 @@ struct FilterOp: RawRepresentable, Hashable, Codable {
 struct FilterRule: Equatable, Codable {
     var property: UUID
     var op: FilterOp
-    /// Число, дата `ГГГГ-ММ-ДД`, ID варианта или текст: значение всегда передаётся параметром.
+    /// Число, дата `ГГГГ-ММ-ДД`, ID варианта или текст (у связи — часть заголовка записи): значение всегда передаётся параметром.
     var value: String
 }
 

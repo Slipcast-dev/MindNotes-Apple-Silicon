@@ -10,12 +10,12 @@ enum DatabaseQuerySQL {
     private static let maxDepth = 8
 
     /// Условие группы. nil — нечего проверять: нет правил, или все они неполны и пропущены.
-    static func compile(_ group: FilterGroup, properties: [PropertyDefinition], depth: Int = 0) -> Fragment? {
+    static func compile(_ group: FilterGroup, properties: [PropertyDefinition], zone: TimeZone = .current, depth: Int = 0) -> Fragment? {
         guard depth < maxDepth else { return nil }
         let parts = group.items.compactMap { node -> Fragment? in
             switch node {
-            case .rule(let rule): return compile(rule, properties: properties)
-            case .group(let inner): return compile(inner, properties: properties, depth: depth + 1)
+            case .rule(let rule): return compile(rule, properties: properties, zone: zone)
+            case .group(let inner): return compile(inner, properties: properties, zone: zone, depth: depth + 1)
             }
         }
         guard !parts.isEmpty else { return nil }
@@ -23,10 +23,52 @@ enum DatabaseQuerySQL {
         return Fragment(sql: "(" + parts.map(\.sql).joined(separator: joiner) + ")", args: parts.flatMap(\.args))
     }
 
+    /// Связанные записи строки `p`: живые страницы на другой стороне связи. Условие о самой записи добавляется к `q`.
+    static func linked(_ def: PropertyDefinition, where condition: String = "1") -> String {
+        let (mine, other) = def.config.isBackSide ? ("to_page", "from_page") : ("from_page", "to_page")
+        return "SELECT 1 FROM relation_links l JOIN pages q ON q.id = l.\(other) WHERE l.\(mine) = p.id AND l.property_id = ? AND q.deleted_at IS NULL AND \(condition)"
+    }
+
+    /// Границы дня в поясе пользователя, мс UTC: «Создано» и «Изменено» — моменты, а фильтр задаётся днём.
+    static func dayBounds(_ day: LocalDate, zone: TimeZone) -> (start: Int64, end: Int64) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        func ms(_ d: LocalDate) -> Int64 {
+            Int64((calendar.date(from: DateComponents(year: d.year, month: d.month, day: d.day)) ?? Date(timeIntervalSince1970: 0)).timeIntervalSince1970 * 1000)
+        }
+        return (ms(day), ms(day.adding(days: 1)))
+    }
+
     /// Правило неизвестного свойства, неподходящей операции или с неполным значением пропускается.
-    static func compile(_ rule: FilterRule, properties: [PropertyDefinition]) -> Fragment? {
+    static func compile(_ rule: FilterRule, properties: [PropertyDefinition], zone: TimeZone = .current) -> Fragment? {
         guard let def = properties.first(where: { $0.id == rule.property }), FilterOp.available(for: def.type).contains(rule.op) else { return nil }
         let prop = SQLValue(def.id)
+        if def.type == .relation {
+            let owner = SQLValue(def.linkOwner)
+            switch rule.op {
+            case .isEmpty: return Fragment(sql: "NOT EXISTS (\(linked(def)))", args: [owner])
+            case .isNotEmpty: return Fragment(sql: "EXISTS (\(linked(def)))", args: [owner])
+            case .contains, .notContains:
+                let needle = SearchText.normalize(rule.value.trimmingCharacters(in: .whitespaces))
+                guard !needle.isEmpty else { return nil }
+                let not = rule.op == .notContains ? "NOT " : ""
+                return Fragment(sql: "\(not)EXISTS (\(linked(def, where: "instr(minerva_norm(q.title), ?) > 0")))", args: [owner, .text(needle)])
+            default: return nil
+            }
+        }
+        if def.type.isTimestamp {
+            guard let day = LocalDate(iso: rule.value.trimmingCharacters(in: .whitespaces)) else { return nil }
+            let column = def.type == .createdTime ? "p.created_at" : "p.updated_at"
+            let (start, end) = dayBounds(day, zone: zone)
+            switch rule.op {
+            case .equals: return Fragment(sql: "(\(column) >= ? AND \(column) < ?)", args: [.int(start), .int(end)])
+            case .less: return Fragment(sql: "\(column) < ?", args: [.int(start)])
+            case .lessOrEqual: return Fragment(sql: "\(column) < ?", args: [.int(end)])
+            case .greater: return Fragment(sql: "\(column) >= ?", args: [.int(end)])
+            case .greaterOrEqual: return Fragment(sql: "\(column) >= ?", args: [.int(start)])
+            default: return nil
+            }
+        }
         func value(_ condition: String, _ args: [SQLValue], negate: Bool = false) -> Fragment {
             let sql = "\(negate ? "NOT " : "")EXISTS (SELECT 1 FROM property_values v WHERE v.page_id = p.id AND v.property_id = ? AND \(condition))"
             return Fragment(sql: sql, args: [prop] + args)
@@ -106,6 +148,15 @@ enum DatabaseQuerySQL {
             switch def.type {
             case .title:
                 expression = "minerva_norm(p.title)"
+            case .createdTime:
+                expression = "p.created_at"
+            case .editedTime:
+                expression = "p.updated_at"
+            case .relation:
+                // Связь сортируется по числу живых связанных записей; пустая — в конце.
+                expression = "(SELECT NULLIF(count(*), 0) FROM (\(linked(def))))"
+                order.args.append(SQLValue(def.linkOwner))
+                order.args.append(SQLValue(def.linkOwner))
             case .status, .select, .multiSelect:
                 expression = "(SELECT MIN(so.sort_key) FROM property_value_options po JOIN property_options so ON so.id = po.option_id WHERE po.page_id = p.id AND po.property_id = ?)"
                 order.args.append(SQLValue(def.id))
@@ -153,11 +204,21 @@ extension SQLiteWorkspace {
         try await reader.run { try Self.loadDatabase($0, id) }
     }
 
+    /// Пара связи могла исчезнуть вместе со своей базой при окончательном удалении.
+    /// Тогда оставшаяся сторона читается и пишется как самостоятельная связь под своим ID.
+    private static func resolvePair(_ db: SQLiteConnection, _ def: inout PropertyDefinition) throws {
+        guard def.type == .relation, let pair = def.config.pair else { return }
+        if try db.scalarInt("SELECT 1 FROM property_definitions WHERE id=?", [SQLValue(pair)]) == nil {
+            def.config.pair = nil
+            def.config.isBackSide = false
+        }
+    }
+
     private static func loadDatabase(_ db: SQLiteConnection, _ id: UUID) throws -> Database? {
         guard let page = try db.query("SELECT page_id FROM databases WHERE id=?", [SQLValue(id)], { $0.uuid(0) }).first ?? nil else { return nil }
-        var properties = try db.query("SELECT id, name, type, sort_key FROM property_definitions WHERE database_id=? ORDER BY sort_key, id", [SQLValue(id)]) { r -> PropertyDefinition? in
+        var properties = try db.query("SELECT id, name, type, sort_key, config_json FROM property_definitions WHERE database_id=? ORDER BY sort_key, id", [SQLValue(id)]) { r -> PropertyDefinition? in
             guard let pid = r.uuid(0) else { return nil }
-            return PropertyDefinition(id: pid, databaseID: id, name: r.text(1), type: PropertyType(rawValue: r.text(2)), sortKey: r.text(3))
+            return PropertyDefinition(id: pid, databaseID: id, name: r.text(1), type: PropertyType(rawValue: r.text(2)), sortKey: r.text(3), config: PropertyConfig(json: r.optText(4)))
         }.compactMap { $0 }
         let options = try db.query("""
         SELECT o.id, o.property_id, o.name, o.color, o.sort_key FROM property_options o JOIN property_definitions d ON d.id = o.property_id
@@ -169,6 +230,7 @@ extension SQLiteWorkspace {
         for (pid, option) in options {
             if let i = properties.firstIndex(where: { $0.id == pid }) { properties[i].options.append(option) }
         }
+        for i in properties.indices { try resolvePair(db, &properties[i]) }
         let views = try db.query("SELECT id, name, kind, sort_key, state_json FROM database_views WHERE database_id=? ORDER BY sort_key, id", [SQLValue(id)]) { r -> DatabaseView? in
             guard let vid = r.uuid(0) else { return nil }
             return DatabaseView(id: vid, databaseID: id, name: r.text(1), kind: r.text(2), sortKey: r.text(3), state: DatabaseViewState(json: r.text(4)))
@@ -231,6 +293,27 @@ extension SQLiteWorkspace {
                 out[page]?[prop] = .options(ids + [option])
             } else {
                 out[page, default: [:]][prop] = .options([option])
+            }
+        }
+        for def in properties where def.type == .relation {
+            let (mine, other) = def.config.isBackSide ? ("to_page", "from_page") : ("from_page", "to_page")
+            // Прямая сторона — в порядке связи, обратная — по заголовку: у неё нет собственного порядка.
+            let order = def.config.isBackSide ? "minerva_norm(q.title), q.id" : "l.sort_key, q.id"
+            var collected: [UUID: [LinkedPage]] = [:]
+            _ = try db.query("""
+            SELECT l.\(mine), q.id, q.title, q.icon FROM relation_links l JOIN pages q ON q.id = l.\(other)
+            WHERE l.property_id = ? AND l.\(mine) IN (\(marks)) AND q.deleted_at IS NULL ORDER BY \(order)
+            """, [SQLValue(def.linkOwner)] + args) { r in
+                guard let page = r.uuid(0), let target = r.uuid(1) else { return }
+                collected[page, default: []].append(LinkedPage(id: target, title: r.text(2), icon: r.optText(3)))
+            }
+            for (page, links) in collected { out[page, default: [:]][def.id] = .relation(links) }
+        }
+        let stamps = properties.filter(\.type.isTimestamp)
+        if !stamps.isEmpty {
+            _ = try db.query("SELECT id, created_at, updated_at FROM pages WHERE id IN (\(marks))", args) { r in
+                guard let page = r.uuid(0) else { return }
+                for def in stamps { out[page, default: [:]][def.id] = .time(def.type == .createdTime ? r.int(1) : r.int(2)) }
             }
         }
         return out
@@ -363,11 +446,12 @@ extension SQLiteWorkspace {
     // MARK: Значения
 
     private static func definition(_ db: SQLiteConnection, _ id: UUID) throws -> PropertyDefinition {
-        let rows = try db.query("SELECT id, database_id, name, type, sort_key FROM property_definitions WHERE id=?", [SQLValue(id)]) { r -> PropertyDefinition? in
+        let rows = try db.query("SELECT id, database_id, name, type, sort_key, config_json FROM property_definitions WHERE id=?", [SQLValue(id)]) { r -> PropertyDefinition? in
             guard let pid = r.uuid(0), let dbid = r.uuid(1) else { return nil }
-            return PropertyDefinition(id: pid, databaseID: dbid, name: r.text(2), type: PropertyType(rawValue: r.text(3)), sortKey: r.text(4))
+            return PropertyDefinition(id: pid, databaseID: dbid, name: r.text(2), type: PropertyType(rawValue: r.text(3)), sortKey: r.text(4), config: PropertyConfig(json: r.optText(5)))
         }
         guard var def = rows.first ?? nil else { throw storageError("Свойство не найдено.") }
+        try resolvePair(db, &def)
         def.options = try db.query("SELECT id, name, color, sort_key FROM property_options WHERE property_id=? ORDER BY sort_key, id", [SQLValue(id)]) { r -> PropertyOption? in
             guard let oid = r.uuid(0) else { return nil }
             return PropertyOption(id: oid, name: r.text(1), color: r.optText(2), sortKey: r.text(3))
@@ -385,12 +469,54 @@ extension SQLiteWorkspace {
             return ids.count <= 1 && ids.allSatisfy { id in def.options.contains { $0.id == id } }
         case (.options(let ids), .multiSelect):
             return ids.allSatisfy { id in def.options.contains { $0.id == id } }
-        case (.unconverted, _): return true
+        case (.relation(let links), .relation):
+            return links.count <= RelationLimits.maxLinks && Set(links.map(\.id)).count == links.count
+        case (.unconverted, _): return def.type != .relation
         default: return false
         }
     }
 
+    /// Связи одной записи по одному свойству. Связи с записями в корзине и скрытыми страницами не трогаются:
+    /// они не видны, но вернутся вместе с восстановленной записью.
+    private static func writeLinks(_ db: SQLiteConnection, page: UUID, def: PropertyDefinition, links: [UUID]) throws {
+        guard let target = def.config.target else { throw storageError("Связь не настроена.") }
+        let owner = SQLValue(def.linkOwner)
+        let (mine, other) = def.config.isBackSide ? ("to_page", "from_page") : ("from_page", "to_page")
+        for link in links {
+            guard try db.scalarInt("SELECT 1 FROM pages WHERE id=? AND database_id=? AND deleted_at IS NULL", [SQLValue(link), SQLValue(target)]) != nil else {
+                throw storageError("Связанная запись недоступна.")
+            }
+        }
+        if def.config.isBackSide {
+            // Обратная сторона меняет только то, что добавили или сняли: порядок у связанных записей задаёт прямая сторона.
+            let existing = Set(try db.query("""
+            SELECT l.from_page FROM relation_links l JOIN pages q ON q.id = l.from_page WHERE l.to_page=? AND l.property_id=? AND q.deleted_at IS NULL
+            """, [SQLValue(page), owner]) { $0.uuid(0) }.compactMap { $0 })
+            let wanted = Set(links)
+            for gone in existing.subtracting(wanted) {
+                try db.run("DELETE FROM relation_links WHERE from_page=? AND property_id=? AND to_page=?", [SQLValue(gone), owner, SQLValue(page)])
+            }
+            for from in links where !existing.contains(from) {
+                let last = try db.scalarText("SELECT max(sort_key) FROM relation_links WHERE from_page=? AND property_id=?", [SQLValue(from), owner])
+                try db.run("INSERT OR IGNORE INTO relation_links(from_page, property_id, to_page, sort_key) VALUES(?,?,?,?)",
+                           [SQLValue(from), owner, SQLValue(page), .text(SortKey.between(last, nil))])
+            }
+            return
+        }
+        try db.run("DELETE FROM relation_links WHERE \(mine)=? AND property_id=? AND \(other) IN (SELECT id FROM pages WHERE deleted_at IS NULL)", [SQLValue(page), owner])
+        // Скрытые связи остаются первыми: новые встают после них.
+        let kept = try db.scalarText("SELECT max(sort_key) FROM relation_links WHERE \(mine)=? AND property_id=?", [SQLValue(page), owner])
+        for (link, key) in zip(links, SortKey.keys(after: kept, before: nil, count: links.count)) {
+            try db.run("INSERT OR IGNORE INTO relation_links(from_page, property_id, to_page, sort_key) VALUES(?,?,?,?)", [SQLValue(page), owner, SQLValue(link), .text(key)])
+        }
+    }
+
     private static func writeValue(_ db: SQLiteConnection, page: UUID, def: PropertyDefinition, value: PropertyValue?, now: Int64) throws {
+        if def.type == .relation {
+            guard case .relation(let links)? = value else { return try writeLinks(db, page: page, def: def, links: []) }
+            return try writeLinks(db, page: page, def: def, links: links.map(\.id))
+        }
+        guard !def.type.isComputed else { return }
         let keys: [SQLValue] = [SQLValue(page), SQLValue(def.id)]
         try db.run("DELETE FROM property_value_options WHERE page_id=? AND property_id=?", keys)
         try db.run("DELETE FROM property_values WHERE page_id=? AND property_id=?", keys)
@@ -413,6 +539,7 @@ extension SQLiteWorkspace {
                 try db.run("INSERT OR IGNORE INTO property_value_options(page_id, property_id, option_id) VALUES(?,?,?)", keys + [SQLValue(id)])
             }
             return
+        case .relation, .time: return
         }
         try db.run("""
         INSERT INTO property_values(page_id, property_id, value_text, value_num, value_date, value_date_end, value_ts, value_ts_end, value_tz, unconverted, updated_at)
@@ -425,7 +552,7 @@ extension SQLiteWorkspace {
         try await writer.run { db in
             try db.transaction {
                 let def = try Self.definition(db, property)
-                guard def.type.isKnown, def.type != .title else { throw Self.storageError("Это свойство нельзя изменить здесь.") }
+                guard def.type.isKnown, def.type != .title, !def.type.isComputed else { throw Self.storageError("Это свойство нельзя изменить здесь.") }
                 if let value, !Self.isCompatible(value, with: def) { throw Self.storageError("Значение не подходит типу свойства.") }
                 for page in pages {
                     guard try db.scalarInt("SELECT 1 FROM pages WHERE id=? AND database_id=?", [SQLValue(page), SQLValue(def.databaseID)]) != nil else {
@@ -441,12 +568,45 @@ extension SQLiteWorkspace {
     // MARK: Свойства
 
     func addProperty(database: UUID, name: String, type: PropertyType, id: UUID, now: Int64) async throws {
-        guard PropertyType.creatable.contains(type) else { throw Self.storageError("Этот тип свойства нельзя создать.") }
+        guard PropertyType.creatable.contains(type), type != .relation else { throw Self.storageError("Этот тип свойства нельзя создать.") }
         try await writer.run { db in
             let last = try db.scalarText("SELECT sort_key FROM property_definitions WHERE database_id=? ORDER BY sort_key DESC, id DESC LIMIT 1", [SQLValue(database)])
             try db.run("INSERT INTO property_definitions(id, database_id, name, type, sort_key, created_at) VALUES(?,?,?,?,?,?)",
                        [SQLValue(id), SQLValue(database), .text(name), .text(type.rawValue), .text(SortKey.between(last, nil)), .int(now)])
         }
+    }
+
+    /// Связь с базой `target`. Двусторонняя создаёт в целевой базе обратное свойство `pairID` (FR-13).
+    /// Связь базы с самой собой допустима: тогда обе стороны — свойства одной базы.
+    func addRelation(database: UUID, name: String, target: UUID, twoWay: Bool, pairName: String, id: UUID, pairID: UUID, now: Int64) async throws {
+        try await writer.run { db in
+            try db.transaction {
+                for base in [database, target] {
+                    guard try db.scalarInt("SELECT 1 FROM databases d JOIN pages q ON q.id = d.page_id WHERE d.id=? AND q.deleted_at IS NULL", [SQLValue(base)]) != nil else {
+                        throw Self.storageError("База недоступна.")
+                    }
+                }
+                func insert(_ pid: UUID, into base: UUID, name: String, config: PropertyConfig) throws {
+                    let last = try db.scalarText("SELECT sort_key FROM property_definitions WHERE database_id=? ORDER BY sort_key DESC, id DESC LIMIT 1", [SQLValue(base)])
+                    try db.run("INSERT INTO property_definitions(id, database_id, name, type, sort_key, created_at, config_json) VALUES(?,?,?,?,?,?,?)",
+                               [SQLValue(pid), SQLValue(base), .text(name), .text(PropertyType.relation.rawValue), .text(SortKey.between(last, nil)), .int(now), .text(try config.jsonString())])
+                }
+                try insert(id, into: database, name: name, config: PropertyConfig(target: target, pair: twoWay ? pairID : nil))
+                if twoWay { try insert(pairID, into: target, name: pairName, config: PropertyConfig(target: database, pair: id, isBackSide: true)) }
+            }
+        }
+    }
+
+    /// Снимает парность: оставшаяся сторона становится односторонней связью и сохраняет все строки.
+    /// Если остаётся обратная сторона, строки переходят под неё с обменом направлений.
+    private static func detachRelation(_ db: SQLiteConnection, removing def: PropertyDefinition) throws {
+        guard def.type == .relation, let pair = def.config.pair, var other = try? definition(db, pair), other.config.pair == def.id else { return }
+        if !def.config.isBackSide {
+            try db.run("UPDATE relation_links SET from_page=to_page, to_page=from_page, property_id=? WHERE property_id=?", [SQLValue(other.id), SQLValue(def.id)])
+        }
+        other.config.pair = nil
+        other.config.isBackSide = false
+        try db.run("UPDATE property_definitions SET config_json=? WHERE id=?", [.text(try other.config.jsonString()), SQLValue(other.id)])
     }
 
     func renameProperty(_ id: UUID, to name: String) async throws {
@@ -459,6 +619,7 @@ extension SQLiteWorkspace {
             try db.transaction {
                 let def = try Self.definition(db, id)
                 guard def.type != .title else { throw Self.storageError("Заголовок нельзя удалить.") }
+                try Self.detachRelation(db, removing: def)
                 try Self.updateViews(db, database: def.databaseID) { state in
                     state.filter = state.filter.removingRules { $0.property == id }
                     state.sorts.removeAll { $0.property == id }
@@ -474,6 +635,16 @@ extension SQLiteWorkspace {
     /// Сколько записей с непустым значением: подтверждение удаления называет реальное число.
     func valueCount(property: UUID) async throws -> Int {
         try await reader.run { db in
+            let def = try Self.definition(db, property)
+            if def.type.isComputed { return 0 }
+            if def.type == .relation {
+                // У двусторонней связи удаляется только эта сторона: строки остаются у парной.
+                if def.config.pair != nil { return 0 }
+                return Int(try db.scalarInt("""
+                SELECT count(DISTINCT l.from_page) FROM relation_links l JOIN pages p ON p.id = l.from_page JOIN pages q ON q.id = l.to_page
+                WHERE l.property_id=? AND p.deleted_at IS NULL AND q.deleted_at IS NULL
+                """, [SQLValue(property)]) ?? 0)
+            }
             let plain = try db.scalarInt("SELECT count(*) FROM property_values v JOIN pages p ON p.id = v.page_id WHERE v.property_id=? AND p.deleted_at IS NULL", [SQLValue(property)]) ?? 0
             let options = try db.scalarInt("SELECT count(DISTINCT v.page_id) FROM property_value_options v JOIN pages p ON p.id = v.page_id WHERE v.property_id=? AND p.deleted_at IS NULL", [SQLValue(property)]) ?? 0
             return Int(plain + options)
@@ -584,18 +755,20 @@ extension SQLiteWorkspace {
 
     /// Предварительный результат смены типа (FR-10). Ничего не записывает.
     func previewTypeChange(property: UUID, to type: PropertyType, zone: String) async throws -> TypeChangePreview {
-        try await writer.run { db in
+        guard PropertyType.convertible.contains(type) else { throw Self.storageError("Этот тип свойства нельзя выбрать.") }
+        return try await writer.run { db in
             try Self.plan(db, def: try Self.definition(db, property), to: type, zone: zone, ids: RandomIDs()).preview
         }
     }
 
     /// Меняет тип. Значение, которое нельзя преобразовать, остаётся текстом с пометкой и вернётся при обратной смене.
     func changePropertyType(_ property: UUID, to type: PropertyType, zone: String, ids: IDGenerator, now: Int64) async throws {
-        guard PropertyType.creatable.contains(type) else { throw Self.storageError("Этот тип свойства нельзя выбрать.") }
+        guard PropertyType.convertible.contains(type) else { throw Self.storageError("Этот тип свойства нельзя выбрать.") }
         try await writer.run { db in
             try db.transaction {
                 let def = try Self.definition(db, property)
                 guard def.type != .title else { throw Self.storageError("У заголовка нельзя сменить тип.") }
+                guard PropertyType.convertible.contains(def.type) else { throw Self.storageError("У этого свойства нельзя сменить тип.") }
                 guard def.type != type else { return }
                 let plan = try Self.plan(db, def: def, to: type, zone: zone, ids: ids)
                 for option in plan.created {
@@ -732,21 +905,54 @@ extension SQLiteWorkspace {
 
     // MARK: Дублирование
 
+    /// Связи скопированных страниц (FR-12). Скопированное прямое свойство получает строки своих записей, внешние цели сохраняются.
+    /// Копия записи без своей базы остаётся связанной с теми же записями с обеих сторон.
+    /// Обратная сторона, ставшая самостоятельной, получает строки с обменом направлений.
+    private static func copyRelationLinks(_ db: SQLiteConnection, pageMap: [UUID: UUID], propertyMap: [UUID: UUID], standalone: [UUID: UUID]) throws {
+        let pages = Array(pageMap.keys)
+        var seen = Set<String>()
+        for start in stride(from: 0, to: pages.count, by: 400) {
+            let slice = pages[start..<min(start + 400, pages.count)].map { SQLValue($0) }
+            let marks = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            let rows = try db.query("SELECT from_page, property_id, to_page, sort_key FROM relation_links WHERE from_page IN (\(marks)) OR to_page IN (\(marks))", slice + slice) {
+                (from: $0.uuid(0), property: $0.uuid(1), to: $0.uuid(2), key: $0.text(3))
+            }
+            for row in rows {
+                guard let f = row.from, let p = row.property, let t = row.to, seen.insert("\(f)|\(p)|\(t)").inserted else { continue }
+                let link: (UUID, UUID, UUID)
+                if let copied = propertyMap[p] {
+                    guard let nf = pageMap[f] else { continue }
+                    link = (nf, copied, pageMap[t] ?? t)
+                } else if let nt = pageMap[t], let own = standalone[p] {
+                    link = (nt, own, f)
+                } else {
+                    link = (pageMap[f] ?? f, p, pageMap[t] ?? t)
+                }
+                try db.run("INSERT OR IGNORE INTO relation_links(from_page, property_id, to_page, sort_key) VALUES(?,?,?,?)",
+                           [SQLValue(link.0), SQLValue(link.1), SQLValue(link.2), .text(row.key)])
+            }
+        }
+    }
+
     /// Часть дублирования страниц: база в поддереве копируется целиком, копия записи остаётся в базе и сохраняет значения.
     static func duplicateDatabaseData(_ db: SQLiteConnection, pageMap: [UUID: UUID], ids: IDGenerator, now: Int64) throws {
         var databaseMap: [UUID: UUID] = [:], propertyMap: [UUID: UUID] = [:], optionMap: [UUID: UUID] = [:]
+        var relationConfigs: [UUID: PropertyConfig] = [:]
         for old in pageMap.keys {
             guard let id = try db.query("SELECT id FROM databases WHERE page_id=?", [SQLValue(old)], { $0.uuid(0) }).first ?? nil, let page = pageMap[old] else { continue }
             let copy = ids.next()
             databaseMap[id] = copy
             try db.run("INSERT INTO databases(id, page_id, created_at) VALUES(?,?,?)", [SQLValue(copy), SQLValue(page), .int(now)])
-            let properties = try db.query("SELECT id, name, type, sort_key FROM property_definitions WHERE database_id=?", [SQLValue(id)]) { (id: $0.uuid(0), name: $0.text(1), type: $0.text(2), key: $0.text(3)) }
+            let properties = try db.query("SELECT id, name, type, sort_key, config_json FROM property_definitions WHERE database_id=?", [SQLValue(id)]) {
+                (id: $0.uuid(0), name: $0.text(1), type: $0.text(2), key: $0.text(3), config: $0.optText(4))
+            }
             for p in properties {
                 guard let pid = p.id else { continue }
                 let np = ids.next()
                 propertyMap[pid] = np
-                try db.run("INSERT INTO property_definitions(id, database_id, name, type, sort_key, created_at) VALUES(?,?,?,?,?,?)",
-                           [SQLValue(np), SQLValue(copy), .text(p.name), .text(p.type), .text(p.key), .int(now)])
+                if p.type == PropertyType.relation.rawValue { relationConfigs[np] = PropertyConfig(json: p.config) }
+                try db.run("INSERT INTO property_definitions(id, database_id, name, type, sort_key, created_at, config_json) VALUES(?,?,?,?,?,?,?)",
+                           [SQLValue(np), SQLValue(copy), .text(p.name), .text(p.type), .text(p.key), .int(now), SQLValue(p.config)])
                 let options = try db.query("SELECT id, name, color, sort_key FROM property_options WHERE property_id=?", [SQLValue(pid)]) { (id: $0.uuid(0), name: $0.text(1), color: $0.optText(2), key: $0.text(3)) }
                 for o in options {
                     guard let oid = o.id else { continue }
@@ -766,6 +972,23 @@ extension SQLiteWorkspace {
                            [SQLValue(ids.next()), SQLValue(copy), .text(v.name), .text(v.kind), .text(v.key), .text(json)])
             }
         }
+        // Связь копии смотрит на копию цели, если цель скопирована. Пара вне копии не получает второй обратной стороны:
+        // копия становится односторонней связью.
+        var standalone: [UUID: UUID] = [:] // прямое свойство вне копии → скопированная обратная сторона, ставшая самостоятельной
+        for (copyID, old) in relationConfigs {
+            var config = old
+            config.target = old.target.map { databaseMap[$0] ?? $0 }
+            if let pair = old.pair, let mapped = propertyMap[pair] {
+                config.pair = mapped
+            } else {
+                if old.isBackSide, let pair = old.pair { standalone[pair] = copyID }
+                config.pair = nil
+                config.isBackSide = false
+            }
+            try db.run("UPDATE property_definitions SET config_json=? WHERE id=?", [.text(try config.jsonString()), SQLValue(copyID)])
+        }
+        try copyRelationLinks(db, pageMap: pageMap, propertyMap: propertyMap, standalone: standalone)
+
         // Встроенные представления хранят ID свойств и вариантов: у копии базы они свои.
         let idMap = propertyMap.merging(optionMap, uniquingKeysWith: { a, _ in a })
         if !idMap.isEmpty {

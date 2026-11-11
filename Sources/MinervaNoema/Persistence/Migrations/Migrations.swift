@@ -11,9 +11,28 @@ enum Migrations {
     static let applicationID: Int64 = 0x47525A4E // "GRZN"
 
     /// Полный список миграций. Изменять уже выпущенные миграции нельзя: только добавлять новые и fixture прошлой версии.
-    static let all: [Migration] = [v1, v2, v3, v4, v5]
+    static let all: [Migration] = [v1, v2, v3, v4, v5, v6]
 
     static var supportedVersion: Int { all.last?.version ?? 0 }
+
+    private static let v6 = Migration(version: 6, name: "связи баз") { db in
+        try db.execute(schemaV6)
+    }
+
+    /// Связь хранится одной строкой под прямым свойством; обратное свойство (`config_json.pair`) читает её со стороны `to_page`.
+    /// Настройки свойства — JSON: цель связи и парное свойство. Типы «Создано» и «Изменено» берут время из `pages`.
+    static let schemaV6 = """
+    ALTER TABLE property_definitions ADD COLUMN config_json TEXT;
+    CREATE TABLE relation_links (
+        from_page TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        property_id TEXT NOT NULL REFERENCES property_definitions(id) ON DELETE CASCADE,
+        to_page TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        sort_key TEXT NOT NULL,
+        PRIMARY KEY(from_page, property_id, to_page)
+    ) WITHOUT ROWID;
+    CREATE INDEX relation_links_to ON relation_links(to_page, property_id);
+    CREATE INDEX relation_links_prop ON relation_links(property_id);
+    """
 
     private static let v5 = Migration(version: 5, name: "шаблоны") { db in
         try db.execute(schemaV5)

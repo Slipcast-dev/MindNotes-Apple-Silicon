@@ -91,7 +91,7 @@ final class WorkspaceSession {
         try await coordinator.flush() // Чтение ниже должно видеть все подтверждённые правки.
         let session = try await EditorSession.open(pageID: id, store: store, coordinator: coordinator, clock: clock, ids: ids)
         // Пустой абзац новой страницы — не правка пользователя и не входит в отмену.
-        if session.document.blocks.isEmpty { try session.perform(.insertBlock(after: nil, type: .paragraph), recordUndo: false) }
+        if session.document.blocks.isEmpty { try session.perform(.insertBlock(after: nil, type: .paragraph), recordUndo: false, quiet: true) }
         try await store.markOpened(id, now: clock.nowMillis())
         editor = session
         try await refreshPages()

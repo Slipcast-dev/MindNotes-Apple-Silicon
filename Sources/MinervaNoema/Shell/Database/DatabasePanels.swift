@@ -113,7 +113,7 @@ struct FilterRuleEditor: View {
                     ForEach(FilterOp.available(for: property.type), id: \.self) { Text($0.title(for: property.type)).tag($0) }
                 }
                 .labelsHidden()
-                .frame(width: 140)
+                .frame(width: 170)
                 if rule.op.needsValue { valueEditor(property) }
             }
         }
@@ -127,7 +127,7 @@ struct FilterRuleEditor: View {
 
     @ViewBuilder private func valueEditor(_ property: PropertyDefinition) -> some View {
         switch property.type {
-        case .date:
+        case .date, .createdTime, .editedTime:
             DatePicker("Дата", selection: Binding(get: {
                 (LocalDate(iso: rule.value) ?? LocalDate(date: Date(), in: .current)).date(in: .current)
             }, set: { set(LocalDate(date: $0, in: .current).iso) }), displayedComponents: [.date])
@@ -201,10 +201,32 @@ struct SortPopover: View {
 
 struct PropertiesSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var shell: ShellModel
     @ObservedObject var model: DatabaseModel
     @State private var newName = ""
     @State private var newType = PropertyType.text
+    @State private var relationTarget: UUID?
+    @State private var twoWay = true
     @State private var change: TypeChange?
+
+    /// Базы пространства для связи, включая эту: связь базы с самой собой допустима.
+    private var databases: [(id: UUID, title: String)] {
+        shell.databaseIndex.compactMap { page, id in
+            shell.pages.first { $0.id == page }.map { (id: id, title: $0.title.isEmpty ? L("Без названия") : $0.title) }
+        }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    private func databaseTitle(_ id: UUID?) -> String? {
+        guard let id else { return nil }
+        return databases.first { $0.id == id }?.title
+    }
+
+    /// Подпись связи: куда смотрит и есть ли обратная сторона.
+    private func relationSummary(_ property: PropertyDefinition) -> String {
+        let target = databaseTitle(property.config.target) ?? L("база недоступна")
+        let side = property.config.pair == nil ? L("односторонняя") : (property.config.isBackSide ? L("обратная сторона") : L("двусторонняя"))
+        return L("Связь → %@ · %@", target, side)
+    }
 
     struct TypeChange: Identifiable {
         var property: PropertyDefinition
@@ -238,7 +260,18 @@ struct PropertiesSheet: View {
                 .frame(width: 180)
                 Button("Добавить", action: addProperty)
                     .buttonStyle(NotesButtonStyle())
-                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || (newType == .relation && relationTarget == nil))
+            }
+            if newType == .relation {
+                HStack(spacing: 8) {
+                    Picker("Записи базы", selection: $relationTarget) {
+                        Text("Выберите базу").tag(UUID?.none)
+                        ForEach(databases, id: \.id) { Text($0.title).tag(UUID?.some($0.id)) }
+                    }
+                    .frame(width: 300)
+                    Toggle("Показывать связь в выбранной базе", isOn: $twoWay)
+                        .help(L("Без обратной связи выбранная база не получит нового свойства."))
+                }
             }
             HStack {
                 Spacer()
@@ -264,11 +297,13 @@ struct PropertiesSheet: View {
                     guard !clean.isEmpty else { return }
                     model.perform { [store = model.store] in try await store.renameProperty(property.id, to: clean) }
                 }
-                if property.type == .title || !property.type.isKnown {
+                if property.type == .relation {
+                    Text(relationSummary(property)).font(.system(size: 12)).foregroundColor(Tokens.muted).lineLimit(1)
+                } else if !PropertyType.convertible.contains(property.type) {
                     Text(property.type.title).font(.system(size: 12)).foregroundColor(Tokens.muted)
                 } else {
                     Menu(property.type.title) {
-                        ForEach(PropertyType.creatable.filter { $0 != property.type }, id: \.self) { type in
+                        ForEach(PropertyType.convertible.filter { $0 != property.type }, id: \.self) { type in
                             Button(type.title) { previewChange(property, to: type) }
                         }
                     }
@@ -294,6 +329,16 @@ struct PropertiesSheet: View {
         let name = newName.trimmingCharacters(in: .whitespaces)
         let type = newType
         newName = ""
+        if type == .relation, let target = relationTarget {
+            // Обратная сторона называется как эта база: так в целевой базе видно, откуда связь.
+            let pairName = shell.pages.first { $0.id == model.pageID }.map { $0.title.isEmpty ? L("Без названия") : $0.title } ?? L("Связь")
+            let both = twoWay
+            model.perform { [store = model.store, databaseID = model.databaseID] in
+                try await store.addRelation(database: databaseID, name: name, target: target, twoWay: both, pairName: pairName,
+                                            id: UUID(), pairID: UUID(), now: SystemClock().nowMillis())
+            }
+            return
+        }
         model.perform { [store = model.store, databaseID = model.databaseID] in
             try await store.addProperty(database: databaseID, name: name, type: type, id: UUID(), now: SystemClock().nowMillis())
         }
@@ -311,9 +356,11 @@ struct PropertiesSheet: View {
         let store = model.store
         Task { @MainActor in
             let count = (try? await store.valueCount(property: property.id)) ?? 0
-            guard PromptAlert.confirm(L("Удалить свойство «%@»?", property.name),
-                                      detail: L("Значений будет удалено: %d. Это действие нельзя отменить.", count),
-                                      action: L("Удалить")) else { return }
+            // У двусторонней связи значения не пропадают: их сохраняет парное свойство.
+            let detail = property.type == .relation && property.config.pair != nil
+                ? L("Связи сохранятся у парного свойства в базе «%@», оно станет односторонним.", databaseTitle(property.config.target) ?? "")
+                : L("Значений будет удалено: %d. Это действие нельзя отменить.", count)
+            guard PromptAlert.confirm(L("Удалить свойство «%@»?", property.name), detail: detail, action: L("Удалить")) else { return }
             model.perform { try await store.deleteProperty(property.id) }
         }
     }

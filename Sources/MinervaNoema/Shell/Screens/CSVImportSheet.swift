@@ -154,7 +154,7 @@ struct CSVImportSheet: View {
                             } else {
                                 Picker("", selection: Binding(get: { self.plan?.plan.types[i] ?? .text },
                                                               set: { self.plan?.plan.types[i] = $0 })) {
-                                    ForEach(PropertyType.creatable, id: \.self) { Text($0.title).tag($0) }
+                                    ForEach(PropertyType.convertible, id: \.self) { Text($0.title).tag($0) }
                                 }
                                 .labelsHidden()
                                 .controlSize(.small)

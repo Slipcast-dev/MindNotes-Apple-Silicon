@@ -44,14 +44,15 @@ final class EditorSession {
     func updateSelection(_ selection: BlockSelection?) { self.selection = selection }
 
     @discardableResult
-    func perform(_ command: EditCommand, recordUndo: Bool = true) throws -> EditResult {
+    /// `quiet` — служебная правка, не правка пользователя: время изменения страницы не меняется.
+    func perform(_ command: EditCommand, recordUndo: Bool = true, quiet: Bool = false) throws -> EditResult {
         let now = clock.nowMillis()
         let result = try BlockEditing.apply(command, to: document, ids: ids, now: now)
         guard !result.changes.isEmpty else { return result }
         if recordUndo { undo.record(result, selectionBefore: selection, now: now) }
         document = result.document
         if let s = result.selection { selection = s }
-        submit(result.changes)
+        submit(result.changes, quiet: quiet)
         onChange?()
         scheduleSnapshotIfDue()
         return result
@@ -74,7 +75,7 @@ final class EditorSession {
         onChange?()
     }
 
-    private func submit(_ changes: [BlockChange]) {
+    private func submit(_ changes: [BlockChange], quiet: Bool = false) {
         var batch = SaveBatch()
         for change in changes {
             var one = SaveBatch()
@@ -84,7 +85,7 @@ final class EditorSession {
             }
             batch.merge(one)
         }
-        batch.touchedPages = [document.pageID]
+        if quiet { batch.quietPages = [document.pageID] } else { batch.touchedPages = [document.pageID] }
         coordinator.submit(batch)
         dirtySinceSnapshot = true
     }

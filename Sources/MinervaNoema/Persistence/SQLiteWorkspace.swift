@@ -382,6 +382,9 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
                 for id in batch.touchedPages {
                     try db.run("UPDATE pages SET updated_at=?, content_rev=content_rev+1 WHERE id=?", [.int(now), SQLValue(id)])
                 }
+                for id in batch.quietPages.subtracting(batch.touchedPages) {
+                    try db.run("UPDATE pages SET content_rev=content_rev+1 WHERE id=?", [SQLValue(id)])
+                }
                 try self?.faultHook?("before-commit")
             }
             try self?.faultHook?("after-commit")

@@ -103,6 +103,14 @@ struct PropertyCell: View {
         case .status, .select: singleMenu
         case .multiSelect: multiMenu
         case .date: DateCell(value: dateValue, onChange: onChange)
+        case .relation: RelationCell(property: property, value: value, onChange: onChange)
+        case .createdTime, .editedTime:
+            // Время берётся из записи и вручную не меняется.
+            Text(PropertyDisplay.text(value, property: property) ?? L("Пусто"))
+                .font(.system(size: 13))
+                .foregroundColor(Tokens.muted)
+                .lineLimit(1)
+                .help(L("Заполняется автоматически"))
         default:
             Text(L("Неизвестный тип: %@", property.type.rawValue)).font(.system(size: 12)).foregroundColor(Tokens.muted)
         }

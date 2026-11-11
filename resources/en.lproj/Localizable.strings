@@ -908,3 +908,33 @@
 "[Видео]" = "[Video]";
 "Открыть в QuickTime" = "Open in QuickTime";
 "Видео недоступно: %@" = "Video unavailable: %@";
+
+/* M9.1: связи, «Создано» и «Изменено» */
+"Связь" = "Relation";
+"Создано" = "Created";
+"Изменено" = "Edited";
+"содержит запись" = "contains record";
+"не содержит запись" = "does not contain record";
+"база недоступна" = "database unavailable";
+"односторонняя" = "one-way";
+"обратная сторона" = "reverse side";
+"двусторонняя" = "two-way";
+"Связь → %@ · %@" = "Relation → %@ · %@";
+"Записи базы" = "Records of";
+"Выберите базу" = "Choose a database";
+"Показывать связь в выбранной базе" = "Show the relation in the chosen database";
+"Без обратной связи выбранная база не получит нового свойства." = "Without a reverse relation, the chosen database gets no new property.";
+"Связи сохранятся у парного свойства в базе «%@», оно станет односторонним." = "The links stay in the paired property of “%@”, which becomes one-way.";
+"Открыть запись" = "Open record";
+"ещё %d" = "%d more";
+"Выбрать записи" = "Choose records";
+"Найти запись" = "Find a record";
+"База связи недоступна: она удалена или в корзине." = "The related database is unavailable: it was deleted or is in the trash.";
+"В базе нет записей." = "The database has no records.";
+"Ничего не найдено." = "Nothing found.";
+"Показаны первые %d из %d. Уточните поиск." = "Showing the first %d of %d. Refine the search.";
+"Не больше %d связей в одной ячейке." = "No more than %d links in one cell.";
+"Заполняется автоматически" = "Filled in automatically";
+"Связь не настроена." = "The relation is not set up.";
+"Связанная запись недоступна." = "The related record is unavailable.";
+"У этого свойства нельзя сменить тип." = "This property's type cannot be changed.";

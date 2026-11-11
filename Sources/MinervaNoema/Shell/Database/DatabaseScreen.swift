@@ -153,7 +153,7 @@ struct DatabaseScreen: View {
         HStack(spacing: 10) {
             Text(L("Выбрано: %d", model.selection.count)).font(.system(size: 13, weight: .semibold))
             Menu("Изменить свойство") {
-                ForEach(model.database?.properties.filter { $0.type != .title && $0.type.isKnown } ?? []) { property in
+                ForEach(model.database?.properties.filter { $0.type != .title && $0.type.isKnown && !$0.type.isComputed } ?? []) { property in
                     Button(property.name) { bulkProperty = property }
                 }
             }
@@ -174,7 +174,8 @@ struct DatabaseScreen: View {
         case .title: return 280
         case .date: return 200
         case .checkbox: return 90
-        case .multiSelect, .url: return 200
+        case .multiSelect, .url, .createdTime, .editedTime: return 200
+        case .relation: return 240
         default: return 160
         }
     }
