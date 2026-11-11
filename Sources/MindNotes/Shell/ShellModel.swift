@@ -715,6 +715,10 @@ final class ShellModel: ObservableObject {
         editor = PageEditorModel(session: editorSession, style: style) { [weak self] in self?.errorMessage = $0 }
         editor?.controller.pageSearch = { [weak self] in self?.linkCandidates($0) ?? [] }
         editor?.controller.peopleSource = { [weak self] in self?.people ?? [] }
+        editor?.controller.fetchLinkPreview = { [weak self] url in await self?.linkPreview(url) }
+        editor?.controller.onOpenURL = { url, type in
+            if type == .embed { LinkPreviewFetcher.openEmbed(url, title: LinkCard.embed(url).provider) } else { NSWorkspace.shared.open(url) }
+        }
         editor?.controller.pageTitle = { [weak self] in self?.pages.first { $0.id == id }?.title ?? "" }
         editor?.controller.scheduleReminder = { [weak self] when, text in
             MentionReminders.schedule(when, text: text) { self?.errorMessage = $0 }
@@ -803,6 +807,25 @@ final class ShellModel: ObservableObject {
     }
 
     /// Страницы для ссылки «[[»: по заголовку, без текущей корзины.
+    /// Превью закладки (ADR-0011): только при включённом выключателе; картинка сохраняется вложением пространства.
+    func linkPreview(_ url: URL) async -> (title: String?, description: String?, asset: UUID?)? {
+        guard LinkPreviewFetcher.isEnabled, let store else { return nil }
+        do {
+            let result = try await LinkPreviewFetcher.fetch(url)
+            var asset: UUID?
+            if let image = result.image {
+                let temp = FileManager.default.temporaryDirectory.appendingPathComponent("preview-\(UUID().uuidString).\(image.ext)")
+                defer { try? FileManager.default.removeItem(at: temp) }
+                try image.data.write(to: temp)
+                asset = try await store.addAsset(copying: temp, now: SystemClock().nowMillis()).id
+            }
+            return (result.preview.title, result.preview.description, asset)
+        } catch {
+            errorMessage = L("Превью ссылки не загрузилось: страница недоступна или слишком большая.")
+            return nil
+        }
+    }
+
     func linkCandidates(_ query: String) -> [(id: UUID, title: String)] {
         let key = SearchText.normalize(query.trimmingCharacters(in: .whitespaces))
         let list = pages.filter { key.isEmpty || SearchText.normalize($0.title).contains(key) }

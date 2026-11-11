@@ -3,6 +3,8 @@ import SwiftUI
 
 /// Настройки приложения по макету. Подробные настройки файлового режима — отдельным окном.
 struct SettingsScreen: View {
+    /// Сеть только для превью ссылок и встраиваний (ADR-0011), по умолчанию выключена.
+    @AppStorage(LinkPreviewFetcher.settingKey) private var linkPreviews = false
     @EnvironmentObject private var shell: ShellModel
     @EnvironmentObject private var prefs: AppPreferences
     @State private var language = AppLanguage.saved
@@ -69,6 +71,10 @@ struct SettingsScreen: View {
                     divider
                     row(L("Обновления"), L("Локальная сборка обновляется вручную")) {
                         Chip(text: L("Автообновления выключены"))
+                    }
+                    divider
+                    row(L("Превью ссылок"), L("Закладка загружает заголовок и картинку страницы, встраивание открывается в окне. Запрос — только когда вы вставляете ссылку или открываете встраивание.")) {
+                        Toggle("", isOn: $linkPreviews).labelsHidden().toggleStyle(.switch)
                     }
                     divider
                     row("\(AppEdition.displayName) \((Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "")",

@@ -45,6 +45,12 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     var requestLink: ((String?, @escaping (String?) -> Void) -> Void)?
     /// Страницы для «[[»: запрос → найденные.
     var pageSearch: ((String) -> [(id: UUID, title: String)])?
+    /// Что сделать с вставленным адресом: ссылка, закладка или встраивание; nil — обычный текст (меню закрыто).
+    var chooseLinkKind: ((URL) -> BlockType?)?
+    /// Превью закладки: заголовок, описание и сохранённая картинка; nil — сеть выключена или запрос не удался.
+    var fetchLinkPreview: ((URL) async -> (title: String?, description: String?, asset: UUID?)?)?
+    /// Открыть адрес закладки или окно встраивания.
+    var onOpenURL: ((URL, BlockType) -> Void)?
     /// Заголовок открытой страницы: текст напоминания.
     var pageTitle: (() -> String)?
     /// Справочник людей для «@».
@@ -405,6 +411,13 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             if case .beginPageLink = action {
                 textView.insertText("[[", replacementRange: range)
             }
+        case .insertBookmark, .insertEmbed:
+            requestLink?(nil) { [weak self] text in
+                guard let self, let text, let url = LinkCard.url(text) else { return }
+                self.insertLinkCard(action == .insertBookmark ? .bookmark : .embed, url: url)
+            }
+        case .refreshLinkPreview:
+            if let block = document.block(id), block.type == .bookmark, let url = AtomData.url(of: block) { loadPreview(block: block.id, url: url) }
         case .mentionPage(let page, let title):
             insertMention(Mention.page(page, title: title), at: range)
         case .mentionPerson(let person):
@@ -439,6 +452,28 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             guard let last = topSelectedBlockIDs().last, let tail = document.block(last) else { return }
             perform(.insertBlock(after: tail.id, type: .paragraph))
             if let s = session.selection { perform(.replaceRange(s, fragments)) }
+        }
+    }
+
+    var isBookmarkAtCaret: Bool { document.block(point(at: textView.selectedRange().location).blockID)?.type == .bookmark }
+
+    /// Закладка или встраивание на месте выделения; превью закладки загружается следом и не мешает набору.
+    func insertLinkCard(_ type: BlockType, url: URL) {
+        let before = Set(document.blocks.map(\.id))
+        insertFragments([type == .embed ? AtomData.embed(url: url) : AtomData.bookmark(url: url, title: url.host)])
+        guard type == .bookmark, let added = document.blocks.first(where: { !before.contains($0.id) && $0.type == .bookmark }) else { return }
+        loadPreview(block: added.id, url: url)
+    }
+
+    private func loadPreview(block id: UUID, url: URL) {
+        guard let fetch = fetchLinkPreview else { return }
+        Task { @MainActor [weak self] in
+            guard let result = await fetch(url), let self, let block = self.document.block(id), block.type == .bookmark else { return }
+            let json = AtomData.bookmarkJSON(url: url, title: result.title ?? url.host, description: result.description,
+                                             asset: result.asset ?? block.assetID, keeping: block.atomJSON)
+            // Превью — не правка пользователя: без шага отмены.
+            _ = try? self.session.perform(.setAtomData(block: id, json: json, plain: AtomData.linkPlain(url: url, title: result.title)), recordUndo: false)
+            self.syncView()
         }
     }
 
@@ -615,6 +650,15 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             return FileBlockCell(name: AtomData.name(of: block), detail: size, ink: style.ink, muted: style.muted, line: style.line)
         case .table:
             return TableBlockCell(rows: AtomData.rows(of: block), ink: style.ink, line: style.line, soft: style.soft)
+        case .bookmark:
+            let url = AtomData.url(of: block)
+            return BookmarkBlockCell(title: AtomData.string("title", of: block) ?? url?.host ?? block.plainText,
+                                     about: AtomData.string("description", of: block), address: url?.absoluteString ?? "",
+                                     picture: picture(for: block), ink: style.ink, muted: style.muted, line: style.line)
+        case .embed:
+            let url = AtomData.url(of: block)
+            return EmbedBlockCell(provider: url.map { LinkCard.embed($0).provider } ?? "", address: url?.absoluteString ?? block.plainText,
+                                  ink: style.ink, muted: style.muted, line: style.line, soft: style.soft)
         case .databaseView:
             // Ячейка спрашивает данные при каждой отрисовке: загрузка не меняет высоту и не сдвигает текст.
             return DatabaseViewBlockCell(summary: { [weak self] in self?.embedSummary?(block) }, ink: style.ink, muted: style.muted, line: style.line, soft: style.soft)
@@ -1310,6 +1354,16 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
                 let mark = "a:\(trimmed)"
                 return replaceCurrentSelection(with: [BlockFragment(type: .paragraph, content: BlockContent(runs: [TextRun(title, marks: [mark])]))])
             }
+            // Один адрес без выделения: ссылка, закладка или встраивание, как в Notion.
+            if textView.selectedRange().length == 0, let url = LinkCard.url(trimmed), trimmed.hasPrefix("http"), let choose = chooseLinkKind {
+                switch choose(url) {
+                case .bookmark?: return insertLinkCard(.bookmark, url: url)
+                case .embed?: return insertLinkCard(.embed, url: url)
+                case .paragraph?:
+                    return replaceCurrentSelection(with: [BlockFragment(type: .paragraph, content: BlockContent(runs: [TextRun(trimmed, marks: ["a:" + url.absoluteString])]))])
+                default: break
+                }
+            }
             // Адрес поверх выделенного текста делает его ссылкой.
             if textView.selectedRange().length > 0, let address = Self.encodedAddress(trimmed), let scheme = URL(string: address)?.scheme, ["http", "https", "mailto"].contains(scheme) {
                 perform(.formatText(selection(for: textView.selectedRange()), .setValue(prefix: "a:", value: address)))
@@ -1392,6 +1446,9 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
                 return true
             case .databaseView:
                 onOpenEmbed?(block)
+                return true
+            case .bookmark, .embed:
+                if let url = AtomData.url(of: block) { onOpenURL?(url, block.type) }
                 return true
             default:
                 return false
@@ -1685,6 +1742,9 @@ final class BlockTextView: NSTextView {
         add(sub(t("Цвет текста"), EditorAction.colors))
         add(sub(t("Цветной маркер"), EditorAction.highlights))
         add(sub(t("Цвет блока"), EditorAction.blockColors))
+        if let controller, controller.fetchLinkPreview != nil, controller.isBookmarkAtCaret {
+            add(menuItem(EditorAction.Item(title: t("Обновить превью"), action: .refreshLinkPreview)))
+        }
         add(sub(t("Вставить блок"), EditorAction.inserts))
         for item in EditorAction.blockActions { add(menuItem(item)) }
         add(.separator())

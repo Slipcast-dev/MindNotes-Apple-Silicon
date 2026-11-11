@@ -73,6 +73,40 @@ enum AtomData {
         }
     }
 
+    /// Закладка: адрес, заголовок, описание и картинка превью; пустые поля не пишутся. Прочие поля сохраняются.
+    static func bookmarkJSON(url: URL, title: String?, description: String?, asset: UUID?, keeping base: [String: JSONValue] = [:]) -> String {
+        var object = base
+        object["url"] = .string(url.absoluteString)
+        object["title"] = title.map { .string($0) }
+        object["description"] = description.map { .string($0) }
+        object["asset"] = asset.map { .string($0.uuidString.lowercased()) }
+        return json(object)
+    }
+
+    static func bookmark(url: URL, title: String? = nil, description: String? = nil, asset: UUID? = nil) -> BlockFragment {
+        BlockFragment(type: BlockType.bookmark.rawValue, contentVersion: 1, json: bookmarkJSON(url: url, title: title, description: description, asset: asset),
+                      plain: linkPlain(url: url, title: title))
+    }
+
+    static func embed(url: URL) -> BlockFragment {
+        let provider = LinkCard.embed(url).provider
+        return BlockFragment(type: BlockType.embed.rawValue, contentVersion: 1,
+                             json: json(["url": .string(url.absoluteString), "provider": .string(provider)]), plain: linkPlain(url: url, title: provider))
+    }
+
+    /// Текст для поиска: заголовок и адрес.
+    static func linkPlain(url: URL, title: String?) -> String { [title, url.absoluteString].compactMap { $0 }.joined(separator: " ") }
+
+    static func url(of block: Block) -> URL? {
+        guard case .string(let s)? = block.atomJSON["url"] else { return nil }
+        return LinkCard.url(s)
+    }
+
+    static func string(_ key: String, of block: Block) -> String? {
+        if case .string(let s)? = block.atomJSON[key], !s.isEmpty { return s }
+        return nil
+    }
+
     static func name(of block: Block) -> String {
         if case .string(let s)? = block.atomJSON["name"] { return s }
         return block.plainText

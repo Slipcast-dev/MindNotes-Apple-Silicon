@@ -59,12 +59,15 @@ struct BlockType: RawRepresentable, Hashable {
     static let video = BlockType(rawValue: "video")
     static let table = BlockType(rawValue: "table")
     static let databaseView = BlockType(rawValue: "database_view")
+    /// Закладка и встраивание (M12): адрес, подпись и превью.
+    static let bookmark = BlockType(rawValue: "bookmark")
+    static let embed = BlockType(rawValue: "embed")
 
     /// Текстовые типы этой версии. Всё остальное хранится непрозрачно и показывается одним неделимым символом.
     static let known: Set<BlockType> = [.paragraph, .heading1, .heading2, .heading3, .task, .bullet, .numbered, .quote, .callout, .toggle, .code]
     var isKnown: Bool { Self.known.contains(self) }
     /// Известные неделимые блоки: у них нет текста, данные лежат в JSON.
-    static let atoms: Set<BlockType> = [.divider, .image, .video, .file, .table, .databaseView]
+    static let atoms: Set<BlockType> = [.divider, .image, .video, .file, .table, .databaseView, .bookmark, .embed]
     var isAtom: Bool { Self.atoms.contains(self) }
     var isHeading: Bool { self == .heading1 || self == .heading2 || self == .heading3 }
 }
@@ -213,7 +216,8 @@ struct Block: Equatable, Identifiable {
 
     /// Вложение изображения или файла.
     var assetID: UUID? {
-        guard type == .image || type == .video || type == .file, case .string(let s)? = atomJSON["asset"] else { return nil }
+        // У закладки вложение — картинка превью: так она защищена от уборки и попадает в резервную копию.
+        guard type == .image || type == .video || type == .file || type == .bookmark, case .string(let s)? = atomJSON["asset"] else { return nil }
         return UUID(uuidString: s)
     }
 

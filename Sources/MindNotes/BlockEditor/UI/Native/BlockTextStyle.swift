@@ -471,3 +471,102 @@ enum BlockTextMapping {
     static func toView(_ model: String) -> String { model.replacingOccurrences(of: "\n", with: lineBreak) }
     static func toModel(_ view: String) -> String { view.replacingOccurrences(of: lineBreak, with: "\n") }
 }
+
+/// Закладка (M12): заголовок, описание, адрес и картинка справа, как в Notion. Нажатие открывает адрес в браузере.
+final class BookmarkBlockCell: NSTextAttachmentCell {
+    private let heading: String
+    private let about: String?
+    private let address: String
+    private let picture: NSImage?
+    private let ink: NSColor, muted: NSColor, line: NSColor
+
+    init(title: String, about: String?, address: String, picture: NSImage?, ink: NSColor, muted: NSColor, line: NSColor) {
+        self.heading = title
+        self.about = about
+        self.address = address
+        self.picture = picture
+        self.ink = ink
+        self.muted = muted
+        self.line = line
+        super.init(textCell: "")
+    }
+
+    required init(coder: NSCoder) { fatalError("не используется") }
+
+    override func cellFrame(for textContainer: NSTextContainer, proposedLineFragment lineFrag: NSRect, glyphPosition position: NSPoint, characterIndex charIndex: Int) -> NSRect {
+        NSRect(x: 0, y: 0, width: min(max(200, lineFrag.width - position.x - 1), 640), height: 96)
+    }
+
+    override func draw(withFrame frame: NSRect, in view: NSView?) {
+        let shape = NSBezierPath(roundedRect: frame.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+        line.setStroke()
+        shape.stroke()
+        var textWidth = frame.width - 28
+        if let picture, frame.width > 360 {
+            let side = NSRect(x: frame.maxX - 170, y: frame.minY + 1, width: 169, height: frame.height - 2)
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(roundedRect: side, xRadius: 5, yRadius: 5).addClip()
+            let size = picture.size
+            let scale = max(side.width / max(size.width, 1), side.height / max(size.height, 1))
+            let drawn = NSRect(x: side.midX - size.width * scale / 2, y: side.midY - size.height * scale / 2, width: size.width * scale, height: size.height * scale)
+            picture.draw(in: drawn, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            NSGraphicsContext.restoreGraphicsState()
+            textWidth -= 170
+        }
+        let left = frame.minX + 14
+        (heading as NSString).draw(with: NSRect(x: left, y: frame.minY + 12, width: textWidth, height: 18), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                                 attributes: [.font: NSFont.systemFont(ofSize: 13.5, weight: .medium), .foregroundColor: ink])
+        if let about {
+            (about as NSString).draw(with: NSRect(x: left, y: frame.minY + 34, width: textWidth, height: 32), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                                     attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: muted])
+        }
+        (address as NSString).draw(with: NSRect(x: left, y: frame.maxY - 24, width: textWidth, height: 16), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                                   attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: ink])
+    }
+}
+
+/// Встраивание (M12): сервис и адрес; нажатие открывает окно со страницей (ADR-0011), видео — с проигрывателем.
+final class EmbedBlockCell: NSTextAttachmentCell {
+    private let provider: String
+    private let address: String
+    private let ink: NSColor, muted: NSColor, line: NSColor, soft: NSColor
+
+    init(provider: String, address: String, ink: NSColor, muted: NSColor, line: NSColor, soft: NSColor) {
+        self.provider = provider
+        self.address = address
+        self.ink = ink
+        self.muted = muted
+        self.line = line
+        self.soft = soft
+        super.init(textCell: "")
+    }
+
+    required init(coder: NSCoder) { fatalError("не используется") }
+
+    override func cellFrame(for textContainer: NSTextContainer, proposedLineFragment lineFrag: NSRect, glyphPosition position: NSPoint, characterIndex charIndex: Int) -> NSRect {
+        let width = min(max(200, lineFrag.width - position.x - 1), 640)
+        return NSRect(x: 0, y: 0, width: width, height: (width * 9 / 16 / 2).rounded())
+    }
+
+    override func draw(withFrame frame: NSRect, in view: NSView?) {
+        let shape = NSBezierPath(roundedRect: frame, xRadius: 8, yRadius: 8)
+        soft.setFill()
+        shape.fill()
+        line.setStroke()
+        NSBezierPath(roundedRect: frame.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8).stroke()
+        let center = NSPoint(x: frame.midX, y: frame.midY - 10)
+        let triangle = NSBezierPath()
+        triangle.move(to: NSPoint(x: center.x - 9, y: center.y - 12))
+        triangle.line(to: NSPoint(x: center.x - 9, y: center.y + 12))
+        triangle.line(to: NSPoint(x: center.x + 13, y: center.y))
+        triangle.close()
+        muted.setFill()
+        triangle.fill()
+        let caption = String(format: NSLocalizedString("Встраивание: %@", comment: ""), provider) as NSString
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: ink]
+        let size = caption.size(withAttributes: attrs)
+        caption.draw(at: NSPoint(x: frame.midX - min(size.width, frame.width - 24) / 2, y: center.y + 20), withAttributes: attrs)
+        (address as NSString).draw(with: NSRect(x: frame.minX + 12, y: frame.maxY - 22, width: frame.width - 24, height: 16), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                                   attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: muted])
+    }
+}

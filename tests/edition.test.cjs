@@ -29,7 +29,7 @@ test('сборка только для Apple Silicon: одна цель во в�
   }
 });
 
-test('AT-15: в приложении нет сетевых запросов, ИИ, моделей и аккаунтов', () => {
+test('AT-15: сеть только в Shell/Network (ADR-0011), нет ИИ, моделей и аккаунтов', () => {
   const files = [];
   const walk = (dir) => {
     for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
@@ -39,10 +39,18 @@ test('AT-15: в приложении нет сетевых запросов, И�
   };
   walk('Sources');
   const forbidden = /\b(URLSession|NSURLConnection|NWConnection|NWPathMonitor|import Network|CFNetwork|WKWebView|import CoreML|MLModel|NaturalLanguage|import FoundationModels|LanguageModelSession|OpenAI|Anthropic|apiKey|api_key|Sparkle|GoogleSignIn|CloudKit|CKContainer)\b/;
+  const network = /\b(URLSession|WKWebView)\b/;
   for (const file of files) {
     const text = read(file).split('\n').filter((line) => !line.trim().startsWith('//')).join('\n');
-    assert.ok(!forbidden.test(text), `${file}: ${text.match(forbidden)?.[0]}`);
+    // Сеть для превью ссылок и окна встраивания — только в одном файле оболочки (ADR-0011).
+    const allowed = file === path.join('Sources', 'MindNotes', 'Shell', 'Network', 'LinkPreviewFetcher.swift');
+    const checked = allowed ? text.replace(/\b(URLSession|URLSessionConfiguration|WKWebView|WKWebViewConfiguration)\b/g, '') : text;
+    assert.ok(!forbidden.test(checked), `${file}: ${checked.match(forbidden)?.[0]}`);
+    if (!allowed) assert.ok(!network.test(text), `${file}: сеть вне Shell/Network`);
   }
+  const fetcher = read('Sources/MindNotes/Shell/Network/LinkPreviewFetcher.swift');
+  assert.ok(/guard isEnabled, url\.scheme\?\.lowercased\(\) == "https"/.test(fetcher), 'запрос только при включённом превью и по https');
+  assert.ok(/guard isEnabled else \{\s*NSWorkspace\.shared\.open\(url\)/.test(fetcher), 'окно встраивания только при включённом превью');
   assert.ok(files.length > 50, 'исходники найдены');
 });
 

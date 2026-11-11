@@ -63,6 +63,15 @@ enum MarkdownExport {
                     lost["Вложения без файла", default: 0] += 1
                 }
             case .table: line = table(AtomData.rows(of: block))
+            case .bookmark, .embed:
+                if let url = AtomData.url(of: block) {
+                    let label = AtomData.string("title", of: block) ?? url.absoluteString
+                    line = "[\(escape(label))](<\(url.absoluteString)>)"
+                    if let about = AtomData.string("description", of: block) { line += "\n" + escape(about) }
+                    if block.type == .embed { lost["Встраивания стали ссылками", default: 0] += 1 }
+                } else {
+                    line = escape(block.plainText)
+                }
             case .databaseView:
                 line = "*\\[Представление базы\\]*"
                 lost["Встроенные представления баз (экспортируйте базу в CSV)", default: 0] += 1

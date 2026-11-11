@@ -166,6 +166,28 @@ final class EditorPanels {
             alert.addButton(withTitle: L("Отмена"))
             if alert.runModal() == .alertFirstButtonReturn { done(field.stringValue) }
         }
+        controller.chooseLinkKind = { [weak controller] _ in
+            // Меню у курсора, как в Notion: «Ссылка», «Закладка», «Встроить»; Esc — вставить обычным текстом.
+            guard let view = controller?.textView else { return nil }
+            final class Pick: NSObject {
+                var kind: BlockType?
+                @objc func choose(_ sender: NSMenuItem) { kind = sender.representedObject as? BlockType }
+            }
+            let pick = Pick()
+            let menu = NSMenu()
+            for (title, kind) in [(L("Ссылка"), BlockType.paragraph), (L("Закладка"), .bookmark), (L("Встроить"), .embed)] {
+                let item = NSMenuItem(title: title, action: #selector(Pick.choose(_:)), keyEquivalent: "")
+                item.target = pick
+                item.representedObject = kind
+                menu.addItem(item)
+            }
+            var actual = NSRange()
+            let screen = view.firstRect(forCharacterRange: view.selectedRange(), actualRange: &actual)
+            let inWindow = view.window?.convertFromScreen(screen) ?? .zero
+            let point = view.convert(NSPoint(x: inWindow.minX, y: inWindow.minY), from: nil)
+            menu.popUp(positioning: nil, at: point, in: view)
+            return pick.kind
+        }
         controller.requestMentionDate = { done in
             let alert = NSAlert()
             alert.messageText = L("Дата или напоминание")

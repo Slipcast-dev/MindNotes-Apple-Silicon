@@ -24,6 +24,10 @@ enum EditorAction: Equatable {
     case mentionPerson(Person)
     case mentionDate(String)
     case pickMentionDate
+    /// Закладка и встраивание (M12): адрес спрашивается в окне; «Обновить превью» — у выбранной закладки.
+    case insertBookmark
+    case insertEmbed
+    case refreshLinkPreview
     /// Запрашивает изображение или файл у пользователя.
     case attach(BlockType)
     case insertTable
@@ -70,7 +74,9 @@ enum EditorAction: Equatable {
          Item(title: t("Видео"), action: .attach(.video), aliases: ["ролик", "фильм", "кино", "video"]),
          Item(title: t("Файл"), action: .attach(.file), aliases: ["вложение", "документ", "file"]),
          Item(title: t("Таблица"), action: .insertTable, aliases: ["table", "сетка"]),
-         Item(title: t("Представление базы"), action: .insertDatabaseView, aliases: ["база", "database", "view"])]
+         Item(title: t("Представление базы"), action: .insertDatabaseView, aliases: ["база", "database", "view"]),
+         Item(title: t("Закладка"), action: .insertBookmark, aliases: ["bookmark", "ссылка", "url", "сайт"]),
+         Item(title: t("Встраивание"), action: .insertEmbed, aliases: ["embed", "youtube", "vimeo", "figma", "карта", "видео"])]
     }
 
     static var marks: [Item] {

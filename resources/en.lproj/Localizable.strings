@@ -1117,3 +1117,14 @@
 "Напоминание" = "Reminder";
 "Время напоминания уже прошло: уведомление не запланировано." = "The reminder time has passed: no notification was scheduled.";
 "Уведомления выключены для MindNotes в Системных настройках: напоминание не придёт." = "Notifications are turned off for MindNotes in System Settings: the reminder will not appear.";
+
+/* M12: закладки и встраивания */
+"Закладка" = "Bookmark";
+"Встраивание" = "Embed";
+"Встроить" = "Embed";
+"Обновить превью" = "Refresh preview";
+"Превью ссылок" = "Link previews";
+"Закладка загружает заголовок и картинку страницы, встраивание открывается в окне. Запрос — только когда вы вставляете ссылку или открываете встраивание." = "A bookmark loads the page title and image; an embed opens in a window. Requests are made only when you paste a link or open an embed.";
+"Встраивание: %@" = "Embed: %@";
+"Превью ссылки не загрузилось: страница недоступна или слишком большая." = "The link preview did not load: the page is unavailable or too large.";
+"Встраивания стали ссылками" = "Embeds became links";
