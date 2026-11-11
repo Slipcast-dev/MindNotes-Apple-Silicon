@@ -1037,3 +1037,19 @@
 "Связей Notion восстановлено: %d" = "Notion relations restored: %d";
 "Столбцов связей Notion, оставленных текстом: %d" = "Notion relation columns kept as text: %d";
 "Связей с записями не из архива (не перенесены): %d" = "Links to records outside the archive (not carried over): %d";
+
+/* M10.1: люди */
+"Человек" = "Person";
+"Удалить «%@» из справочника?" = "Remove “%@” from the directory?";
+"Человек будет убран из записей: %d. Это действие нельзя отменить." = "The person will be removed from records: %d. This cannot be undone.";
+"Справочник пуст: добавьте людей в «Настройках»" = "The directory is empty: add people in Settings";
+"Справочник людей…" = "People Directory…";
+"Люди" = "People";
+"Справочник для свойства «Человек»: общий для всех баз пространства." = "Directory for the Person property, shared by all databases in the workspace.";
+"Эмодзи" = "Emoji";
+"Имя" = "Name";
+"Удалить из справочника" = "Remove from directory";
+"Новый человек" = "New person";
+"Укажите имя." = "Enter a name.";
+"Слишком длинное имя." = "The name is too long.";
+"Человека нет в справочнике." = "This person is not in the directory.";

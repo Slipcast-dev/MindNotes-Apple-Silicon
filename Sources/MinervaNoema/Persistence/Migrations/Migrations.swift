@@ -11,9 +11,51 @@ enum Migrations {
     static let applicationID: Int64 = 0x47525A4E // "GRZN"
 
     /// Полный список миграций. Изменять уже выпущенные миграции нельзя: только добавлять новые и fixture прошлой версии.
-    static let all: [Migration] = [v1, v2, v3, v4, v5, v6, v7]
+    static let all: [Migration] = [v1, v2, v3, v4, v5, v6, v7, v8]
 
     static var supportedVersion: Int { all.last?.version ?? 0 }
+
+    private static let v8 = Migration(version: 8, name: "люди, файлы, ручной порядок") { db in
+        try db.execute(schemaV8)
+    }
+
+    /// M10. Справочник людей пространства и свойство «Человек»; свойство «Файлы и медиа» (вложения держатся
+    /// ссылкой RESTRICT, как у блоков); ручной порядок записей у каждого представления.
+    static let schemaV8 = """
+    CREATE TABLE people (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        color TEXT,
+        emoji TEXT,
+        sort_key TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    CREATE TABLE property_value_people (
+        page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        property_id TEXT NOT NULL REFERENCES property_definitions(id) ON DELETE CASCADE,
+        person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+        sort_key TEXT NOT NULL,
+        PRIMARY KEY(page_id, property_id, person_id)
+    ) WITHOUT ROWID;
+    CREATE INDEX property_value_people_person ON property_value_people(person_id);
+    CREATE INDEX property_value_people_prop ON property_value_people(property_id, person_id);
+    CREATE TABLE property_value_assets (
+        page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        property_id TEXT NOT NULL REFERENCES property_definitions(id) ON DELETE CASCADE,
+        asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE RESTRICT,
+        sort_key TEXT NOT NULL,
+        PRIMARY KEY(page_id, property_id, asset_id)
+    ) WITHOUT ROWID;
+    CREATE INDEX property_value_assets_asset ON property_value_assets(asset_id);
+    CREATE INDEX property_value_assets_prop ON property_value_assets(property_id);
+    CREATE TABLE view_record_order (
+        view_id TEXT NOT NULL REFERENCES database_views(id) ON DELETE CASCADE,
+        page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        sort_key TEXT NOT NULL,
+        PRIMARY KEY(view_id, page_id)
+    ) WITHOUT ROWID;
+    CREATE INDEX view_record_order_key ON view_record_order(view_id, sort_key);
+    """
 
     private static let v7 = Migration(version: 7, name: "формулы") { db in
         try db.execute(schemaV7)

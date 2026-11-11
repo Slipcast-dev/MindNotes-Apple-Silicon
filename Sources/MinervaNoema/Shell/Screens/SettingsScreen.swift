@@ -80,6 +80,8 @@ struct SettingsScreen: View {
                 .background(RoundedRectangle(cornerRadius: 12).fill(Tokens.card))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Tokens.line))
 
+                if shell.isOpen { PeopleSettings() }
+
                 Text("Пространства").font(.system(size: 17, weight: .semibold)).padding(.top, 24).padding(.bottom, 10)
                 VStack(spacing: 0) {
                     ForEach(shell.knownWorkspaces) { item in
@@ -157,5 +159,77 @@ struct SettingsScreen: View {
             control()
         }
         .padding(.vertical, 15)
+    }
+}
+
+/// Справочник людей пространства: имена, цвет и эмодзи для свойства «Человек». Без аккаунтов и сети.
+struct PeopleSettings: View {
+    @EnvironmentObject private var shell: ShellModel
+    @State private var newName = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Люди").font(.system(size: 17, weight: .semibold)).padding(.top, 24).padding(.bottom, 4)
+            Text("Справочник для свойства «Человек»: общий для всех баз пространства.")
+                .font(.system(size: 13)).foregroundColor(Tokens.muted).padding(.bottom, 10)
+            VStack(spacing: 0) {
+                ForEach(shell.people) { person in
+                    HStack(spacing: 10) {
+                        CommitField(value: person.emoji ?? "", placeholder: "🙂") { emoji in
+                            var next = person
+                            next.emoji = emoji
+                            shell.updatePerson(next)
+                        }
+                        .frame(width: 28)
+                        .accessibilityLabel(Text("Эмодзи"))
+                        CommitField(value: person.name, placeholder: L("Имя")) { name in
+                            var next = person
+                            next.name = name
+                            shell.updatePerson(next)
+                        }
+                        .accessibilityLabel(Text("Имя"))
+                        Menu {
+                            Button("Без цвета") { var next = person; next.color = nil; shell.updatePerson(next) }
+                            ForEach(BlockTextStyle.colors, id: \.name) { color in
+                                Button(L(color.title)) { var next = person; next.color = color.name; shell.updatePerson(next) }
+                            }
+                        } label: {
+                            Chip(text: person.label, colors: Tokens.swatch(person.color) ?? (Tokens.soft, Tokens.ink))
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                        .accessibilityLabel(Text("Цвет"))
+                        Button { shell.deletePerson(person) } label: { Image(systemName: "trash") }
+                            .buttonStyle(.plain)
+                            .foregroundColor(Tokens.muted)
+                            .help(L("Удалить из справочника"))
+                            .accessibilityLabel(Text("Удалить из справочника"))
+                    }
+                    .padding(.vertical, 9)
+                    Rectangle().fill(Tokens.line).frame(height: 1)
+                }
+                HStack(spacing: 9) {
+                    TextField(L("Новый человек"), text: $newName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 260)
+                        .onSubmit(add)
+                    Button("Добавить", action: add)
+                        .buttonStyle(NotesButtonStyle())
+                        .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Spacer()
+                }
+                .padding(.vertical, 12)
+            }
+            .padding(.horizontal, 18)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Tokens.card))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Tokens.line))
+        }
+    }
+
+    private func add() {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        shell.addPerson(name: name)
+        newName = ""
     }
 }

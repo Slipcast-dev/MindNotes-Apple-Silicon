@@ -174,7 +174,7 @@ struct DatabaseScreen: View {
         case .title: return 280
         case .date: return 200
         case .checkbox: return 90
-        case .multiSelect, .url, .createdTime, .editedTime: return 200
+        case .multiSelect, .url, .createdTime, .editedTime, .person: return 200
         case .relation: return 240
         default: return 160
         }

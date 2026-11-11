@@ -13,6 +13,7 @@ extension PropertyType {
         case .select: return L("Выбор")
         case .multiSelect: return L("Множественный выбор")
         case .url: return L("Ссылка")
+        case .person: return L("Человек")
         case .relation: return L("Связь")
         case .rollup: return L("Свёртка")
         case .formula: return L("Формула")
@@ -91,6 +92,8 @@ final class DatabaseModel: ObservableObject {
     @Published private(set) var undated: RecordPage = RecordPage(rows: [], total: 0)
     @Published var month = LocalDate(date: Date(), in: .current).firstOfMonth
     @Published private(set) var templates: [PageTemplate] = []
+    /// Справочник людей пространства: варианты ячеек «Человек» и группы доски.
+    @Published private(set) var people: [Person] = []
     @Published var selection: Set<UUID> = []
     private var limits: [String: Int] = [:]
     private var embedded: EmbeddedView?
@@ -165,6 +168,7 @@ final class DatabaseModel: ObservableObject {
         guard let fresh = try await store.database(databaseID) else { return }
         database = fresh
         templates = try await store.templates().filter { $0.databaseID == databaseID }
+        people = fresh.properties.contains { $0.type == .person } ? try await store.people() : []
         let current = state
         let kind = activeView?.kind ?? DatabaseView.tableKind
         total = try await store.queryRecords(database: fresh, state: current, limit: 0, offset: 0).total
@@ -175,7 +179,7 @@ final class DatabaseModel: ObservableObject {
         } else {
             var loaded: [RecordSection] = []
             if let property = current.groupProperty(fresh.properties, kind: kind) {
-                for group in RecordGroup.groups(for: property) {
+                for group in RecordGroup.groups(for: property, people: people) {
                     let page = try await store.queryRecords(database: fresh, state: current.narrowed(by: [group.rule]), limit: limits[group.id] ?? Self.pageSize, offset: 0)
                     loaded.append(RecordSection(id: group.id, group: group, rows: page.rows, total: page.total))
                 }
@@ -382,6 +386,7 @@ enum PropertyDisplay {
             let names = ids.compactMap { id in property.options.first { $0.id == id }?.name }
             return names.isEmpty ? nil : names.joined(separator: ", ")
         case .relation(let links)?: return links.isEmpty ? nil : links.map { $0.title.isEmpty ? L("Без названия") : $0.title }.joined(separator: ", ")
+        case .people(let people)?: return people.isEmpty ? nil : people.map(\.label).joined(separator: ", ")
         case .time(let ms)?: return time(ms)
         case .error?: return L("Ошибка формулы")
         case nil: return nil

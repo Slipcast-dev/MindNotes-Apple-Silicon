@@ -102,6 +102,7 @@ struct PropertyCell: View {
                 .accessibilityLabel(Text(property.name))
         case .status, .select: singleMenu
         case .multiSelect: multiMenu
+        case .person: personMenu
         case .date: DateCell(value: dateValue, onChange: onChange)
         case .relation: RelationCell(property: property, value: value, onChange: onChange)
         case .formula:
@@ -173,6 +174,43 @@ struct PropertyCell: View {
                 Divider()
                 Button("Очистить") { onChange(nil) }
             }
+        }
+    }
+
+    private var people: [Person] {
+        if case .people(let list)? = value { return list }
+        return []
+    }
+
+    /// Люди из справочника; отмеченные — галочкой. Человек не из справочника (удалён) в ячейке не показывается.
+    private var personMenu: some View {
+        HStack(spacing: 4) {
+            if people.isEmpty { Text("Пусто").font(.system(size: 13)).foregroundColor(Tokens.muted) }
+            ForEach(people) { person in
+                Chip(text: person.label, colors: Tokens.swatch(person.color) ?? (Tokens.soft, Tokens.ink))
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+        .contentShape(Rectangle())
+        .overlay {
+            Menu {
+                ForEach(shell.people) { person in
+                    Button {
+                        let chosen = people.contains { $0.id == person.id } ? people.filter { $0.id != person.id } : people + [person]
+                        onChange(chosen.isEmpty ? nil : .people(chosen))
+                    } label: {
+                        if people.contains(where: { $0.id == person.id }) { Label(person.label, systemImage: "checkmark") } else { Text(person.label) }
+                    }
+                }
+                if shell.people.isEmpty { Text("Справочник пуст: добавьте людей в «Настройках»") }
+                Divider()
+                Button("Справочник людей…") { shell.goSettings() }
+            } label: { Color.clear }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .opacity(0.02)
+                .accessibilityLabel(Text(property.name))
         }
     }
 

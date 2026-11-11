@@ -33,6 +33,7 @@ func runAllNotesTests() async {
     await runExportTests()
     await runFolderImportTests()
     await runRelationTransferTests()
+    await runPeopleTests()
     await runLocalizationTests()
     await runVideoTests()
     await runAcceptanceTests()

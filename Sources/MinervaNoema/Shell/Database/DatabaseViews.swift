@@ -48,6 +48,8 @@ struct GroupHeader: View {
         HStack(spacing: 8) {
             if let option = group.option {
                 Chip(text: option.name, colors: Tokens.swatch(option.color) ?? (Tokens.soft, Tokens.ink))
+            } else if let person = group.person {
+                Chip(text: person.label, colors: Tokens.swatch(person.color) ?? (Tokens.soft, Tokens.ink))
             } else if let checked = group.checked {
                 Chip(text: checked ? L("Отмечено") : L("Не отмечено"))
             } else {

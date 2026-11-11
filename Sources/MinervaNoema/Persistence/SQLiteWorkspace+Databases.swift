@@ -59,6 +59,17 @@ enum DatabaseQuerySQL {
             default: return nil
             }
         }
+        if def.type == .person {
+            let any = "EXISTS (SELECT 1 FROM property_value_people pp WHERE pp.page_id = p.id AND pp.property_id = ?"
+            switch rule.op {
+            case .isEmpty: return Fragment(sql: "NOT \(any))", args: [prop])
+            case .isNotEmpty: return Fragment(sql: "\(any))", args: [prop])
+            case .contains, .notContains:
+                guard let person = UUID(uuidString: rule.value) else { return nil }
+                return Fragment(sql: "\(rule.op == .notContains ? "NOT " : "")\(any) AND pp.person_id = ?)", args: [prop, SQLValue(person)])
+            default: return nil
+            }
+        }
         if def.type.isTimestamp {
             guard let day = LocalDate(iso: rule.value.trimmingCharacters(in: .whitespaces)) else { return nil }
             let column = def.type == .createdTime ? "p.created_at" : "p.updated_at"
@@ -161,6 +172,11 @@ enum DatabaseQuerySQL {
                 expression = "(SELECT NULLIF(count(*), 0) FROM (\(linked(def))))"
                 order.args.append(SQLValue(def.linkOwner))
                 order.args.append(SQLValue(def.linkOwner))
+            case .person:
+                // По имени первого по алфавиту человека, как у Notion; без людей — в конце.
+                expression = "(SELECT MIN(minerva_norm(pe.name)) FROM property_value_people pv JOIN people pe ON pe.id = pv.person_id WHERE pv.page_id = p.id AND pv.property_id = ?)"
+                order.args.append(SQLValue(def.id))
+                order.args.append(SQLValue(def.id))
             case .status, .select, .multiSelect:
                 expression = "(SELECT MIN(so.sort_key) FROM property_value_options po JOIN property_options so ON so.id = po.option_id WHERE po.page_id = p.id AND po.property_id = ?)"
                 order.args.append(SQLValue(def.id))
@@ -298,6 +314,16 @@ extension SQLiteWorkspace {
                 out[page]?[prop] = .options(ids + [option])
             } else {
                 out[page, default: [:]][prop] = .options([option])
+            }
+        }
+        if properties.contains(where: { $0.type == .person }) {
+            _ = try db.query("""
+            SELECT v.page_id, v.property_id, e.id, e.name, e.color, e.emoji, e.sort_key FROM property_value_people v JOIN people e ON e.id = v.person_id
+            WHERE v.page_id IN (\(marks)) ORDER BY v.sort_key, e.id
+            """, args) { r in
+                guard let page = r.uuid(0), let prop = r.uuid(1), types[prop] == .person, let id = r.uuid(2) else { return }
+                let person = Person(id: id, name: r.text(3), color: r.optText(4), emoji: r.optText(5), sortKey: r.text(6))
+                if case .people(let list)? = out[page]?[prop] { out[page]?[prop] = .people(list + [person]) } else { out[page, default: [:]][prop] = .people([person]) }
             }
         }
         for def in properties where def.type == .relation {
@@ -480,7 +506,9 @@ extension SQLiteWorkspace {
             return ids.allSatisfy { id in def.options.contains { $0.id == id } }
         case (.relation(let links), .relation):
             return links.count <= RelationLimits.maxLinks && Set(links.map(\.id)).count == links.count
-        case (.unconverted, _): return def.type != .relation
+        case (.people(let people), .person):
+            return people.count <= PeopleLimits.maxPerValue && Set(people.map(\.id)).count == people.count
+        case (.unconverted, _): return def.type != .relation && def.type != .person
         default: return false
         }
     }
@@ -527,6 +555,15 @@ extension SQLiteWorkspace {
         }
         guard !def.type.isComputed else { return }
         let keys: [SQLValue] = [SQLValue(page), SQLValue(def.id)]
+        if def.type == .person {
+            try db.run("DELETE FROM property_value_people WHERE page_id=? AND property_id=?", keys)
+            guard case .people(let people)? = value else { return }
+            for (person, key) in zip(people, SortKey.keys(after: nil, before: nil, count: people.count)) {
+                guard try db.scalarInt("SELECT 1 FROM people WHERE id=?", [SQLValue(person.id)]) != nil else { throw storageError("Человека нет в справочнике.") }
+                try db.run("INSERT INTO property_value_people(page_id, property_id, person_id, sort_key) VALUES(?,?,?,?)", keys + [SQLValue(person.id), .text(key)])
+            }
+            return
+        }
         try db.run("DELETE FROM property_value_options WHERE page_id=? AND property_id=?", keys)
         try db.run("DELETE FROM property_values WHERE page_id=? AND property_id=?", keys)
         guard let value else { return }
@@ -548,7 +585,7 @@ extension SQLiteWorkspace {
                 try db.run("INSERT OR IGNORE INTO property_value_options(page_id, property_id, option_id) VALUES(?,?,?)", keys + [SQLValue(id)])
             }
             return
-        case .relation, .time, .error: return
+        case .relation, .time, .error, .people: return
         }
         try db.run("""
         INSERT INTO property_values(page_id, property_id, value_text, value_num, value_date, value_date_end, value_ts, value_ts_end, value_tz, unconverted, updated_at)
@@ -713,6 +750,9 @@ extension SQLiteWorkspace {
                 SELECT count(DISTINCT l.from_page) FROM relation_links l JOIN pages p ON p.id = l.from_page JOIN pages q ON q.id = l.to_page
                 WHERE l.property_id=? AND p.deleted_at IS NULL AND q.deleted_at IS NULL
                 """, [SQLValue(property)]) ?? 0)
+            }
+            if def.type == .person {
+                return Int(try db.scalarInt("SELECT count(DISTINCT v.page_id) FROM property_value_people v JOIN pages p ON p.id = v.page_id WHERE v.property_id=? AND p.deleted_at IS NULL", [SQLValue(property)]) ?? 0)
             }
             let plain = try db.scalarInt("SELECT count(*) FROM property_values v JOIN pages p ON p.id = v.page_id WHERE v.property_id=? AND p.deleted_at IS NULL", [SQLValue(property)]) ?? 0
             let options = try db.scalarInt("SELECT count(DISTINCT v.page_id) FROM property_value_options v JOIN pages p ON p.id = v.page_id WHERE v.property_id=? AND p.deleted_at IS NULL", [SQLValue(property)]) ?? 0
@@ -1107,6 +1147,13 @@ extension SQLiteWorkspace {
                 INSERT INTO property_values(page_id, property_id, value_text, value_num, value_date, value_date_end, value_ts, value_ts_end, value_tz, unconverted, updated_at)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?)
                 """, [SQLValue(new)] + row + [.int(now)])
+            }
+            // Люди — из общего справочника: копия ссылается на тех же людей.
+            let people = try db.query("SELECT property_id, person_id, sort_key FROM property_value_people WHERE page_id=?", [SQLValue(old)]) { ($0.uuid(0), $0.uuid(1), $0.text(2)) }
+            for (property, person, key) in people {
+                guard let property, let person else { continue }
+                try db.run("INSERT INTO property_value_people(page_id, property_id, person_id, sort_key) VALUES(?,?,?,?)",
+                           [SQLValue(new), SQLValue(propertyMap[property] ?? property), SQLValue(person), .text(key)])
             }
             let chosen = try db.query("SELECT property_id, option_id FROM property_value_options WHERE page_id=?", [SQLValue(old)]) { ($0.uuid(0), $0.uuid(1)) }
             for (property, option) in chosen {

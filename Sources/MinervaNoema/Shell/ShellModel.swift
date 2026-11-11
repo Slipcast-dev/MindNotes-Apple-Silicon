@@ -81,6 +81,8 @@ final class ShellModel: ObservableObject {
     @Published var csvImport: CSVImportRequest?
     @Published private(set) var databaseModel: DatabaseModel?
     @Published private(set) var userTemplates: [PageTemplate] = []
+    /// Справочник людей пространства (M10): варианты свойства «Человек».
+    @Published private(set) var people: [Person] = []
     /// Предпросмотр на блок: данные блока рядом, изменившийся блок читается заново.
     private var embedCache: [UUID: (json: String, summary: EmbedSummary)] = [:]
     private var embedLoading: Set<String> = []
@@ -411,6 +413,7 @@ final class ShellModel: ObservableObject {
             pageTags = loadedPageTags
             databaseIndex = loadedDatabases
             userTemplates = (try? await store.templates()) ?? []
+            people = (try? await store.people()) ?? []
             pages = session.pages
             saveStatus = .saved
             await cacheImages(for: loadedLook)
@@ -952,6 +955,48 @@ final class ShellModel: ObservableObject {
             try await self.reloadTrash()
             try await self.reloadTags()
             self.notice = moved ? L("Прежняя родительская страница недоступна: страница восстановлена в корень.") : L("Страница восстановлена.")
+        }
+    }
+
+    // MARK: Люди
+
+    private func reloadPeople() async throws {
+        guard let store else { return }
+        people = try await store.people()
+        databaseModel?.reload()
+    }
+
+    func addPerson(name: String) {
+        enqueue {
+            guard let store = self.store else { return }
+            _ = try await store.addPerson(name: name, color: nil, emoji: nil, id: UUID(), now: SystemClock().nowMillis())
+            try await self.reloadPeople()
+        }
+    }
+
+    func updatePerson(_ person: Person) {
+        enqueue {
+            try await self.store?.updatePerson(person, now: SystemClock().nowMillis())
+            try await self.reloadPeople()
+        }
+    }
+
+    /// Удаление снимает человека из всех записей: подтверждение называет их число.
+    func deletePerson(_ person: Person) {
+        enqueue {
+            guard let store = self.store else { return }
+            let used = try await store.personUsage(person.id)
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = String(format: L("Удалить «%@» из справочника?"), person.name)
+            alert.informativeText = used > 0
+                ? String(format: L("Человек будет убран из записей: %d. Это действие нельзя отменить."), used)
+                : L("Это действие нельзя отменить.")
+            alert.addButton(withTitle: L("Удалить"))
+            alert.addButton(withTitle: L("Отмена"))
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            try await store.deletePerson(person.id, now: SystemClock().nowMillis())
+            try await self.reloadPeople()
         }
     }
 

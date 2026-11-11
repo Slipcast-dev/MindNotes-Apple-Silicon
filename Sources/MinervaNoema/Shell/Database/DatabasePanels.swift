@@ -87,6 +87,7 @@ struct FilterGroupEditor: View {
 }
 
 struct FilterRuleEditor: View {
+    @EnvironmentObject private var shell: ShellModel
     let rule: FilterRule
     let properties: [PropertyDefinition]
     let onChange: (FilterRule) -> Void
@@ -137,6 +138,13 @@ struct FilterRuleEditor: View {
             Picker("Вариант", selection: Binding(get: { UUID(uuidString: rule.value) }, set: { set($0?.uuidString ?? "") })) {
                 Text("Выберите").tag(UUID?.none)
                 ForEach(property.options) { Text($0.name).tag(UUID?.some($0.id)) }
+            }
+            .labelsHidden()
+            .frame(width: 150)
+        case .person:
+            Picker("Человек", selection: Binding(get: { UUID(uuidString: rule.value) }, set: { set($0?.uuidString ?? "") })) {
+                Text("Выберите").tag(UUID?.none)
+                ForEach(shell.people) { Text($0.label).tag(UUID?.some($0.id)) }
             }
             .labelsHidden()
             .frame(width: 150)

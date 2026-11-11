@@ -23,9 +23,11 @@ struct PropertyType: RawRepresentable, Hashable, Codable {
     static let rollup = PropertyType(rawValue: "rollup")
     /// Формула: вычисляется из свойств своей записи, хранится готовым значением.
     static let formula = PropertyType(rawValue: "formula")
+    /// Человек: один или несколько людей из справочника пространства.
+    static let person = PropertyType(rawValue: "person")
 
     /// Типы, которые можно выбрать; заголовок у базы один и создаётся вместе с ней.
-    static let creatable: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url, .relation, .rollup, .formula, .createdTime, .editedTime]
+    static let creatable: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url, .person, .relation, .rollup, .formula, .createdTime, .editedTime]
     /// Типы с собственными значениями, между которыми возможна смена типа с предпросмотром.
     static let convertible: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url]
     var isKnown: Bool { self == .title || Self.creatable.contains(self) }
@@ -116,6 +118,25 @@ struct LinkedPage: Hashable, Identifiable {
 enum RelationLimits {
     /// Предел связей в одной ячейке: защита от случайной массовой вставки.
     static let maxLinks = 1000
+}
+
+/// Человек из справочника пространства (M10). Справочник общий для всех баз: свойство «Человек» хранит только ID.
+struct Person: Hashable, Identifiable {
+    var id: UUID
+    var name: String
+    /// Имя цвета из палитры вариантов (`PropertyColor`); nil — серый.
+    var color: String? = nil
+    var emoji: String? = nil
+    var sortKey: String = ""
+
+    /// Подпись в ячейке и экспорте: эмодзи перед именем, если есть.
+    var label: String { (emoji.map { $0 + " " } ?? "") + name }
+}
+
+enum PeopleLimits {
+    /// Предел людей в одной ячейке и длины имени.
+    static let maxPerValue = 200
+    static let maxName = 200
 }
 
 /// Вариант выбора. Постоянный ID: переименование не меняет значения записей.
@@ -308,6 +329,8 @@ enum PropertyValue: Hashable {
     case time(Int64)
     /// Ошибка вычисления формулы в этой записи: видна в ячейке, значения нет.
     case error(String)
+    /// Люди в порядке ячейки; имя и цвет — из справочника на момент чтения.
+    case people([Person])
 }
 
 /// Разбор пользовательского ввода и текста при смене типа.
@@ -388,6 +411,7 @@ enum PropertyConversion {
         case .options(let ids): return ids.compactMap { id in options.first { $0.id == id }?.name }.joined(separator: ", ")
         case .date(let d): return d.end.map { "\(d.start.localText) — \($0.localText)" } ?? d.start.localText
         case .relation(let pages): return pages.map(\.title).joined(separator: ", ")
+        case .people(let people): return people.map(\.name).joined(separator: ", ")
         case .time(let ms): return DatePoint.moment(ms: ms, zone: TimeZone.current.identifier).localText
         case .error: return ""
         }
@@ -467,6 +491,7 @@ struct FilterOp: RawRepresentable, Hashable, Codable {
         case .status, .select: return [.equals, .notEquals, .isEmpty, .isNotEmpty]
         case .multiSelect: return [.contains, .notContains, .isEmpty, .isNotEmpty]
         case .relation: return [.contains, .notContains, .isEmpty, .isNotEmpty]
+        case .person: return [.contains, .notContains, .isEmpty, .isNotEmpty]
         case .createdTime, .editedTime: return [.equals, .less, .lessOrEqual, .greater, .greaterOrEqual]
         default: return []
         }
@@ -652,12 +677,18 @@ struct RecordGroup: Equatable, Identifiable {
     var property: UUID
     var option: PropertyOption?
     var checked: Bool?
+    var person: Person? = nil
     var rule: FilterRule
 
-    static func isGroupable(_ type: PropertyType) -> Bool { type.usesOptions || type == .checkbox }
+    static func isGroupable(_ type: PropertyType) -> Bool { type.usesOptions || type == .checkbox || type == .person }
 
     /// Сначала варианты по порядку, в конце группа без значения: запись не должна пропасть из вида.
-    static func groups(for def: PropertyDefinition) -> [RecordGroup] {
+    /// У «Человека» группы — люди справочника; запись с несколькими людьми видна в группе каждого.
+    static func groups(for def: PropertyDefinition, people: [Person] = []) -> [RecordGroup] {
+        if def.type == .person {
+            return people.map { RecordGroup(id: $0.id.uuidString, property: def.id, person: $0, rule: FilterRule(property: def.id, op: .contains, value: $0.id.uuidString)) }
+                + [RecordGroup(id: "empty", property: def.id, rule: FilterRule(property: def.id, op: .isEmpty, value: ""))]
+        }
         if def.type == .checkbox {
             return [RecordGroup(id: "true", property: def.id, checked: true, rule: FilterRule(property: def.id, op: .isTrue, value: "")),
                     RecordGroup(id: "false", property: def.id, checked: false, rule: FilterRule(property: def.id, op: .isFalse, value: ""))]
@@ -671,6 +702,15 @@ struct RecordGroup: Equatable, Identifiable {
     /// Значение записи после переноса в эту группу. Во множественном выборе заменяется только вариант исходной группы.
     func value(replacing current: PropertyValue?, from source: RecordGroup?, type: PropertyType) -> PropertyValue? {
         if let checked { return .checkbox(checked) }
+        if type == .person {
+            // Заменяется только человек исходной группы, остальные остаются; в группу «пусто» — без людей.
+            guard let person else { return nil }
+            if source?.person?.id == person.id, case .people? = current { return current }
+            var people: [Person] = []
+            if case .people(let old)? = current { people = old.filter { $0.id != source?.person?.id } }
+            if !people.contains(where: { $0.id == person.id }) { people.append(person) }
+            return .people(people)
+        }
         guard type == .multiSelect else { return option.map { .options([$0.id]) } }
         guard let option else { return nil }
         var ids: [UUID] = []

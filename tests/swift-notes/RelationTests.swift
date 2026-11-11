@@ -351,6 +351,6 @@ func runRelationTests() async {
         checkEqual(back, config, "неизвестные поля сохраняются")
         checkEqual(PropertyConfig(json: "{испорчено"), PropertyConfig(), "испорченные настройки — пустые")
         checkEqual(PropertyConfig(json: nil), PropertyConfig())
-        checkEqual(Migrations.supportedVersion, 7)
+        checkEqual(Migrations.supportedVersion, 8)
     }
 }
