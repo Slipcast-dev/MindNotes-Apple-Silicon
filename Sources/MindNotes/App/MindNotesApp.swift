@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWindow.allowsAutomaticWindowTabbing = false
         SheetOutsideClick.install()
         TitlebarDoubleClick.install()
+        shell.observeLockEvents() // Сон экрана закрывает пароли страниц (ADR-0017).
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         // Расширения читаются до оформления: своя тема и иконка нужны с первого кадра (ADR-0015).

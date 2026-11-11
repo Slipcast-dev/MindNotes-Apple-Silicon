@@ -46,6 +46,8 @@ struct SidebarGroup: View {
     var onToggle: (() -> Void)? = nil
     /// Над заголовком тащат страницу: она ляжет в этот раздел.
     var highlighted = false
+    /// Сюда встанет перетаскиваемый раздел: линия сверху или снизу заголовка.
+    var insertion: VerticalEdge? = nil
 
     var body: some View {
         HStack(spacing: 4) {
@@ -70,6 +72,11 @@ struct SidebarGroup: View {
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 6).fill(highlighted ? Tokens.accent.opacity(0.12) : .clear).padding(.top, 14))
+        .overlay(alignment: insertion == .bottom ? .bottom : .top) {
+            if insertion != nil {
+                Capsule().fill(Tokens.accent).frame(height: 2).padding(.horizontal, 6).padding(.top, insertion == .top ? 12 : 0)
+            }
+        }
     }
 }
 
@@ -101,7 +108,7 @@ struct NotesSidebar: View {
 
     /// Строки дерева одного раздела: страницы верхнего уровня этого раздела и их потомки.
     @ViewBuilder private func treeRows(in section: UUID?) -> some View {
-        ForEach(shell.isSectionCollapsed(section) ? [] : shell.treeRows(collapsed: collapsed, section: section)) { row in
+        ForEach(shell.isSectionCollapsed(section) ? [] : shell.treeRows(collapsed: collapsed.union(shell.closedLockIDs), section: section)) { row in
             PageTreeRow(row: row, expanded: !collapsed.contains(row.id),
                         dropZone: drag?.target == row.id ? drag?.zone : nil,
                         isDragged: drag?.page == row.id) {
@@ -117,6 +124,8 @@ struct NotesSidebar: View {
             )
         }
     }
+
+    @State private var sectionDrag: SectionDrag?
 
     /// Заголовок стандартного раздела в кадрах строк: свой ID, не совпадающий со страницами.
     static let defaultSection = UUID(uuidString: "00000000-0000-0000-0000-00000000D5EC")!
@@ -155,6 +164,76 @@ struct NotesSidebar: View {
         if shell.reorder(state.page, onto: target, zone: zone) {
             if zone == .into { collapsed.remove(target) } else { shell.followSection(of: target, page: state.page) }
         }
+    }
+
+    private func headerID(_ slot: SectionSlot) -> UUID { slot.sectionID ?? Self.defaultSection }
+
+    private func slot(forHeader id: UUID) -> SectionSlot { id == Self.defaultSection ? .pages : .custom(id) }
+
+    /// Заголовок раздела: щелчок сворачивает, перетаскивание меняет порядок, правый щелчок — действия.
+    @ViewBuilder private func sectionHeader(_ slot: SectionSlot) -> some View {
+        let id = headerID(slot)
+        let section = shell.sections.first { $0.id == slot.sectionID }
+        let order = shell.sectionOrder
+        SidebarGroup(title: section?.name ?? shell.pagesTitle ?? L("Страницы"), collapsed: shell.isSectionCollapsed(slot.sectionID),
+                     onToggle: { shell.toggleSection(slot.sectionID) },
+                     highlighted: drag?.target == id,
+                     insertion: sectionDrag?.target == slot ? sectionDrag?.edge : nil)
+            .opacity(sectionDrag?.moving == slot ? 0.45 : 1)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: RowFramesKey.self, value: [id: g.frame(in: .named(Self.treeSpace))])
+            })
+            .contentShape(Rectangle())
+            .onTapGesture { shell.toggleSection(slot.sectionID) }
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 6, coordinateSpace: .named(Self.treeSpace))
+                    .onChanged { updateSectionDrag(slot, at: $0.location) }
+                    .onEnded { _ in finishSectionDrag() }
+            )
+            .contextMenu {
+                if let section {
+                    Button("Новая страница в разделе") { shell.createPage(inSection: section.id) }
+                    Button("Переименовать раздел…") { shell.renameSection(section) }
+                } else {
+                    Button("Переименовать раздел…") { shell.renamePagesSection() }
+                    if shell.pagesTitle != nil { Button("Вернуть «Страницы»") { shell.setPagesTitle(nil) } }
+                }
+                Button("Выше") { shell.moveSection(slot, by: -1) }.disabled(order.first == slot)
+                Button("Ниже") { shell.moveSection(slot, by: 1) }.disabled(order.last == slot)
+                if let section {
+                    Divider()
+                    Button("Удалить раздел…") { shell.deleteSection(section) }
+                }
+            }
+            .help(L("Щелчок — свернуть или развернуть; перетащите, чтобы изменить порядок; правый щелчок — действия"))
+    }
+
+    /// Перетаскивание раздела: цель — заголовок другого раздела под курсором.
+    private struct SectionDrag: Equatable {
+        var moving: SectionSlot
+        var target: SectionSlot?
+        var edge: VerticalEdge?
+    }
+
+    private func updateSectionDrag(_ slot: SectionSlot, at location: CGPoint) {
+        var state = sectionDrag ?? SectionDrag(moving: slot)
+        state.target = nil
+        state.edge = nil
+        let order = shell.sectionOrder
+        if let (id, _) = rowFrames.first(where: { sectionHeaders.contains($0.key) && $0.value.contains(location) }) {
+            let target = self.slot(forHeader: id)
+            if target != slot, let from = order.firstIndex(of: slot), let to = order.firstIndex(of: target) {
+                state.target = target
+                state.edge = from < to ? .bottom : .top
+            }
+        }
+        sectionDrag = state
+    }
+
+    private func finishSectionDrag() {
+        defer { sectionDrag = nil }
+        guard let state = sectionDrag, let target = state.target else { return }
+        shell.moveSection(state.moving, onto: target)
     }
 
     var body: some View {
@@ -239,39 +318,10 @@ struct NotesSidebar: View {
                         }
                     }
                     if shell.isOpen {
-                        // Название раздела задаёт пользователь; оно хранится в пространстве (у другого — своё или «Страницы»).
-                        SidebarGroup(title: shell.pagesTitle ?? L("Страницы"), collapsed: shell.isSectionCollapsed(nil),
-                                     onToggle: { shell.toggleSection(nil) }, highlighted: drag?.target == Self.defaultSection)
-                            .background(GeometryReader { g in
-                                Color.clear.preference(key: RowFramesKey.self, value: [Self.defaultSection: g.frame(in: .named(Self.treeSpace))])
-                            })
-                            .contentShape(Rectangle())
-                            .onTapGesture { shell.toggleSection(nil) }
-                            .contextMenu {
-                                Button("Переименовать раздел…") { shell.renamePagesSection() }
-                                if shell.pagesTitle != nil { Button("Вернуть «Страницы»") { shell.setPagesTitle(nil) } }
-                            }
-                            .help(L("Щелчок — свернуть или развернуть; правый щелчок — переименовать"))
-                        treeRows(in: nil)
-                        // Свои разделы: каждый со своими страницами верхнего уровня (схема v9).
-                        ForEach(shell.sections) { section in
-                            SidebarGroup(title: section.name, collapsed: shell.isSectionCollapsed(section.id),
-                                         onToggle: { shell.toggleSection(section.id) }, highlighted: drag?.target == section.id)
-                                .background(GeometryReader { g in
-                                    Color.clear.preference(key: RowFramesKey.self, value: [section.id: g.frame(in: .named(Self.treeSpace))])
-                                })
-                                .contentShape(Rectangle())
-                                .onTapGesture { shell.toggleSection(section.id) }
-                                .contextMenu {
-                                    Button("Новая страница в разделе") { shell.createPage(inSection: section.id) }
-                                    Button("Переименовать раздел…") { shell.renameSection(section) }
-                                    Button("Выше") { shell.moveSection(section, by: -1) }.disabled(shell.sections.first?.id == section.id)
-                                    Button("Ниже") { shell.moveSection(section, by: 1) }.disabled(shell.sections.last?.id == section.id)
-                                    Divider()
-                                    Button("Удалить раздел…") { shell.deleteSection(section) }
-                                }
-                                .help(L("Щелчок — свернуть или развернуть; правый щелчок — переименовать"))
-                            treeRows(in: section.id)
+                        // Разделы в порядке пользователя: «Страницы» и свои (схема v9) перетаскиваются за заголовок.
+                        ForEach(shell.sectionOrder, id: \.self) { slot in
+                            sectionHeader(slot)
+                            treeRows(in: slot.sectionID)
                         }
                         SidebarRow(title: L("Новый раздел"), symbol: "plus.rectangle.on.folder") { shell.addSection() }
                             .padding(.top, 4)
@@ -368,6 +418,13 @@ struct PageTreeRow: View {
                 .padding(.trailing, 6)
             }
         }
+        .overlay(alignment: .trailing) {
+            if !hovering, shell.hasOwnLock(page.id) {
+                Image(systemName: shell.isClosed(page.id) ? "lock.fill" : "lock.open")
+                    .font(.system(size: 10)).foregroundColor(Tokens.muted).padding(.trailing, 10)
+                    .accessibilityLabel(Text("Под паролем"))
+            }
+        }
         .onHover { hovering = $0 }
         // Куда упадёт страница: линия между строками или рамка «внутрь».
         .overlay(alignment: dropZone == .before ? .top : .bottom) {
@@ -402,6 +459,7 @@ struct PageTreeRow: View {
                     }
                 }
                 if AISettings.shared.enabled { AIExcludeMenuItem(page: page.id) }
+                PageLockMenuItems(page: page.id)
                 Divider()
                 Button("Удалить") { shell.trash(page.id) }
     }

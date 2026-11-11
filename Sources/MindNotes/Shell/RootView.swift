@@ -172,6 +172,7 @@ struct NotesLayout: View {
             } else {
                 Color.clear
             }
+        case .locked(let id): LockedPageScreen(id: id).id(id)
         case .backups: BackupsScreen()
         case .settings: SettingsScreen()
         case .files: FilesScreen()
@@ -214,7 +215,7 @@ struct CrumbBar: View {
 
     private var currentTitle: String {
         switch shell.section {
-        case .page(let id), .database(let id): return shell.pageTree.page(id)?.title ?? ""
+        case .page(let id), .database(let id), .locked(let id): return shell.pageTree.page(id)?.title ?? ""
         case .backups: return L("Резервные копии")
         case .settings: return L("Настройки")
         case .trash: return L("Корзина")
@@ -264,6 +265,7 @@ struct CrumbBar: View {
                     if !shell.isDatabase(id) { Button("Экспорт в Markdown…") { shell.exportMarkdown(id) } }
                     if shell.isDatabase(id) { Button("Экспорт в CSV…") { shell.exportDatabaseCSV(page: id) } }
                     if AISettings.shared.enabled { AIExcludeMenuItem(page: id) }
+                    PageLockMenuItems(page: id)
                     Divider()
                     Button("Удалить страницу") { shell.trash(id) }
                 } label: { Image(systemName: "ellipsis") }

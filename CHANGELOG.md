@@ -7,6 +7,8 @@ All notable changes to MindNotes. The format follows [Keep a Changelog](https://
 ## [Unreleased]
 
 ### Added
+- **Drag sidebar sections** by the title, including “Pages”; “Move up” and “Move down” are available for every section. The order is stored in the workspace.
+- **Password for a page, record, database or folder** (ADR-0017): “…” → “Set Password…”. The lock covers everything inside; unlock with the password, Touch ID or your Mac password, and it locks again after the display sleeps, the app restarts or “Lock Now”. Locked text stays out of search, backlinks, inline databases, copies, templates, export and AI. This is an app lock, not encryption.
 - **Optional AI assistant** (ADR-0016), off by default: “Ask AI” on selected text and ⌘J, AI on an empty line with Space, an AI chat (⇧⌘J) that answers about the open page or the whole workspace, an agent that proposes changes and applies them only when you click Apply, an empty-line hint, page mentions with “@” and saved chat history, an “AI instructions” page, “Don't send to AI” for pages, AI fill for database properties (text, numbers, dates, checkboxes, links and options) with an “AI-filled” mark, undo, auto-update and half-price batch mode, database tools for the agent, and file attachments in the chat. Uses the Claude API with your own key stored in the macOS keychain; nothing is sent until you turn AI on.
 
 ## [1.3.0] - 2026-11-11

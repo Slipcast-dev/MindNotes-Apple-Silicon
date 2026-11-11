@@ -1441,3 +1441,36 @@
 "запись не найдена" = "record not found";
 "значения не подходят к свойствам" = "values don't match the properties";
 "✦ создано ИИ (на экране): %d" = "✦ AI-filled (on screen): %d";
+
+/* Пароли страниц и порядок разделов (ADR-0017) */
+"Touch ID или пароль Mac" = "Touch ID or Mac password";
+"Введите пароль страницы" = "Enter the page password";
+"Ещё раз" = "Repeat";
+"Забыли пароль — подтвердите Touch ID или паролем Mac." = "Forgot the password? Confirm with Touch ID or your Mac password.";
+"Закрыть на замок" = "Lock Now";
+"Изменить пароль…" = "Change Password…";
+"Неверный пароль." = "Wrong password.";
+"Новый пароль" = "New password";
+"Нужно не меньше %d символов." = "At least %d characters are needed.";
+"Пароли не совпадают." = "The passwords do not match.";
+"Пароль" = "Password";
+"Пароль изменён." = "Password changed.";
+"Пароль на страницу" = "Page password";
+"Пароль нужен, чтобы открыть страницу и всё, что внутри неё. Это замок приложения, а не шифрование: файл пространства и резервные копии остаются читаемыми. Забытый пароль снимается через Touch ID или пароль Mac." = "The password is needed to open the page and everything inside it. This is an app lock, not encryption: the workspace file and backups stay readable. A forgotten password can be removed with Touch ID or your Mac password.";
+"Пароль поставлен. Страница закроется после сна экрана или перезапуска; «Закрыть на замок» — сразу." = "Password set. The page locks after the display sleeps or the app restarts; “Lock Now” locks it right away.";
+"Пароль снят." = "Password removed.";
+"Поставить" = "Set";
+"Поставить пароль…" = "Set Password…";
+"Сначала откройте паролем страницу и закрытые страницы внутри неё." = "First unlock the page and the locked pages inside it.";
+"Сначала откройте паролем страницу, из которой её переносите." = "First unlock the page you are moving it out of.";
+"Снять пароль…" = "Remove Password…";
+"Страница внутри защищённой паролем страницы." = "This page is inside a password-protected page.";
+"Страница защищена паролем." = "This page is password-protected.";
+"изменить пароль страницы" = "change the page password";
+"открыть страницу под паролем" = "open a password-protected page";
+"снять пароль со страницы" = "remove the page password";
+"Щелчок — свернуть или развернуть; перетащите, чтобы изменить порядок; правый щелчок — действия" = "Click to collapse or expand; drag to reorder; right-click for actions";
+"Защищено паролем" = "Password-protected";
+"База защищена паролем: откройте её, чтобы увидеть записи." = "The database is password-protected: open it to see the records.";
+"выгрузить пространство вместе со страницами под паролем" = "export the workspace including password-protected pages";
+"Под паролем" = "Password-protected";

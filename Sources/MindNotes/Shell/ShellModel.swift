@@ -15,6 +15,8 @@ enum ShellSection: Equatable {
     case trash
     case templates
     case tag(UUID)
+    /// Страница под паролем (ADR-0017): вместо содержимого — окно ввода пароля.
+    case locked(UUID)
 }
 
 /// Пространство, которое уже открывали на этом Mac.
@@ -74,6 +76,9 @@ final class ShellModel: ObservableObject {
     /// Свои разделы боковой панели и раздел каждой страницы верхнего уровня (схема v9).
     @Published private(set) var sections: [PageSection] = []
     @Published private(set) var sectionOf: [UUID: UUID] = [:]
+    /// Замки страниц (ADR-0017) и открытые в этом сеансе: сон экрана, выход и смена пространства закрывают снова.
+    @Published var pageLocks: [UUID: PageLock] = [:]
+    @Published var unlockedPages: Set<UUID> = []
     private static let pagesTitleKey = "ui.pagesSectionTitle"
     @Published private(set) var look = WorkspaceLook()
     @Published var showsLookSheet = false
@@ -459,6 +464,8 @@ final class ShellModel: ObservableObject {
             let loadedSections = try await store.sections()
             let loadedMembers = try await store.sectionMembers()
             let loadedCollapsed = Set((try await store.meta(Self.collapsedSectionsKey) ?? "").split(separator: ",").map(String.init))
+            let loadedPagesIndex = Int(try await store.meta(Self.pagesIndexKey) ?? "") ?? 0
+            let loadedLocks = PageLock.decode(try await store.meta(PageLock.metaKey))
             let session = WorkspaceSession(store: store, name: name)
             session.coordinator.onStatusChange = { [weak self] in self?.saveStatus = $0 }
             try await session.refreshPages()
@@ -486,6 +493,9 @@ final class ShellModel: ObservableObject {
             sections = loadedSections
             sectionOf = loadedMembers
             collapsedSections = loadedCollapsed
+            pagesSectionIndex = loadedPagesIndex
+            pageLocks = loadedLocks
+            unlockedPages = []
             tags = loadedTags
             pageTags = loadedPageTags
             databaseIndex = loadedDatabases
@@ -562,16 +572,30 @@ final class ShellModel: ObservableObject {
         }
     }
 
-    func moveSection(_ section: PageSection, by delta: Int) {
-        guard let i = sections.firstIndex(of: section) else { return }
-        let target = i + delta
-        guard sections.indices.contains(target) else { return }
-        let others = sections.filter { $0.id != section.id }
-        // Место в списке без самого раздела: встать после соседа слева (nil — первым).
-        let after: UUID? = target > 0 ? others[target - 1].id : nil
+    /// Позиция «Страниц» среди разделов: хранится в пространстве, как и порядок своих разделов.
+    @Published private(set) var pagesSectionIndex = 0
+    private static let pagesIndexKey = "ui.pagesSectionIndex"
+
+    var sectionOrder: [SectionSlot] { SectionSlot.order(sections, pagesIndex: pagesSectionIndex) }
+
+    func moveSection(_ slot: SectionSlot, by delta: Int) {
+        let order = sectionOrder
+        guard let i = order.firstIndex(of: slot), order.indices.contains(i + delta) else { return }
+        moveSection(slot, onto: order[i + delta])
+    }
+
+    /// Раздел перетащили на место другого: новый порядок своих разделов и позиция «Страниц».
+    func moveSection(_ moving: SectionSlot, onto target: SectionSlot) {
+        let order = SectionSlot.move(sectionOrder, moving, onto: target)
+        guard order != sectionOrder else { return }
+        let pagesIndex = order.firstIndex(of: .pages) ?? 0
+        pagesSectionIndex = pagesIndex
         enqueue {
-            try await self.store?.moveSection(section.id, after: after)
-            try await self.reloadSections()
+            if case .custom(let id) = moving {
+                try await self.store?.moveSection(id, after: SectionSlot.customPredecessor(of: id, in: order))
+                try await self.reloadSections()
+            }
+            try await self.store?.setMeta(Self.pagesIndexKey, String(pagesIndex))
         }
     }
 
@@ -590,6 +614,7 @@ final class ShellModel: ObservableObject {
 
     /// Страницу бросили на заголовок раздела: она становится страницей верхнего уровня этого раздела.
     func dropPage(_ id: UUID, onSection section: UUID?) {
+        guard allowsMove(id, toParent: nil) else { return }
         let isRoot = pages.first { $0.id == id }?.parentID == nil
         act {
             guard let session = self.session else { return }
@@ -651,6 +676,9 @@ final class ShellModel: ObservableObject {
             self.sections = []
             self.sectionOf = [:]
             self.collapsedSections = []
+            self.pagesSectionIndex = 0
+            self.pageLocks = [:]
+            self.unlockedPages = []
             UserDefaults.standard.removeObject(forKey: self.lastWorkspaceKey)
             self.backStack = []
             self.forwardStack = []
@@ -768,6 +796,7 @@ final class ShellModel: ObservableObject {
         guard let page = AtomData.viewPage(of: block), let database = databaseIndex[page], pages.contains(where: { $0.id == page }) else {
             return EmbedSummary(title: L("База недоступна: она удалена или в корзине."), lines: [], total: 0)
         }
+        if isClosed(page) { return EmbedSummary(title: L("База защищена паролем: откройте её, чтобы увидеть записи."), lines: [], total: 0) }
         embedLoading.insert(key)
         let title = pages.first { $0.id == page }?.title ?? ""
         let state = DatabaseViewState(json: AtomData.viewState(of: block))
@@ -791,7 +820,8 @@ final class ShellModel: ObservableObject {
 
     /// Модель полного вида для блока; состояние пишется обратно в блок обычной правкой страницы и попадает в отмену.
     func embeddedModel(for block: Block, editor: PageEditorModel) -> DatabaseModel? {
-        guard let store, let session, let page = AtomData.viewPage(of: block), let database = databaseIndex[page], pages.contains(where: { $0.id == page }) else { return nil }
+        guard let store, let session, let page = AtomData.viewPage(of: block), let database = databaseIndex[page], pages.contains(where: { $0.id == page }),
+              !isClosed(page) else { return nil }
         let coordinator = session.coordinator
         var keep = block.atomJSON
         keep["kind"] = nil
@@ -818,6 +848,7 @@ final class ShellModel: ObservableObject {
 
     /// Сохраняет страницу или запись. Шаблон — независимая копия: её дальнейшие правки не связаны с оригиналом.
     func saveAsTemplate(_ id: UUID) {
+        guard allowsCopy(of: id) else { return }
         let current = pages.first { $0.id == id }?.title ?? ""
         guard let name = PromptAlert.ask(L("Название шаблона"), value: current) else { return }
         enqueue {
@@ -928,6 +959,7 @@ final class ShellModel: ObservableObject {
         guard let session else { return }
         // Страница открывается целиком: Peek закрывается, чтобы два редактора не правили одно и то же.
         if peek != nil { try await closePeekNow() }
+        if isClosed(id) { return try await showLocked(id) }
         if let database = databaseIndex[id] { return try await showDatabase(page: id, database: database) }
         let editorSession = try await session.open(id)
         pages = session.pages
@@ -1049,6 +1081,7 @@ final class ShellModel: ObservableObject {
         var opened: UUID?
         if case .page(let id) = target { opened = id }
         if case .database(let id) = target { opened = id }
+        if case .locked(let id) = target { opened = id } // Замок могли открыть: show решит заново.
         if let opened, pages.contains(where: { $0.id == opened }) {
             try await show(opened)
             return
@@ -1061,7 +1094,14 @@ final class ShellModel: ObservableObject {
     // MARK: Поиск и ссылки
 
     func search(_ query: String) async -> [SearchHit] {
-        (try? await store?.search(query)) ?? []
+        // Текст страниц под закрытым замком не показывается: только заголовок.
+        ((try? await store?.search(query)) ?? []).map { hit in
+            guard isClosed(hit.pageID) else { return hit }
+            var hidden = hit
+            hidden.snippet = L("Защищено паролем")
+            hidden.blockID = nil
+            return hidden
+        }
     }
 
     /// Страницы для ссылки «[[»: по заголовку, без текущей корзины.
@@ -1094,7 +1134,12 @@ final class ShellModel: ObservableObject {
         enqueue {
             guard let session = self.session, let store = self.store else { return }
             try await session.coordinator.flush() // Ссылки считаются по записанному тексту.
-            self.backlinks = try await store.backlinks(to: page)
+            self.backlinks = try await store.backlinks(to: page).map { link in
+                guard self.isClosed(link.pageID) else { return link }
+                var hidden = link
+                hidden.text = L("Защищено паролем")
+                return hidden
+            }
         }
     }
 
@@ -1200,6 +1245,7 @@ final class ShellModel: ObservableObject {
         enqueue {
             guard let session = self.session, let store = self.store else { return }
             if self.editor?.pageID == id { return } // Та же страница уже открыта целиком.
+            if self.isClosed(id) { return try await self.show(id) } // Под паролем — окно ввода, а не Peek.
             try await self.closePeekNow()
             try await session.coordinator.flush()
             let opened = try await EditorSession.open(pageID: id, store: store, coordinator: session.coordinator, clock: SystemClock(), ids: RandomIDs())
@@ -1216,6 +1262,19 @@ final class ShellModel: ObservableObject {
     }
 
     func closePeek() { enqueue { try await self.closePeekNow() } }
+
+    func closePeekForLock() async throws { try await closePeekNow() }
+
+    /// Закрытая паролем страница (ADR-0017): редактор и база закрываются, на экране — окно ввода.
+    func showLocked(_ id: UUID) async throws {
+        try await session?.closeEditor()
+        editor = nil
+        databaseModel = nil
+        backlinks = []
+        comments = []
+        showsComments = false
+        section = .locked(id)
+    }
 
     private func closePeekNow() async throws {
         guard let model = peek else { return }
@@ -1318,6 +1377,7 @@ final class ShellModel: ObservableObject {
     }
 
     func duplicatePage(_ id: UUID) {
+        guard allowsCopy(of: id) else { return }
         enqueue {
             guard let store = self.store, let session = self.session else { return }
             try await session.coordinator.flush()
@@ -1541,7 +1601,7 @@ final class ShellModel: ObservableObject {
     @discardableResult
     func reorder(_ id: UUID, onto target: UUID, zone: PageTree.DropZone) -> Bool {
         if zone == .into, isDatabase(target) { return false }
-        guard let place = pageTree.placement(moving: id, onto: target, zone: zone) else { return false }
+        guard let place = pageTree.placement(moving: id, onto: target, zone: zone), allowsMove(id, toParent: place.parent) else { return false }
         act {
             guard let session = self.session else { return }
             try await session.move(id, toParent: place.parent, afterSibling: place.after)
@@ -1551,7 +1611,7 @@ final class ShellModel: ObservableObject {
     }
 
     func reorder(_ id: UUID, onto target: UUID, upperHalf: Bool) {
-        guard let place = pageTree.placement(moving: id, onto: target, upperHalf: upperHalf) else { return }
+        guard let place = pageTree.placement(moving: id, onto: target, upperHalf: upperHalf), allowsMove(id, toParent: place.parent) else { return }
         act {
             guard let session = self.session else { return }
             try await session.move(id, toParent: place.parent, afterSibling: place.after)
@@ -1560,6 +1620,7 @@ final class ShellModel: ObservableObject {
     }
 
     func move(_ id: UUID, toParent parent: UUID?) {
+        guard allowsMove(id, toParent: parent) else { return }
         act {
             guard let session = self.session else { return }
             try await session.move(id, toParent: parent, afterSibling: nil)
@@ -1887,6 +1948,7 @@ final class ShellModel: ObservableObject {
 
     /// Страница в Markdown; вложения копируются в папку рядом с файлом. Оригинал не меняется.
     func exportMarkdown(_ id: UUID) {
+        guard allowsCopy(of: id) else { return }
         enqueue {
             guard let store = self.store, let session = self.session else { return }
             try await session.coordinator.flush() // В файл попадают все подтверждённые правки.
@@ -1941,6 +2003,7 @@ final class ShellModel: ObservableObject {
 
     /// База в CSV: все записи без фильтра, значения в виде, который принимает импорт.
     func exportDatabaseCSV(page id: UUID) {
+        guard allowsCopy(of: id) else { return }
         enqueue {
             guard let store = self.store, let session = self.session, let databaseID = self.databaseIndex[id],
                   let database = try await store.database(databaseID) else { return }
@@ -1958,6 +2021,18 @@ final class ShellModel: ObservableObject {
 
     /// Всё пространство в новую папку: Markdown, CSV и вложения. Резервную копию не заменяет.
     func exportWorkspace() {
+        // Экспорт выгружает и страницы под паролем: при закрытых замках нужно подтверждение владельца Mac.
+        if pageLocks.keys.contains(where: { !unlockedPages.contains($0) }) {
+            Task { @MainActor in
+                guard await Self.deviceOwner(reason: L("выгрузить пространство вместе со страницами под паролем")) else { return }
+                self.exportWorkspaceNow()
+            }
+            return
+        }
+        exportWorkspaceNow()
+    }
+
+    private func exportWorkspaceNow() {
         enqueue {
             guard let store = self.store, let session = self.session else { return }
             try await session.coordinator.flush()

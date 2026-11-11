@@ -44,7 +44,8 @@ final class AIWorkspace: ObservableObject {
     // MARK: Исключения
 
     func isExcluded(_ page: UUID, shell: ShellModel) -> Bool {
-        AIExclusion.isExcluded(page, excluded: excluded) { id in shell.pages.first { $0.id == id }?.parentID }
+        // Страница под паролем (ADR-0017) никогда не уходит ИИ сама, даже открытая.
+        shell.isProtected(page) || AIExclusion.isExcluded(page, excluded: excluded) { id in shell.pages.first { $0.id == id }?.parentID }
     }
 
     /// Отмечена сама страница (а не её предок): от этого зависит подпись пункта меню.

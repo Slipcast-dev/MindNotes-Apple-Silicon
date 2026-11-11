@@ -90,6 +90,10 @@ Settings → “Updates”: “Automatic” (checks GitHub releases at launch an
 
 Custom themes and app icons are folders with a `manifest.json` in the extensions folder (Settings → “Extensions” → “Open Extensions Folder”). Format and example: [EXTENSIONS.md](EXTENSIONS.md) (ADR-0015).
 
+## Page password
+
+“…” on a page, record, database or folder → “Set Password…”. The lock covers everything inside. Unlock with the password, Touch ID or your Mac password; it locks again after the display sleeps, the app restarts or “Lock Now”. This is an app lock, not encryption (ADR-0017): backups and the workspace file are not protected by the password.
+
 ## Editor
 
 Block menu: `/` at the start of a line or after a space. Shortcuts: `# `, `## `, `### `, `- `, `1. `, `[] `, `> `, `---`. Formatting: ⌘B, ⌘I, ⌘U, ⇧⌘X, ⌘E, ⇧⌘K; the same actions are in the “Format” menu, the context menu and the toolbar that appears over a selection. Tab and Shift+Tab change nesting.
