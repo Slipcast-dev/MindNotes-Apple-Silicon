@@ -92,8 +92,11 @@ final class DatabaseModel: ObservableObject {
     @Published private(set) var calendarTotal = 0
     @Published private(set) var undated: RecordPage = RecordPage(rows: [], total: 0)
     @Published var month = LocalDate(date: Date(), in: .current).firstOfMonth
-    /// Timeline: опорный день окна; не сохраняется, как и месяц календаря.
-    @Published private(set) var timelineAnchor = LocalDate(date: Date(), in: .current)
+    /// Хронология: шкала растёт порциями при прокрутке; для какого вида и масштаба она построена.
+    @Published private(set) var timelineWindow = TimelineWindow(scale: .week, anchor: LocalDate(date: Date(), in: .current))
+    /// День, к которому экран должен прокрутить шкалу; экран сбрасывает его, когда прокрутил.
+    @Published var timelineScrollTarget: LocalDate?
+    private var timelineKey: String?
     @Published private(set) var templates: [PageTemplate] = []
     /// Справочник людей пространства: варианты ячеек «Человек» и группы доски.
     @Published private(set) var people: [Person] = []
@@ -218,24 +221,30 @@ final class DatabaseModel: ObservableObject {
                                                limit: limits["undated"] ?? Self.pageSize, offset: 0)
     }
 
-    var timelineWindow: TimelineWindow { TimelineWindow(scale: state.timelineScale, anchor: timelineAnchor) }
-
-    /// Записи, задевающие окно, по группам вида; на все группы вместе не больше `calendarLimit`, как у календаря.
+    /// Записи, задевающие шкалу, по группам вида; на все группы вместе не больше `calendarLimit`, как у календаря.
     private func loadTimeline(_ fresh: Database, _ current: DatabaseViewState) async throws {
+        // Новая шкала — при открытии вида и смене масштаба: от запомненного дня или от сегодня.
+        let key = "\(activeView?.id.uuidString ?? "")|\(current.timelineScale.rawValue)"
+        if key != timelineKey {
+            timelineKey = key
+            let day = current.timelineDay ?? LocalDate(date: Date(), in: .current)
+            timelineWindow = TimelineWindow(scale: current.timelineScale, anchor: day)
+            timelineScrollTarget = day
+        }
         guard let date = current.calendarProperty(fresh.properties) else {
             sections = []
             calendarTotal = 0
             undated = RecordPage(rows: [], total: 0)
             return
         }
-        let window = TimelineWindow(scale: current.timelineScale, anchor: timelineAnchor)
+        let window = timelineWindow
         let inWindow = current.narrowed(by: [FilterRule(property: date.id, op: .greaterOrEqual, value: window.start.iso),
                                              FilterRule(property: date.id, op: .lessOrEqual, value: window.end.iso)])
         let groups: [RecordGroup?] = current.groupProperty(fresh.properties, kind: DatabaseView.timelineKind).map { RecordGroup.groups(for: $0, people: people) } ?? [nil]
         var loaded: [RecordSection] = [], budget = Self.calendarLimit, total = 0
         for group in groups {
             let state = group.map { inWindow.narrowed(by: [$0.rule]) } ?? inWindow
-            let page = try await store.queryRecords(database: fresh, state: state, limit: budget, offset: 0)
+            let page = try await store.queryRecords(database: fresh, state: state, limit: budget, offset: 0, manualView: manualOrderView)
             budget -= page.rows.count
             total += page.total
             loaded.append(RecordSection(id: group?.id ?? "all", group: group, rows: page.rows, total: page.total))
@@ -246,9 +255,42 @@ final class DatabaseModel: ObservableObject {
                                                limit: limits["undated"] ?? Self.pageSize, offset: 0)
     }
 
-    func showTimeline(around day: LocalDate) {
-        timelineAnchor = day
+    /// Продлить шкалу на порцию; возвращает, на сколько точек сдвинулось её начало (экран поправит прокрутку).
+    /// Шкала у предела не растёт — экран перестраивает её вокруг видимого дня через `showTimeline`.
+    @discardableResult
+    func extendTimeline(before: Bool) -> Double? {
+        guard timelineWindow.canGrow else { return nil }
+        let next = timelineWindow.extended(before: before)
+        timelineWindow = next.window
         reload()
+        return next.shift
+    }
+
+    /// Показать день: внутри шкалы — только прокрутка, вне её — шкала строится заново вокруг дня.
+    func showTimeline(around day: LocalDate, rebuild: Bool = false) {
+        let w = timelineWindow
+        if rebuild || day < w.start || day > w.end {
+            timelineWindow = TimelineWindow(scale: w.scale, anchor: day)
+            reload()
+        }
+        timelineScrollTarget = day
+        rememberTimelineDay(day) // программная прокрутка не меняет фазу прокрутки, поэтому день запоминается здесь
+    }
+
+    /// День у левого края после прокрутки запоминается в виде без перечитывания записей.
+    /// Встроенное представление его не запоминает: иначе каждая прокрутка меняла бы страницу.
+    func rememberTimelineDay(_ day: LocalDate) {
+        guard !isEmbedded, let view = activeView, view.state.timelineDay != day else { return }
+        let previous = chain
+        chain = Task { @MainActor [store, databaseID] in
+            await previous?.value
+            do {
+                var state = (try await store.database(databaseID))?.views.first { $0.id == view.id }?.state ?? view.state
+                state.timelineDay = day
+                try await store.saveViewState(view.id, state)
+                if let fresh = try await store.database(databaseID) { self.database = fresh }
+            } catch { self.report((error as? LocalizedError)?.errorDescription ?? error.localizedDescription) }
+        }
     }
 
     func setTimelineScale(_ scale: TimelineScale) {
@@ -258,16 +300,21 @@ final class DatabaseModel: ObservableObject {
         }
     }
 
-    /// Перенос полосы целиком на `days` дней; запись без даты получает день, на который её бросили.
-    func shiftDate(record id: UUID, byDays days: Int) {
-        changeDate(record: id) { $0.moved(byDays: days) }
+    /// Перенос полосы целиком; шаг — минуты (масштаб «Часы») или дни.
+    func shiftDate(record id: UUID, byMinutes minutes: Int) {
+        changeDate(record: id) { $0.moved(byMinutes: minutes) }
     }
+
+    func shiftDate(record id: UUID, byDays days: Int) { shiftDate(record: id, byMinutes: days * 1440) }
 
     /// Растягивание полосы за левый (`start`) или правый край.
-    func resizeDate(record id: UUID, start: Bool, byDays days: Int) {
-        changeDate(record: id) { start ? $0.resized(startBy: days) : $0.resized(endBy: days) }
+    func resizeDate(record id: UUID, start: Bool, byMinutes minutes: Int) {
+        changeDate(record: id) { start ? $0.resized(startByMinutes: minutes) : $0.resized(endByMinutes: minutes) }
     }
 
+    func resizeDate(record id: UUID, start: Bool, byDays days: Int) { resizeDate(record: id, start: start, byMinutes: days * 1440) }
+
+    /// Запись без даты получает день, на который её бросили.
     func setDay(record id: UUID, _ day: LocalDate) {
         guard let database, let property = state.calendarProperty(database.properties) else { return }
         setValue(pages: [id], property: property.id, value: .date(DateValue(start: .day(day))))
@@ -279,6 +326,50 @@ final class DatabaseModel: ObservableObject {
         let next = change(value)
         guard next != value, next.isValid else { return }
         setValue(pages: [id], property: property.id, value: .date(next))
+    }
+
+    // MARK: Зависимости хронологии
+
+    var dependencyProperty: PropertyDefinition? {
+        database.flatMap { state.dependencyProperty($0.properties, database: databaseID) }
+    }
+
+    /// От каких записей зависит каждая запись шкалы.
+    var dependencyLinks: [UUID: [UUID]] {
+        guard let property = dependencyProperty else { return [:] }
+        var out: [UUID: [UUID]] = [:]
+        for row in rows {
+            if case .relation(let pages)? = row.values[property.id], !pages.isEmpty { out[row.id] = pages.map(\.id) }
+        }
+        return out
+    }
+
+    /// `record` начинает зависеть от `source`: связь дописывается в конец ячейки.
+    func addDependency(record: UUID, on source: UUID) {
+        guard record != source, let property = dependencyProperty, let row = rows.first(where: { $0.id == record }) else { return }
+        var pages: [LinkedPage] = []
+        if case .relation(let list)? = row.values[property.id] { pages = list }
+        guard !pages.contains(where: { $0.id == source }), pages.count < RelationLimits.maxLinks else { return }
+        pages.append(LinkedPage(id: source, title: rows.first { $0.id == source }?.title ?? ""))
+        setValue(pages: [record], property: property.id, value: .relation(pages))
+    }
+
+    func removeDependency(record: UUID, on source: UUID) {
+        guard let property = dependencyProperty, let row = rows.first(where: { $0.id == record }),
+              case .relation(let list)? = row.values[property.id] else { return }
+        let rest = list.filter { $0.id != source }
+        setValue(pages: [record], property: property.id, value: rest.isEmpty ? nil : .relation(rest))
+    }
+
+    /// Пара связей базы с самой собой «Зависит от» / «Блокирует»; хронология сразу рисует по ней стрелки.
+    func createDependencyProperty() {
+        let id = UUID(), pair = UUID()
+        let viewID = activeView?.id
+        perform { [store, databaseID] in
+            try await store.addRelation(database: databaseID, name: L("Зависит от"), target: databaseID, twoWay: true, pairName: L("Блокирует"),
+                                        id: id, pairID: pair, now: SystemClock().nowMillis())
+        }
+        if viewID != nil { updateState { $0.dependencyProperty = id } }
     }
 
     func showMore(_ section: String = "all") {

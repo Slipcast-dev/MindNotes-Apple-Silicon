@@ -420,6 +420,7 @@ struct ViewSettingsPopover: View {
                     ForEach(properties.filter { $0.type == .date }) { Text($0.name).tag(UUID?.some($0.id)) }
                 }
             }
+            if kind == DatabaseView.timelineKind { dependencies }
             if kind != DatabaseView.calendarKind {
                 Picker("Группировка", selection: Binding(get: { model.state.groupProperty(properties, kind: kind)?.id }, set: { id in
                     model.updateState { $0.groupBy = id }
@@ -436,5 +437,21 @@ struct ViewSettingsPopover: View {
         }
         .padding(14)
         .frame(width: 320)
+    }
+
+    /// Хронология: стрелки «зависит от» по связи базы с самой собой.
+    @ViewBuilder private var dependencies: some View {
+        let own = properties.filter { $0.type == .relation && $0.config.target == model.databaseID }
+        Picker("Зависимости", selection: Binding(get: { model.dependencyProperty?.id }, set: { id in
+            model.updateState { $0.dependencyProperty = id }
+        })) {
+            Text("Без стрелок").tag(UUID?.none)
+            ForEach(own) { Text($0.name).tag(UUID?.some($0.id)) }
+        }
+        if own.isEmpty {
+            Button("Создать свойство «Зависит от»") { model.createDependencyProperty() }
+                .buttonStyle(NotesButtonStyle(kind: .plain))
+                .help(L("Добавляет связь базы с самой собой: «Зависит от» и обратную «Блокирует»"))
+        }
     }
 }

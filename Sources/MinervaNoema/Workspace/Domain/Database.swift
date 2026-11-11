@@ -593,6 +593,10 @@ struct DatabaseViewState: Equatable {
     var showCover = true
     /// Масштаб Timeline (M11).
     var timelineScale: TimelineScale = .week
+    /// Хронология: день у левого края при последнем просмотре; nil — открывать на сегодня.
+    var timelineDay: LocalDate?
+    /// Хронология: связь базы с самой собой, по которой рисуются стрелки «зависит от».
+    var dependencyProperty: UUID?
     var extra: [String: JSONValue] = [:]
 
     private struct Known: Codable {
@@ -604,6 +608,8 @@ struct DatabaseViewState: Equatable {
         var showCover: Bool?
         /// Строкой: незнакомый масштаб более новой версии не должен ломать чтение всего состояния.
         var timelineScale: String?
+        var timelineDay: String?
+        var dependencyProperty: UUID?
     }
 
     init() {}
@@ -618,7 +624,9 @@ struct DatabaseViewState: Equatable {
             groupBy = known.groupBy
             dateProperty = known.dateProperty
             showCover = known.showCover ?? true
-            for key in ["filter", "sorts", "columns", "groupBy", "dateProperty", "showCover"] { object[key] = nil }
+            timelineDay = known.timelineDay.flatMap(LocalDate.init(iso:))
+            dependencyProperty = known.dependencyProperty
+            for key in ["filter", "sorts", "columns", "groupBy", "dateProperty", "showCover", "timelineDay", "dependencyProperty"] { object[key] = nil }
             // Незнакомый масштаб остаётся в `extra` и записывается обратно как был.
             if let raw = known.timelineScale, let scale = TimelineScale(rawValue: raw) {
                 timelineScale = scale
@@ -632,7 +640,8 @@ struct DatabaseViewState: Equatable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let known = try encoder.encode(Known(filter: filter, sorts: sorts, columns: columns, groupBy: groupBy, dateProperty: dateProperty, showCover: showCover,
-                                                 timelineScale: timelineScale == .week ? nil : timelineScale.rawValue))
+                                                 timelineScale: timelineScale == .week ? nil : timelineScale.rawValue,
+                                                 timelineDay: timelineDay?.iso, dependencyProperty: dependencyProperty))
         guard case .object(let fields) = try JSONDecoder().decode(JSONValue.self, from: known) else { return "{}" }
         let merged = extra.merging(fields) { _, new in new }
         return String(decoding: try encoder.encode(JSONValue.object(merged)), as: UTF8.self)
@@ -643,6 +652,11 @@ struct DatabaseViewState: Equatable {
         if let groupBy, let found = properties.first(where: { $0.id == groupBy && RecordGroup.isGroupable($0.type) }) { return found }
         guard kind == DatabaseView.boardKind else { return nil }
         return properties.first { $0.type == .status } ?? properties.first { RecordGroup.isGroupable($0.type) }
+    }
+
+    /// Свойство зависимостей, если оно всё ещё связь этой базы с самой собой.
+    func dependencyProperty(_ properties: [PropertyDefinition], database: UUID) -> PropertyDefinition? {
+        properties.first { $0.id == dependencyProperty && $0.type == .relation && $0.config.target == database }
     }
 
     func calendarProperty(_ properties: [PropertyDefinition]) -> PropertyDefinition? {

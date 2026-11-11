@@ -1089,3 +1089,16 @@
 "Шкала времени" = "Time scale";
 "На день раньше" = "One day earlier";
 "На день позже" = "One day later";
+
+/* M11: зависимости и часы */
+"Часы" = "Hours";
+"Зависит от" = "Depends on";
+"Блокирует" = "Blocks";
+"Зависимости" = "Dependencies";
+"Без стрелок" = "No arrows";
+"Убрать зависимость" = "Remove dependency";
+"На час раньше" = "One hour earlier";
+"На час позже" = "One hour later";
+"Создать свойство «Зависит от»" = "Create “Depends on” property";
+"Потяните к другой записи: она будет зависеть от этой" = "Drag to another record to make it depend on this one";
+"Добавляет связь базы с самой собой: «Зависит от» и обратную «Блокирует»" = "Adds a relation of the database to itself: “Depends on” and the reverse “Blocks”";
