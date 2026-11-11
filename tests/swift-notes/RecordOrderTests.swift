@@ -115,3 +115,25 @@ func runColumnWidthTests() async {
         }
     }
 }
+
+/// M10.5: отмена возвращает каждой записи её значение одной транзакцией.
+func runUndoStoreTests() async {
+    await test("Отмена в базе: setValues пишет разные значения разом, неверное значение не пишет ничего") {
+        try await withTempDir { dir in
+            let w = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "T")
+            defer { w.close() }
+            let d = try await w.createDatabase(parent: nil, template: NewDatabase(title: "База", titleProperty: "Название", statusProperty: "Статус",
+                                                                                 statusOptions: ["Новая", "Готово"], dateProperty: "Срок", viewName: "Таблица"), ids: RandomIDs(), now: 1)
+            let a = UUID(), b = UUID(), note = UUID()
+            try await w.addProperty(database: d.id, name: "Заметка", type: .text, id: note, now: 1)
+            try await w.createRecord(database: d.id, title: "А", id: a, now: 2)
+            try await w.createRecord(database: d.id, title: "Б", id: b, now: 2)
+            try await w.setValues(property: note, [(a, .text("первая")), (b, nil)], now: 3)
+            let fresh = try await w.database(d.id)!
+            checkEqual(try await w.recordValues(page: a, database: fresh)[note], .text("первая"))
+            checkEqual(try await w.recordValues(page: b, database: fresh)[note], nil)
+            await checkThrows("неверный тип во второй записи") { try await w.setValues(property: note, [(a, .text("вторая")), (b, .number(1))], now: 4) }
+            checkEqual(try await w.recordValues(page: a, database: fresh)[note], .text("первая"), "транзакция целиком откатилась")
+        }
+    }
+}

@@ -640,11 +640,17 @@ extension SQLiteWorkspace {
 
     /// Значение одного свойства у одной или многих записей; одна транзакция: применится ко всем или ни к одной (FR-10).
     func setValue(pages: [UUID], property: UUID, value: PropertyValue?, now: Int64) async throws {
+        try await setValues(property: property, pages.map { ($0, value) }, now: now)
+    }
+
+    /// Каждой записи своё значение одного свойства, одной транзакцией: так отмена возвращает прежние значения разом (M10.5).
+    func setValues(property: UUID, _ values: [(page: UUID, value: PropertyValue?)], now: Int64) async throws {
         try await writer.run { db in
             try db.transaction {
                 let def = try Self.definition(db, property)
                 guard def.type.isKnown, def.type != .title, !def.type.isComputed else { throw Self.storageError("Это свойство нельзя изменить здесь.") }
-                if let value, !Self.isCompatible(value, with: def) { throw Self.storageError("Значение не подходит типу свойства.") }
+                for value in values.compactMap(\.value) where !Self.isCompatible(value, with: def) { throw Self.storageError("Значение не подходит типу свойства.") }
+                let pages = values.map(\.page)
                 // Связь: прежние и новые записи другой стороны тоже затронуты, их свёртки пересчитываются.
                 var touched = Set(pages)
                 if def.type == .relation {
@@ -654,9 +660,9 @@ extension SQLiteWorkspace {
                             if let id { touched.insert(id) }
                         }
                     }
-                    if case .relation(let links)? = value { touched.formUnion(links.map(\.id)) }
+                    for case .relation(let links)? in values.map(\.value) { touched.formUnion(links.map(\.id)) }
                 }
-                for page in pages {
+                for (page, value) in values {
                     guard try db.scalarInt("SELECT 1 FROM pages WHERE id=? AND database_id=?", [SQLValue(page), SQLValue(def.databaseID)]) != nil else {
                         throw Self.storageError("Запись не входит в эту базу.")
                     }

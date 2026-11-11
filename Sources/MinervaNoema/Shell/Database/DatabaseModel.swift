@@ -250,9 +250,28 @@ final class DatabaseModel: ObservableObject {
            let type = database?.property(group.property)?.type, let row = rows.first(where: { $0.id == id }) {
             change = (group.property, group.value(replacing: row.values[group.property], from: source?.group, type: type))
         }
+        // Прежнее место — перед следующей записью своей группы; прежнее значение группы — из строки.
+        let home = (source ?? sections.first { $0.rows.contains { $0.id == id } })?.rows ?? rows
+        let next = home.firstIndex { $0.id == id }.flatMap { $0 + 1 < home.count ? home[$0 + 1].id : nil }
+        let oldValue = change.flatMap { snapshot([id], $0.property) }
+        registerUndo(L("Перенос записи")) { model in
+            model.undoMove(id, before: next, values: change.map { ($0.property, oldValue ?? []) }) { $0.reorder(record: id, before: before, from: source, to: target) }
+        }
         perform { [store] in
             let now = SystemClock().nowMillis()
             if let change { try await store.setValue(pages: [id], property: change.property, value: change.value, now: now) }
+            try await store.moveRecord(id, before: before, view: view)
+        }
+    }
+
+    /// Отмена переноса: место и значение группы возвращаются одной цепочкой; `redo` повторяет перенос.
+    private func undoMove(_ id: UUID, before: UUID?, values: (property: UUID, list: [(page: UUID, value: PropertyValue?)])?,
+                          redo: @escaping (DatabaseModel) -> Void) {
+        registerUndo(L("Перенос записи"), redo)
+        guard let view = manualOrderView else { return }
+        perform { [store] in
+            let now = SystemClock().nowMillis()
+            if let values, !values.list.isEmpty { try await store.setValues(property: values.property, values.list, now: now) }
             try await store.moveRecord(id, before: before, view: view)
         }
     }
@@ -307,8 +326,44 @@ final class DatabaseModel: ObservableObject {
         }
     }
 
+    // MARK: Отмена (M10.5)
+
+    /// Стек отмены окна: правки значений, массовые изменения и переносы записей отменяются ⌘Z и возвращаются ⇧⌘Z.
+    weak var undoManager: UndoManager?
+
+    /// Прежние значения из загруженных строк. Если какой-то записи нет на экране, шаг не запоминается:
+    /// отмена не должна стереть значение, которого модель не видела.
+    private func snapshot(_ pages: [UUID], _ property: UUID) -> [(page: UUID, value: PropertyValue?)]? {
+        var out: [(page: UUID, value: PropertyValue?)] = []
+        for id in pages {
+            guard let row = rows.first(where: { $0.id == id }) else { return nil }
+            out.append((id, row.values[property]))
+        }
+        return out
+    }
+
+    private func registerUndo(_ name: String, _ action: @escaping (DatabaseModel) -> Void) {
+        guard let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { action($0) }
+        if !undoManager.isUndoing, !undoManager.isRedoing { undoManager.setActionName(name) }
+    }
+
+    /// Шаги этой базы уходят из стека вместе с экраном: другая база не должна отменять чужие правки.
+    func dropUndo() { undoManager?.removeAllActions(withTarget: self) }
+
     func setValue(pages: [UUID], property: UUID, value: PropertyValue?) {
+        if let old = snapshot(pages, property) {
+            registerUndo(pages.count > 1 ? L("Изменение записей") : L("Изменение значения")) { $0.restore(property: property, old) }
+        }
         perform { [store] in try await store.setValue(pages: pages, property: property, value: value, now: SystemClock().nowMillis()) }
+    }
+
+    /// Возврат значений: сам становится шагом, который можно повторить.
+    private func restore(property: UUID, _ values: [(page: UUID, value: PropertyValue?)]) {
+        if let current = snapshot(values.map(\.page), property) {
+            registerUndo(values.count > 1 ? L("Изменение записей") : L("Изменение значения")) { $0.restore(property: property, current) }
+        }
+        perform { [store] in try await store.setValues(property: property, values, now: SystemClock().nowMillis()) }
     }
 
     func createRecord() {

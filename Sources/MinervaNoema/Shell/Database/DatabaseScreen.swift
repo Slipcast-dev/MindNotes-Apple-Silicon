@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Экран базы по макету: надзаголовок, заголовок, кнопки, вкладки представлений, таблица.
 struct DatabaseScreen: View {
+    @Environment(\.undoManager) private var undoManager
     @EnvironmentObject private var shell: ShellModel
     @ObservedObject var model: DatabaseModel
     @State private var title = ""
@@ -46,8 +47,11 @@ struct DatabaseScreen: View {
         }
         .onAppear {
             title = page?.title ?? ""
+            model.undoManager = undoManager
             model.reload()
         }
+        .onChange(of: undoManager) { _, new in model.undoManager = new }
+        .onDisappear { model.dropUndo() }
         .sheet(isPresented: $showsProperties) { PropertiesSheet(model: model) }
         .sheet(item: $bulkProperty) { BulkEditSheet(model: model, property: $0) }
     }
