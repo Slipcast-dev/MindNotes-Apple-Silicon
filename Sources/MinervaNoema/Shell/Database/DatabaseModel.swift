@@ -14,6 +14,7 @@ extension PropertyType {
         case .multiSelect: return L("Множественный выбор")
         case .url: return L("Ссылка")
         case .person: return L("Человек")
+        case .files: return L("Файлы и медиа")
         case .relation: return L("Связь")
         case .rollup: return L("Свёртка")
         case .formula: return L("Формула")
@@ -387,6 +388,7 @@ enum PropertyDisplay {
             return names.isEmpty ? nil : names.joined(separator: ", ")
         case .relation(let links)?: return links.isEmpty ? nil : links.map { $0.title.isEmpty ? L("Без названия") : $0.title }.joined(separator: ", ")
         case .people(let people)?: return people.isEmpty ? nil : people.map(\.label).joined(separator: ", ")
+        case .files(let files)?: return files.isEmpty ? nil : files.map(\.name).joined(separator: ", ")
         case .time(let ms)?: return time(ms)
         case .error?: return L("Ошибка формулы")
         case nil: return nil

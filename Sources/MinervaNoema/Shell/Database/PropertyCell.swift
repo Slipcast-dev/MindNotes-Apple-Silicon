@@ -103,6 +103,7 @@ struct PropertyCell: View {
         case .status, .select: singleMenu
         case .multiSelect: multiMenu
         case .person: personMenu
+        case .files: filesMenu
         case .date: DateCell(value: dateValue, onChange: onChange)
         case .relation: RelationCell(property: property, value: value, onChange: onChange)
         case .formula:
@@ -206,6 +207,55 @@ struct PropertyCell: View {
                 if shell.people.isEmpty { Text("Справочник пуст: добавьте людей в «Настройках»") }
                 Divider()
                 Button("Справочник людей…") { shell.goSettings() }
+            } label: { Color.clear }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .opacity(0.02)
+                .accessibilityLabel(Text(property.name))
+        }
+    }
+
+    private var files: [AttachedFile] {
+        if case .files(let list)? = value { return list }
+        return []
+    }
+
+    /// Имена файлов; меню открывает, показывает в Finder, убирает и добавляет. Убранный файл остаётся в хранилище.
+    private var filesMenu: some View {
+        HStack(spacing: 4) {
+            if files.isEmpty { Text("Пусто").font(.system(size: 13)).foregroundColor(Tokens.muted) }
+            ForEach(files) { file in
+                Label(file.name, systemImage: file.isImage ? "photo" : "doc")
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Tokens.soft))
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+        .contentShape(Rectangle())
+        .overlay {
+            Menu {
+                ForEach(files) { file in
+                    Menu(file.name) {
+                        Button("Открыть") { shell.openRecordFile(file) }
+                        Button("Показать в Finder") { shell.revealRecordFile(file) }
+                        Divider()
+                        Button("Убрать") {
+                            let rest = files.filter { $0.id != file.id }
+                            onChange(rest.isEmpty ? nil : .files(rest))
+                        }
+                    }
+                }
+                if !files.isEmpty { Divider() }
+                Button("Добавить файл…") {
+                    let current = files
+                    shell.pickRecordFiles { added in
+                        let merged = current + added.filter { new in !current.contains { $0.id == new.id } }
+                        onChange(merged.isEmpty ? nil : .files(Array(merged.prefix(FileLimits.maxPerValue))))
+                    }
+                }
             } label: { Color.clear }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)

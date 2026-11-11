@@ -25,9 +25,11 @@ struct PropertyType: RawRepresentable, Hashable, Codable {
     static let formula = PropertyType(rawValue: "formula")
     /// Человек: один или несколько людей из справочника пространства.
     static let person = PropertyType(rawValue: "person")
+    /// Файлы и медиа: список вложений пространства в порядке ячейки.
+    static let files = PropertyType(rawValue: "files")
 
     /// Типы, которые можно выбрать; заголовок у базы один и создаётся вместе с ней.
-    static let creatable: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url, .person, .relation, .rollup, .formula, .createdTime, .editedTime]
+    static let creatable: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url, .person, .files, .relation, .rollup, .formula, .createdTime, .editedTime]
     /// Типы с собственными значениями, между которыми возможна смена типа с предпросмотром.
     static let convertible: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url]
     var isKnown: Bool { self == .title || Self.creatable.contains(self) }
@@ -131,6 +133,21 @@ struct Person: Hashable, Identifiable {
 
     /// Подпись в ячейке и экспорте: эмодзи перед именем, если есть.
     var label: String { (emoji.map { $0 + " " } ?? "") + name }
+}
+
+/// Файл свойства «Файлы и медиа»: вложение из общего хранилища и его исходное имя.
+struct AttachedFile: Hashable, Identifiable {
+    /// ID вложения (`assets.id`).
+    var id: UUID
+    var name: String
+
+    static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "heic", "heif", "webp", "tiff", "tif", "bmp"]
+    var isImage: Bool { Self.imageExtensions.contains((name as NSString).pathExtension.lowercased()) }
+}
+
+enum FileLimits {
+    /// Предел файлов в одной ячейке.
+    static let maxPerValue = 100
 }
 
 enum PeopleLimits {
@@ -331,6 +348,8 @@ enum PropertyValue: Hashable {
     case error(String)
     /// Люди в порядке ячейки; имя и цвет — из справочника на момент чтения.
     case people([Person])
+    /// Файлы в порядке ячейки.
+    case files([AttachedFile])
 }
 
 /// Разбор пользовательского ввода и текста при смене типа.
@@ -412,6 +431,7 @@ enum PropertyConversion {
         case .date(let d): return d.end.map { "\(d.start.localText) — \($0.localText)" } ?? d.start.localText
         case .relation(let pages): return pages.map(\.title).joined(separator: ", ")
         case .people(let people): return people.map(\.name).joined(separator: ", ")
+        case .files(let files): return files.map(\.name).joined(separator: ", ")
         case .time(let ms): return DatePoint.moment(ms: ms, zone: TimeZone.current.identifier).localText
         case .error: return ""
         }
@@ -492,6 +512,7 @@ struct FilterOp: RawRepresentable, Hashable, Codable {
         case .multiSelect: return [.contains, .notContains, .isEmpty, .isNotEmpty]
         case .relation: return [.contains, .notContains, .isEmpty, .isNotEmpty]
         case .person: return [.contains, .notContains, .isEmpty, .isNotEmpty]
+        case .files: return [.isEmpty, .isNotEmpty]
         case .createdTime, .editedTime: return [.equals, .less, .lessOrEqual, .greater, .greaterOrEqual]
         default: return []
         }

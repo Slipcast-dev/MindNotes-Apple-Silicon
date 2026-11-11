@@ -1053,3 +1053,8 @@
 "Укажите имя." = "Enter a name.";
 "Слишком длинное имя." = "The name is too long.";
 "Человека нет в справочнике." = "This person is not in the directory.";
+
+/* M10.2: файлы и медиа */
+"Файлы и медиа" = "Files & media";
+"Добавить файл…" = "Add File…";
+"Файл недоступен." = "The file is unavailable.";

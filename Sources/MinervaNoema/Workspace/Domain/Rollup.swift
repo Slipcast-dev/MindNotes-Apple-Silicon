@@ -68,6 +68,7 @@ enum RollupMath {
         case .options(let ids)?: return ids.isEmpty
         case .relation(let links)?: return links.isEmpty
         case .people(let people)?: return people.isEmpty
+        case .files(let files)?: return files.isEmpty
         default: return false
         }
     }

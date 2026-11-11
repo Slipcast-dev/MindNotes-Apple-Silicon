@@ -69,6 +69,15 @@ struct RecordCard: View {
     var cover = false
     var compact = false
 
+    /// Обложка карточки: своя обложка записи, иначе первая картинка из «Файлов и медиа».
+    private var preview: UUID? {
+        if let cover = row.cover { return cover }
+        for property in model.database?.properties ?? [] where property.type == .files {
+            if case .files(let list)? = row.values[property.id], let image = list.first(where: \.isImage) { return image.id }
+        }
+        return nil
+    }
+
     private var lines: [String] {
         model.visibleColumns.filter { $0.type != .title }.compactMap { PropertyDisplay.text(row.values[$0.id], property: $0) }
     }
@@ -78,14 +87,14 @@ struct RecordCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 if cover {
                     Group {
-                        if let image = shell.image(for: row.cover) {
+                        if let image = shell.image(for: preview) {
                             Color.clear.overlay(Image(nsImage: image).resizable().scaledToFill()).clipped()
                         } else {
                             Tokens.soft
                         }
                     }
                     .frame(height: 110)
-                    .onAppear { if let asset = row.cover { shell.loadImage(asset: asset) } }
+                    .onAppear { if let asset = preview { shell.loadImage(asset: asset) } }
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {

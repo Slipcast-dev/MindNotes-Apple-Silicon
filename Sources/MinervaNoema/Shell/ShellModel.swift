@@ -958,6 +958,41 @@ final class ShellModel: ObservableObject {
         }
     }
 
+    // MARK: Файлы и медиа
+
+    /// Выбор файлов для свойства «Файлы и медиа»: каждый копируется в хранилище вложений пространства.
+    func pickRecordFiles(_ done: @escaping ([AttachedFile]) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = L("Добавить")
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        let urls = panel.urls
+        enqueue {
+            guard let store = self.store else { return }
+            var added: [AttachedFile] = []
+            for url in urls {
+                let size = (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                guard size <= 4 << 30 else { throw CocoaError(.fileReadTooLarge) }
+                let record = try await store.addAsset(copying: url, now: SystemClock().nowMillis())
+                added.append(AttachedFile(id: record.id, name: record.originalName))
+            }
+            done(added)
+        }
+    }
+
+    /// Файл открывается программой по умолчанию; оригинал в хранилище не меняется, если программа его не перезапишет.
+    func openRecordFile(_ file: AttachedFile) {
+        guard let url = assetFileURL(file.id) else { errorMessage = L("Файл недоступен."); return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func revealRecordFile(_ file: AttachedFile) {
+        guard let url = assetFileURL(file.id) else { errorMessage = L("Файл недоступен."); return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
     // MARK: Люди
 
     private func reloadPeople() async throws {
@@ -1412,14 +1447,25 @@ final class ShellModel: ObservableObject {
             let blocks = BlockDocument(pageID: id, blocks: try await store.blocks(ofPage: id)).blocks
             // Запись базы выгружается с карточкой свойств: связи — ссылками [[Заголовок]].
             var card: [String] = []
+            var propertyFiles: [(id: UUID, path: String)] = []
+            var fileNames: Set<String> = []
             if let databaseID = self.pageTree.page(id)?.databaseID, let database = try await store.database(databaseID) {
-                card = MarkdownExport.propertyCard(database, values: try await store.recordValues(page: id, database: database), untitled: L("Без названия"))
+                // Файлы «Файлов и медиа» выгружаются в подпапку вложений, карточка ссылается на них.
+                card = MarkdownExport.propertyCard(database, values: try await store.recordValues(page: id, database: database), untitled: L("Без названия")) { file in
+                    let path = folder + "/properties/" + WorkspaceExport.unique(MarkdownExport.safeFileName(file.name), in: &fileNames)
+                    propertyFiles.append((file.id, path))
+                    return path
+                }
             }
             let result = MarkdownExport.export(title: title, card: card, blocks: blocks, assetFolder: folder) { self.pageTree.page($0)?.title }
             var missing = 0
-            if !result.assets.isEmpty {
+            let allAssets = result.assets + propertyFiles
+            if !allAssets.isEmpty {
                 try fm.createDirectory(at: url.deletingLastPathComponent().appendingPathComponent(folder), withIntermediateDirectories: false)
-                for asset in result.assets {
+                if !propertyFiles.isEmpty {
+                    try fm.createDirectory(at: url.deletingLastPathComponent().appendingPathComponent(folder + "/properties"), withIntermediateDirectories: false)
+                }
+                for asset in allAssets {
                     let target = url.deletingLastPathComponent().appendingPathComponent(asset.path)
                     guard let source = try await store.assetURL(asset.id), fm.fileExists(atPath: source.path) else { missing += 1; continue }
                     try fm.copyItem(at: source, to: target)

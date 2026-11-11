@@ -50,15 +50,27 @@ enum WorkspaceExport {
         var summary = Summary()
         var done = 0
 
-        func writeMarkdown(_ page: Page, name: String, in dir: URL, used: inout Set<String>, card: [String] = []) async throws -> Bool {
+        /// `record` — база и значения записи: карточка свойств, файлы «Файлов и медиа» копируются в папку вложений.
+        func writeMarkdown(_ page: Page, name: String, in dir: URL, used: inout Set<String>,
+                           record: (database: Database, values: [UUID: PropertyValue])? = nil) async throws -> Bool {
             let blocks = BlockDocument(pageID: page.id, blocks: try await source.blocks(ofPage: page.id)).blocks
             let hasContent = blocks.contains { !$0.plainText.isEmpty || $0.type.isAtom }
             guard hasContent || !page.isFolder else { return false }
             let folder = unique(name + "_files", in: &used)
+            var fileNames: Set<String> = []
+            var propertyFiles: [(id: UUID, path: String)] = []
+            var card: [String] = []
+            if let record {
+                card = MarkdownExport.propertyCard(record.database, values: record.values, untitled: untitled) { file in
+                    let path = folder + "/properties/" + unique(MarkdownExport.safeFileName(file.name), in: &fileNames)
+                    propertyFiles.append((file.id, path))
+                    return path
+                }
+            }
             let result = MarkdownExport.export(title: page.title.isEmpty ? untitled : page.title, card: card, blocks: blocks, assetFolder: folder) { tree.page($0)?.title }
-            for asset in result.assets {
+            for asset in result.assets + propertyFiles {
                 guard let from = try await source.assetURL(asset.id), fm.fileExists(atPath: from.path) else { summary.missingAssets += 1; continue }
-                try fm.createDirectory(at: dir.appendingPathComponent(folder), withIntermediateDirectories: true)
+                try fm.createDirectory(at: dir.appendingPathComponent(asset.path).deletingLastPathComponent(), withIntermediateDirectories: true)
                 try fm.copyItem(at: from, to: dir.appendingPathComponent(asset.path))
                 summary.assets += 1
             }
@@ -84,11 +96,12 @@ enum WorkspaceExport {
                     done += 1
                     summary.records += 1
                     let blocks = try await source.blocks(ofPage: record.id)
-                    guard blocks.contains(where: { !$0.plainText.isEmpty || $0.type.isAtom }) else { continue }
+                    // Запись без текста выгружается, только если у неё есть файлы: остальное уже в CSV.
+                    let hasFiles = (values[record.id] ?? [:]).values.contains { if case .files(let f) = $0 { return !f.isEmpty }; return false }
+                    guard hasFiles || blocks.contains(where: { !$0.plainText.isEmpty || $0.type.isAtom }) else { continue }
                     try fm.createDirectory(at: childDir, withIntermediateDirectories: true)
                     let recordName = unique(fileName(record.title, untitled: untitled), in: &childUsed)
-                    let card = MarkdownExport.propertyCard(database, values: values[record.id] ?? [:], untitled: untitled)
-                    _ = try await writeMarkdown(record, name: recordName, in: childDir, used: &childUsed, card: card)
+                    _ = try await writeMarkdown(record, name: recordName, in: childDir, used: &childUsed, record: (database, values[record.id] ?? [:]))
                 }
                 return
             }

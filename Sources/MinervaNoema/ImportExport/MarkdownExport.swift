@@ -81,12 +81,15 @@ enum MarkdownExport {
 
     /// Карточка записи: `Имя: значение` на каждое непустое свойство, связи — ссылками `[[Заголовок]]`, как в тексте.
     /// Так же записывает свойства Notion; при импорте такие строки снимаются, если свойство есть в базе.
-    static func propertyCard(_ database: Database, values: [UUID: PropertyValue], untitled: String) -> [String] {
+    /// `fileLink` даёт путь к выгруженному файлу «Файлов и медиа»; nil — только имя.
+    static func propertyCard(_ database: Database, values: [UUID: PropertyValue], untitled: String, fileLink: (AttachedFile) -> String? = { _ in nil }) -> [String] {
         database.properties.compactMap { property in
             guard property.type != .title, let value = values[property.id] else { return nil }
             let text: String
             if case .relation(let pages) = value {
                 text = pages.map { "[[" + ($0.title.isEmpty ? untitled : $0.title) + "]]" }.joined(separator: ", ")
+            } else if case .files(let files) = value {
+                text = files.map { file in fileLink(file).map { "[" + escape(file.name) + "](<" + $0 + ">)" } ?? escape(file.name) }.joined(separator: ", ")
             } else {
                 text = escape(PropertyConversion.text(of: value, options: property.options)).replacingOccurrences(of: "\n", with: " ")
             }

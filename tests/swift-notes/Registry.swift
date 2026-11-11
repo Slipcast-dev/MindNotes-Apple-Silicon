@@ -34,6 +34,7 @@ func runAllNotesTests() async {
     await runFolderImportTests()
     await runRelationTransferTests()
     await runPeopleTests()
+    await runFilesPropertyTests()
     await runLocalizationTests()
     await runVideoTests()
     await runAcceptanceTests()

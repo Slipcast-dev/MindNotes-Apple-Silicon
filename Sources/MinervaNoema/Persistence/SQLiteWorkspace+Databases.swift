@@ -59,6 +59,14 @@ enum DatabaseQuerySQL {
             default: return nil
             }
         }
+        if def.type == .files {
+            let any = "EXISTS (SELECT 1 FROM property_value_assets pa WHERE pa.page_id = p.id AND pa.property_id = ?)"
+            switch rule.op {
+            case .isEmpty: return Fragment(sql: "NOT \(any)", args: [prop])
+            case .isNotEmpty: return Fragment(sql: any, args: [prop])
+            default: return nil
+            }
+        }
         if def.type == .person {
             let any = "EXISTS (SELECT 1 FROM property_value_people pp WHERE pp.page_id = p.id AND pp.property_id = ?"
             switch rule.op {
@@ -172,6 +180,11 @@ enum DatabaseQuerySQL {
                 expression = "(SELECT NULLIF(count(*), 0) FROM (\(linked(def))))"
                 order.args.append(SQLValue(def.linkOwner))
                 order.args.append(SQLValue(def.linkOwner))
+            case .files:
+                // По числу файлов; без файлов — в конце.
+                expression = "(SELECT NULLIF(count(*), 0) FROM property_value_assets pa WHERE pa.page_id = p.id AND pa.property_id = ?)"
+                order.args.append(SQLValue(def.id))
+                order.args.append(SQLValue(def.id))
             case .person:
                 // По имени первого по алфавиту человека, как у Notion; без людей — в конце.
                 expression = "(SELECT MIN(minerva_norm(pe.name)) FROM property_value_people pv JOIN people pe ON pe.id = pv.person_id WHERE pv.page_id = p.id AND pv.property_id = ?)"
@@ -324,6 +337,16 @@ extension SQLiteWorkspace {
                 guard let page = r.uuid(0), let prop = r.uuid(1), types[prop] == .person, let id = r.uuid(2) else { return }
                 let person = Person(id: id, name: r.text(3), color: r.optText(4), emoji: r.optText(5), sortKey: r.text(6))
                 if case .people(let list)? = out[page]?[prop] { out[page]?[prop] = .people(list + [person]) } else { out[page, default: [:]][prop] = .people([person]) }
+            }
+        }
+        if properties.contains(where: { $0.type == .files }) {
+            _ = try db.query("""
+            SELECT v.page_id, v.property_id, a.id, a.original_name FROM property_value_assets v JOIN assets a ON a.id = v.asset_id
+            WHERE v.page_id IN (\(marks)) ORDER BY v.sort_key, a.id
+            """, args) { r in
+                guard let page = r.uuid(0), let prop = r.uuid(1), types[prop] == .files, let id = r.uuid(2) else { return }
+                let file = AttachedFile(id: id, name: r.text(3))
+                if case .files(let list)? = out[page]?[prop] { out[page]?[prop] = .files(list + [file]) } else { out[page, default: [:]][prop] = .files([file]) }
             }
         }
         for def in properties where def.type == .relation {
@@ -508,7 +531,9 @@ extension SQLiteWorkspace {
             return links.count <= RelationLimits.maxLinks && Set(links.map(\.id)).count == links.count
         case (.people(let people), .person):
             return people.count <= PeopleLimits.maxPerValue && Set(people.map(\.id)).count == people.count
-        case (.unconverted, _): return def.type != .relation && def.type != .person
+        case (.files(let files), .files):
+            return files.count <= FileLimits.maxPerValue && Set(files.map(\.id)).count == files.count
+        case (.unconverted, _): return def.type != .relation && def.type != .person && def.type != .files
         default: return false
         }
     }
@@ -555,6 +580,15 @@ extension SQLiteWorkspace {
         }
         guard !def.type.isComputed else { return }
         let keys: [SQLValue] = [SQLValue(page), SQLValue(def.id)]
+        if def.type == .files {
+            try db.run("DELETE FROM property_value_assets WHERE page_id=? AND property_id=?", keys)
+            guard case .files(let files)? = value else { return }
+            for (file, key) in zip(files, SortKey.keys(after: nil, before: nil, count: files.count)) {
+                guard try db.scalarInt("SELECT 1 FROM assets WHERE id=?", [SQLValue(file.id)]) != nil else { throw storageError("Файл недоступен.") }
+                try db.run("INSERT INTO property_value_assets(page_id, property_id, asset_id, sort_key) VALUES(?,?,?,?)", keys + [SQLValue(file.id), .text(key)])
+            }
+            return
+        }
         if def.type == .person {
             try db.run("DELETE FROM property_value_people WHERE page_id=? AND property_id=?", keys)
             guard case .people(let people)? = value else { return }
@@ -585,7 +619,7 @@ extension SQLiteWorkspace {
                 try db.run("INSERT OR IGNORE INTO property_value_options(page_id, property_id, option_id) VALUES(?,?,?)", keys + [SQLValue(id)])
             }
             return
-        case .relation, .time, .error, .people: return
+        case .relation, .time, .error, .people, .files: return
         }
         try db.run("""
         INSERT INTO property_values(page_id, property_id, value_text, value_num, value_date, value_date_end, value_ts, value_ts_end, value_tz, unconverted, updated_at)
@@ -750,6 +784,9 @@ extension SQLiteWorkspace {
                 SELECT count(DISTINCT l.from_page) FROM relation_links l JOIN pages p ON p.id = l.from_page JOIN pages q ON q.id = l.to_page
                 WHERE l.property_id=? AND p.deleted_at IS NULL AND q.deleted_at IS NULL
                 """, [SQLValue(property)]) ?? 0)
+            }
+            if def.type == .files {
+                return Int(try db.scalarInt("SELECT count(DISTINCT v.page_id) FROM property_value_assets v JOIN pages p ON p.id = v.page_id WHERE v.property_id=? AND p.deleted_at IS NULL", [SQLValue(property)]) ?? 0)
             }
             if def.type == .person {
                 return Int(try db.scalarInt("SELECT count(DISTINCT v.page_id) FROM property_value_people v JOIN pages p ON p.id = v.page_id WHERE v.property_id=? AND p.deleted_at IS NULL", [SQLValue(property)]) ?? 0)
@@ -1149,6 +1186,13 @@ extension SQLiteWorkspace {
                 """, [SQLValue(new)] + row + [.int(now)])
             }
             // Люди — из общего справочника: копия ссылается на тех же людей.
+            // Файлы неизменяемы: копия ссылается на те же вложения.
+            let files = try db.query("SELECT property_id, asset_id, sort_key FROM property_value_assets WHERE page_id=?", [SQLValue(old)]) { ($0.uuid(0), $0.uuid(1), $0.text(2)) }
+            for (property, asset, key) in files {
+                guard let property, let asset else { continue }
+                try db.run("INSERT INTO property_value_assets(page_id, property_id, asset_id, sort_key) VALUES(?,?,?,?)",
+                           [SQLValue(new), SQLValue(propertyMap[property] ?? property), SQLValue(asset), .text(key)])
+            }
             let people = try db.query("SELECT property_id, person_id, sort_key FROM property_value_people WHERE page_id=?", [SQLValue(old)]) { ($0.uuid(0), $0.uuid(1), $0.text(2)) }
             for (property, person, key) in people {
                 guard let property, let person else { continue }
