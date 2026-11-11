@@ -11,6 +11,8 @@ struct BlockTextStyle {
     /// Плашка неделимого блока, которую строит контроллер: изображение, файл, таблица.
     var atomCell: ((Block) -> NSTextAttachmentCell?)?
 
+    /// Размеры как в Notion (тема «Чёрно-белая», M14): текст 16, заголовки 30/24/20, плотнее между блоками.
+    var notionMetrics = false
     /// Метки открытых веток комментариев: такой текст подсвечен; решённые и удалённые — нет.
     var activeComments: Set<String> = []
     /// Атрибут текста упоминания: набор рядом с ним не перенимает его оформление.
@@ -40,6 +42,15 @@ struct BlockTextStyle {
     }
 
     func font(for type: BlockType) -> NSFont {
+        if notionMetrics {
+            switch type {
+            case .heading1: return .systemFont(ofSize: 30, weight: .semibold)
+            case .heading2: return .systemFont(ofSize: 24, weight: .semibold)
+            case .heading3: return .systemFont(ofSize: 20, weight: .semibold)
+            case .code: return .monospacedSystemFont(ofSize: 13.6, weight: .regular)
+            default: return .systemFont(ofSize: 16)
+            }
+        }
         switch type {
         case .heading1: return .systemFont(ofSize: 26, weight: .bold)
         case .heading2: return .systemFont(ofSize: 21, weight: .semibold)
@@ -82,7 +93,7 @@ struct BlockTextStyle {
             style.paragraphSpacing = 21
         default:
             style.lineSpacing = 5 // Интерлиньяж макета: 1,6.
-            style.paragraphSpacing = 9
+            style.paragraphSpacing = notionMetrics ? 4 : 9 // В Notion блоки стоят плотнее.
         }
         return style
     }

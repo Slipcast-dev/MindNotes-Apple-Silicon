@@ -92,7 +92,15 @@ enum Tokens {
 
     static let sidebarWidth: CGFloat = 240
     static let crumbHeight: CGFloat = 54
-    static let editorWidth: CGFloat = 735
+    /// Колонка текста: в «Чёрно-белой» теме — 708, как у страницы Notion обычной ширины.
+    static var editorWidth: CGFloat { theme == .notion ? 708 : 735 }
+
+    /// Оформление редактора под текущую тему.
+    static func editorStyle() -> BlockTextStyle {
+        var style = BlockTextStyle(ink: inkNS, muted: mutedNS, accent: accentNS, line: lineNS, soft: softNS)
+        style.notionMetrics = theme == .notion
+        return style
+    }
     static let contentPadding: CGFloat = 44
 
     static func titleFont(_ size: CGFloat = 44) -> Font {

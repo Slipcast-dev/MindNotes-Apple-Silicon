@@ -938,7 +938,7 @@ final class ShellModel: ObservableObject {
     }
 
     private func installEditor(_ editorSession: EditorSession, id: UUID) {
-        let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS, soft: Tokens.softNS)
+        let style = Tokens.editorStyle()
         editor = PageEditorModel(session: editorSession, style: style) { [weak self] in self?.errorMessage = $0 }
         embedCache = [:]
         if let editor { configure(editor, page: id) }
@@ -1146,7 +1146,7 @@ final class ShellModel: ObservableObject {
             try await session.coordinator.flush()
             let opened = try await EditorSession.open(pageID: id, store: store, coordinator: session.coordinator, clock: SystemClock(), ids: RandomIDs())
             if opened.document.blocks.isEmpty { try opened.perform(.insertBlock(after: nil, type: .paragraph), recordUndo: false, quiet: true) }
-            let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS, soft: Tokens.softNS)
+            let style = Tokens.editorStyle()
             let model = PageEditorModel(session: opened, style: style) { [weak self] in self?.errorMessage = $0 }
             self.configure(model, page: id)
             model.controller.renderAll()

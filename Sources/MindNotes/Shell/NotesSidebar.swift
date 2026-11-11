@@ -23,12 +23,12 @@ struct SidebarRow: View {
                         .foregroundColor(tint ?? (active ? Tokens.accent : Tokens.muted))
                 }
                 Text(title)
-                    .font(.system(size: 13, weight: active ? .semibold : .regular))
+                    .font(.system(size: Tokens.theme == .notion ? 14 : 13, weight: active ? (Tokens.theme == .notion ? .medium : .semibold) : .regular))
                     .foregroundColor(active ? Tokens.accent : Tokens.ink)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, Tokens.theme == .notion ? 5 : 8) // В Notion строка панели — около 28 точек.
             .padding(.leading, 10 + indent)
             .padding(.trailing, 10)
             .background(RoundedRectangle(cornerRadius: 8).fill(active || hover ? Tokens.soft : .clear))
@@ -59,9 +59,10 @@ struct SidebarGroup: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text(collapsed ? "Развернуть раздел" : "Свернуть раздел"))
             }
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(1.3)
+            // В Notion заголовок раздела — мелкий, обычными буквами, без разрядки.
+            Text(Tokens.theme == .notion ? title : title.uppercased())
+                .font(.system(size: Tokens.theme == .notion ? 12 : 10, weight: Tokens.theme == .notion ? .medium : .semibold))
+                .tracking(Tokens.theme == .notion ? 0 : 1.3)
         }
         .foregroundColor(highlighted ? Tokens.accent : Tokens.muted)
         .padding(.top, 20)
