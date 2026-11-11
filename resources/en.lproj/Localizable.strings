@@ -1259,3 +1259,8 @@
 "не поддерживается этой версией приложения" = "not supported by this app version";
 "нет theme.json" = "theme.json is missing";
 "нет icon.png или он больше 5 МБ" = "icon.png is missing or larger than 5 MB";
+
+/* Чтение картинок */
+"Нет доступа к файлу. Разрешите MindNotes доступ к этой папке: «Системные настройки» → «Конфиденциальность и безопасность» → «Файлы и папки» — или перенесите картинку, например, в «Загрузки»." = "No access to the file. Allow MindNotes to access this folder in System Settings → Privacy & Security → Files and Folders, or move the image, for example, to Downloads.";
+"Файл лежит в iCloud и ещё не скачан на этот Mac. Откройте его в Finder (значок облака), дождитесь загрузки и выберите снова." = "The file is in iCloud and not downloaded to this Mac yet. Open it in Finder (cloud icon), wait for the download and choose it again.";
+"Формат картинки не распознан. Подойдут JPEG, PNG, HEIC, GIF, WebP, TIFF, BMP." = "The image format is not recognised. Use JPEG, PNG, HEIC, GIF, WebP, TIFF or BMP.";

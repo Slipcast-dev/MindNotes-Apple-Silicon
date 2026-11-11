@@ -207,13 +207,44 @@ final class ShellModel: ObservableObject {
 
     /// Уменьшенная копия вне главного потока: полноразмерная картинка не нужна логотипу и обложке.
     private static func loadImage(_ url: URL) async -> NSImage? {
-        await Task.detached(priority: .userInitiated) { () -> NSImage? in
-            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-            let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                                            kCGImageSourceCreateThumbnailWithTransform: true,
-                                            kCGImageSourceThumbnailMaxPixelSize: 2400]
-            guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-            return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+        if case .success(let image) = await readImage(url) { return image }
+        return nil
+    }
+
+    /// Чтение выбранной картинки с причиной отказа. Файл из iCloud сначала докачивается (координатор файлов,
+    /// как в Finder); если сжатая копия не строится, картинка открывается напрямую.
+    enum ImageReadError: Error { case noAccess, notDownloaded, unsupported }
+
+    static func readImage(_ url: URL) async -> Result<NSImage, ImageReadError> {
+        await Task.detached(priority: .userInitiated) { () -> Result<NSImage, ImageReadError> in
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            var data: Data?
+            var failure: Error?
+            var coordinationError: NSError?
+            // Для файла iCloud координатор ждёт, пока файл скачается на этот Mac.
+            NSFileCoordinator(filePresenter: nil).coordinate(readingItemAt: url, options: [], error: &coordinationError) { readable in
+                do { data = try Data(contentsOf: readable, options: .mappedIfSafe) } catch { failure = error }
+            }
+            if data == nil { do { data = try Data(contentsOf: url) } catch { failure = failure ?? error } }
+            guard let data else {
+                let code = ((failure ?? coordinationError) as NSError?)?.code
+                if code == NSFileReadNoPermissionError || code == Int(EPERM) || code == Int(EACCES) { return .failure(.noAccess) }
+                let values = try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
+                if let status = values?.ubiquitousItemDownloadingStatus, status != .current { return .failure(.notDownloaded) }
+                return .failure(.noAccess)
+            }
+            if let source = CGImageSourceCreateWithData(data as CFData, nil) {
+                let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                                kCGImageSourceCreateThumbnailWithTransform: true,
+                                                kCGImageSourceThumbnailMaxPixelSize: 2400]
+                if let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                    return .success(NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height)))
+                }
+            }
+            // Запасной путь: то, что умеет открыть сама система (в том числе векторные PDF и SVG).
+            if let image = NSImage(data: data), image.isValid { return .success(image) }
+            return .failure(.unsupported)
         }.value
     }
 
@@ -250,7 +281,7 @@ final class ShellModel: ObservableObject {
     /// Копирует изображение в пространство: архив и восстановление его сохранят. nil — выбор отменён или не удался.
     func pickImage(_ done: @escaping (UUID?) -> Void) {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
+        panel.allowedContentTypes = [.image, .pdf]
         panel.prompt = L("Выбрать")
         guard panel.runModal() == .OK, let url = panel.url, let owner = store else { return done(nil) }
                 let size = (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
@@ -259,8 +290,17 @@ final class ShellModel: ObservableObject {
             return done(nil)
         }
         Task { @MainActor in
-            guard let image = await Self.loadImage(url) else {
-                self.errorMessage = L("Не удалось прочитать изображение.")
+            let image: NSImage
+            switch await Self.readImage(url) {
+            case .success(let read): image = read
+            case .failure(.noAccess):
+                self.errorMessage = L("Нет доступа к файлу. Разрешите MindNotes доступ к этой папке: «Системные настройки» → «Конфиденциальность и безопасность» → «Файлы и папки» — или перенесите картинку, например, в «Загрузки».")
+                return done(nil)
+            case .failure(.notDownloaded):
+                self.errorMessage = L("Файл лежит в iCloud и ещё не скачан на этот Mac. Откройте его в Finder (значок облака), дождитесь загрузки и выберите снова.")
+                return done(nil)
+            case .failure(.unsupported):
+                self.errorMessage = L("Формат картинки не распознан. Подойдут JPEG, PNG, HEIC, GIF, WebP, TIFF, BMP.")
                 return done(nil)
             }
             // За время выбора пространство могло смениться: чужой файл в него не попадёт.
