@@ -31,6 +31,7 @@ func runAllNotesTests() async {
     await runLiveViewTests()
     await runColumnsTests()
     await runColumnsEditorTests()
+    await runPeekTests()
     await runDatabaseTests()
     await runRelationTests()
     await runRollupTests()

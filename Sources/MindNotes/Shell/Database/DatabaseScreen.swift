@@ -320,7 +320,7 @@ struct DatabaseScreen: View {
         .overlay(Rectangle().fill(Tokens.line).frame(height: 1), alignment: .bottom)
         .acceptsRecord { id, _ in model.reorder(record: id, before: row.id) }
         .contextMenu {
-            Button("Открыть") { shell.openPage(row.id) }
+            Button("Открыть") { shell.openRecord(row.id, database: model.databaseID) }
             Button("Дублировать") { shell.duplicatePage(row.id) }
             Button("В корзину") { shell.trash(row.id) }
         }
@@ -334,7 +334,7 @@ struct DatabaseScreen: View {
                 shell.rename(row.id, to: new)
             }
             // Запись — обычная страница: кнопка открывает её в редакторе.
-            Button { shell.openPage(row.id) } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 10)) }
+            Button { shell.openRecord(row.id, database: model.databaseID) } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 10)) }
                 .buttonStyle(.plain)
                 .foregroundColor(Tokens.muted)
                 .help(L("Открыть как страницу"))

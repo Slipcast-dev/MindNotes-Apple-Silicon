@@ -93,6 +93,7 @@ struct NotesLayout: View {
                 .overlay(alignment: .leading) {
                     if shell.sidebarCollapsed { peekSidebar }
                 }
+                .overlay { if let peek = shell.peek { PeekOverlay(editor: peek, mode: shell.peekMode) } }
                 .animation(.easeInOut(duration: 0.15), value: shell.sidebarCollapsed)
             }
         }
@@ -291,3 +292,50 @@ struct CrumbBar: View {
         }
     }
 }
+
+/// Peek (M14): страница сбоку (около 45% ширины) или по центру поверх текущей. Esc закрывает.
+struct PeekOverlay: View {
+    @EnvironmentObject private var shell: ShellModel
+    @ObservedObject var editor: PageEditorModel
+    let mode: ShellModel.PeekMode
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: mode == .center ? .center : .trailing) {
+                // Щелчок мимо панели закрывает её, как в Notion.
+                Color.black.opacity(mode == .center ? 0.18 : 0.04)
+                    .contentShape(Rectangle())
+                    .onTapGesture { shell.closePeek() }
+                panel
+                    .frame(width: mode == .center ? min(900, geo.size.width * 0.72) : max(360, geo.size.width * 0.45),
+                           height: mode == .center ? geo.size.height * 0.86 : geo.size.height)
+                    .background(Tokens.paper)
+                    .clipShape(RoundedRectangle(cornerRadius: mode == .center ? 12 : 0))
+                    .shadow(color: .black.opacity(0.18), radius: 18, x: mode == .center ? 0 : -4)
+                    .transition(.move(edge: mode == .center ? .bottom : .trailing).combined(with: .opacity))
+            }
+        }
+    }
+
+    private var panel: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button { shell.closePeek() } label: { Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)) }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.cancelAction)
+                    .help(L("Закрыть (Esc)"))
+                Button { shell.openPeekAsPage() } label: {
+                    Label("Открыть как страницу", systemImage: "arrow.up.left.and.arrow.down.right").font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+            .foregroundColor(Tokens.muted)
+            .padding(.horizontal, 16)
+            .frame(height: 40)
+            Rectangle().fill(Tokens.line).frame(height: 1)
+            PageScreen(editor: editor).id(editor.pageID)
+        }
+    }
+}
+

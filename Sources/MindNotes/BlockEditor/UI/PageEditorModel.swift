@@ -51,6 +51,12 @@ final class PageEditorModel: ObservableObject {
 
     func emergencyText(title: String) -> String { session.emergencyText(title: title) }
 
+    /// Peek закрывается: правки записаны, снимок сделан, если страница менялась.
+    func closeSession() async throws {
+        session.stopObserving(controller)
+        try await session.close()
+    }
+
     func closePanels() {
         panels.close()
         columnPanels.forEach { $0.close() }

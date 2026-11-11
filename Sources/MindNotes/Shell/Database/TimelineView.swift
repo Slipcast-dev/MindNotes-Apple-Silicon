@@ -432,7 +432,7 @@ private struct TimelineBarRow: View {
             .allowsHitTesting(false)
         }
         .contentShape(shape)
-        .onTapGesture { shell.openPage(row.id) }
+        .onTapGesture { shell.openRecord(row.id, database: model.databaseID) }
         .gesture(dragGesture(.move))
         .overlay(alignment: .leading) { if !bar.clippedStart { handle(.start) } }
         .overlay(alignment: .trailing) {
@@ -449,7 +449,7 @@ private struct TimelineBarRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("\(title), \(PropertyConversion.text(of: .date(value), options: []))"))
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction { shell.openPage(row.id) }
+        .accessibilityAction { shell.openRecord(row.id, database: model.databaseID) }
         .accessibilityAction(named: Text("На день раньше")) { model.shiftDate(record: row.id, byDays: -1) }
         .accessibilityAction(named: Text("На день позже")) { model.shiftDate(record: row.id, byDays: 1) }
     }
@@ -461,7 +461,7 @@ private struct TimelineBarRow: View {
     }
 
     @ViewBuilder private var menu: some View {
-        Button("Открыть") { shell.openPage(row.id) }
+        Button("Открыть") { shell.openRecord(row.id, database: model.databaseID) }
         Button("На день раньше") { model.shiftDate(record: row.id, byDays: -1) }
         Button("На день позже") { model.shiftDate(record: row.id, byDays: 1) }
         if value.start.isMoment {

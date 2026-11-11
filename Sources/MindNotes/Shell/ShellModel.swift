@@ -621,6 +621,8 @@ final class ShellModel: ObservableObject {
         autoBackupTimer?.invalidate()
         autoBackupTimer = nil
         await autoBackupTask?.value
+        // Peek записывается первым: его правки идут той же очередью сохранения.
+        try await closePeekNow()
         // Модель редактора живёт до подтверждённой записи: при отказе нужен аварийный экспорт.
         if let session { try await session.close() }
         editor = nil
@@ -877,44 +879,46 @@ final class ShellModel: ObservableObject {
 
     private func show(_ id: UUID) async throws {
         guard let session else { return }
+        // Страница открывается целиком: Peek закрывается, чтобы два редактора не правили одно и то же.
+        if peek != nil { try await closePeekNow() }
         if let database = databaseIndex[id] { return try await showDatabase(page: id, database: database) }
         let editorSession = try await session.open(id)
         pages = session.pages
         installEditor(editorSession, id: id)
     }
 
-    private func installEditor(_ editorSession: EditorSession, id: UUID) {
-        let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS, soft: Tokens.softNS)
-        editor = PageEditorModel(session: editorSession, style: style) { [weak self] in self?.errorMessage = $0 }
-        editor?.controller.pageSearch = { [weak self] in self?.linkCandidates($0) ?? [] }
-        editor?.controller.peopleSource = { [weak self] in self?.people ?? [] }
-        editor?.controller.fetchLinkPreview = { [weak self] url in await self?.linkPreview(url) }
-        editor?.controller.onOpenURL = { url, type in
+    /// Настройка редактора страницы: основного и Peek (ссылки, вложения, упоминания, превью, представления).
+    private func configure(_ model: PageEditorModel, page id: UUID) {
+        let c = model.controller
+        c.pageSearch = { [weak self] in self?.linkCandidates($0) ?? [] }
+        c.peopleSource = { [weak self] in self?.people ?? [] }
+        c.fetchLinkPreview = { [weak self] url in await self?.linkPreview(url) }
+        c.onOpenURL = { url, type in
             if type == .embed { LinkPreviewFetcher.openEmbed(url, title: LinkCard.embed(url).provider) } else { NSWorkspace.shared.open(url) }
         }
-        editor?.controller.pageTitle = { [weak self] in self?.pages.first { $0.id == id }?.title ?? "" }
-        editor?.controller.scheduleReminder = { [weak self] when, text in
+        c.pageTitle = { [weak self] in self?.pages.first { $0.id == id }?.title ?? "" }
+        c.scheduleReminder = { [weak self] when, text in
             MentionReminders.schedule(when, text: text) { self?.errorMessage = $0 }
         }
-        editor?.controller.pickDatabaseView = { [weak self] in self?.pickDatabaseFragment() }
-        editor?.controller.embedSummary = { [weak self] in self?.embedSummary($0) }
+        c.pickDatabaseView = { [weak self] in self?.pickDatabaseFragment() }
+        c.embedSummary = { [weak self] in self?.embedSummary($0) }
         // Живое представление базы прямо в тексте (M13): тот же экран, что и «Открыть целиком».
-        editor?.controller.liveView = { [weak self] block in
-            guard let self, let editor = self.editor, let model = self.embeddedModel(for: block, editor: editor) else { return nil }
-            return NSHostingView(rootView: DatabaseScreen(model: model, compact: true).environment(\.databaseInset, 14).environmentObject(self))
+        c.liveView = { [weak self, weak model] block in
+            guard let self, let model, let embedded = self.embeddedModel(for: block, editor: model) else { return nil }
+            return NSHostingView(rootView: DatabaseScreen(model: embedded, compact: true).environment(\.databaseInset, 14).environmentObject(self))
         }
-        embedCache = [:]
-        editor?.controller.onOpenLink = { [weak self] page, block in self?.followLink(to: page, block: block) }
-        editor?.controller.onPlayVideo = { [weak self] url, name in self?.playingVideo = PlayingVideo(url: url, name: name) }
-        editor?.controller.addAttachment = { [weak self] url in
+        c.onOpenLink = { [weak self] page, block in self?.followLink(to: page, block: block) }
+        c.onPeekLink = { [weak self] page in self?.peekPage(page) }
+        c.onPlayVideo = { [weak self] url, name in self?.playingVideo = PlayingVideo(url: url, name: name) }
+        c.addAttachment = { [weak self] url in
             guard let store = self?.store else { throw WorkspaceError.storage(code: 0, detail: "пространство закрыто") }
                         let size = (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
                         // Видео бывает большим; предел защищает от случайного копирования образа диска.
                         guard size <= 4 << 30 else { throw CocoaError(.fileReadTooLarge) }
             return try await store.addAsset(copying: url, now: SystemClock().nowMillis())
         }
-        editor?.controller.assetURL = { [weak self] id in self?.assetFileURL(id) }
-        editor?.controller.pickFile = { type in
+        c.assetURL = { [weak self] id in self?.assetFileURL(id) }
+        c.pickFile = { type in
             let panel = NSOpenPanel()
             panel.canChooseFiles = true
             panel.canChooseDirectories = false
@@ -923,6 +927,13 @@ final class ShellModel: ObservableObject {
             panel.prompt = L("Выбрать")
             return panel.runModal() == .OK ? panel.url : nil
         }
+    }
+
+    private func installEditor(_ editorSession: EditorSession, id: UUID) {
+        let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS, soft: Tokens.softNS)
+        editor = PageEditorModel(session: editorSession, style: style) { [weak self] in self?.errorMessage = $0 }
+        embedCache = [:]
+        if let editor { configure(editor, page: id) }
         editor?.controller.renderAll()
         backlinks = []
         section = .page(id)
@@ -1019,6 +1030,77 @@ final class ShellModel: ObservableObject {
     }
 
     /// Переход по ссылке. Страница в корзине не подменяется другой (FR-04).
+    // MARK: Peek (M14)
+
+    enum PeekMode: String, CaseIterable { case side, center, page }
+
+    /// Страница, открытая сбоку или по центру поверх текущей, и как она показана.
+    @Published private(set) var peek: PageEditorModel?
+    @Published private(set) var peekMode: PeekMode = .side
+    private var peekModes: [UUID: PeekMode] = [:]
+
+    /// Как открывать записи базы: сбоку, по центру или страницей. Хранится в пространстве; по умолчанию — сбоку, как в Notion.
+    func peekMode(for database: UUID) -> PeekMode { peekModes[database] ?? .side }
+
+    func loadPeekMode(for database: UUID) {
+        guard peekModes[database] == nil else { return }
+        enqueue {
+            let raw = try await self.store?.meta("peek." + database.uuidString)
+            self.peekModes[database] = raw.flatMap(PeekMode.init(rawValue:)) ?? .side
+        }
+    }
+
+    func setPeekMode(_ mode: PeekMode, for database: UUID) {
+        peekModes[database] = mode
+        objectWillChange.send()
+        enqueue { try await self.store?.setMeta("peek." + database.uuidString, mode.rawValue) }
+    }
+
+    func openRecord(_ id: UUID, database: UUID) {
+        let mode = peekMode(for: database)
+        if mode == .page { openPage(id) } else { peekPage(id, mode: mode) }
+    }
+
+    /// Вторая страница поверх текущей: своя сессия редактора на том же сохранении, текущая не закрывается.
+    func peekPage(_ id: UUID, mode: PeekMode = .side) {
+        enqueue {
+            guard let session = self.session, let store = self.store else { return }
+            if self.editor?.pageID == id { return } // Та же страница уже открыта целиком.
+            try await self.closePeekNow()
+            try await session.coordinator.flush()
+            let opened = try await EditorSession.open(pageID: id, store: store, coordinator: session.coordinator, clock: SystemClock(), ids: RandomIDs())
+            if opened.document.blocks.isEmpty { try opened.perform(.insertBlock(after: nil, type: .paragraph), recordUndo: false, quiet: true) }
+            let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS, soft: Tokens.softNS)
+            let model = PageEditorModel(session: opened, style: style) { [weak self] in self?.errorMessage = $0 }
+            self.configure(model, page: id)
+            model.controller.renderAll()
+            withAnimation(.easeOut(duration: 0.15)) {
+                self.peekMode = mode == .page ? .side : mode
+                self.peek = model
+            }
+        }
+    }
+
+    func closePeek() { enqueue { try await self.closePeekNow() } }
+
+    private func closePeekNow() async throws {
+        guard let model = peek else { return }
+        model.closePanels()
+        withAnimation(.easeIn(duration: 0.15)) { peek = nil }
+        try await model.closeSession()
+        try await session?.refreshPages()
+        if let session { pages = session.pages }
+    }
+
+    /// «Открыть как страницу»: Peek закрывается, страница открывается целиком.
+    func openPeekAsPage() {
+        guard let id = peek?.pageID else { return }
+        enqueue {
+            try await self.closePeekNow()
+            try await self.show(id)
+        }
+    }
+
     func followLink(to id: UUID, block: UUID? = nil) {
         if pages.contains(where: { $0.id == id }) {
             openPage(id, block: block)
@@ -1619,7 +1701,11 @@ final class ShellModel: ObservableObject {
     func prepareToTerminate(reply: @escaping (Bool) -> Void) {
         guard let session else { return reply(true) }
         Task {
-            let finished = await Self.finishes(within: 5) { try await session.close() }
+            let peekModel = peek
+        let finished = await Self.finishes(within: 5) {
+            try await peekModel?.closeSession()
+            try await session.close()
+        }
             if finished {
                 self.session = nil
                 self.store = nil

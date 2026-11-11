@@ -67,6 +67,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     private var lastCaret = 0
     /// Нажата внутренняя ссылка: страница и, возможно, блок.
     var onOpenLink: ((UUID, UUID?) -> Void)?
+    /// ⌥-щелчок по ссылке на страницу: открыть её сбоку.
+    var onPeekLink: ((UUID) -> Void)?
     /// Копирует файл в пространство; ошибки показывает вызывающий.
     var addAttachment: ((URL) async throws -> AssetRecord)?
     /// Адрес вложения на диске.
@@ -479,6 +481,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         requestMentionDate = main.requestMentionDate
         scheduleReminder = main.scheduleReminder
         onOpenLink = main.onOpenLink
+        onPeekLink = main.onPeekLink
         addAttachment = main.addAttachment
         assetURL = main.assetURL
         pickFile = main.pickFile
@@ -1553,6 +1556,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     func textView(_ view: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
         let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
         guard let url, let page = PageLink.page(from: url) else { return false }
+        // ⌥-щелчок открывает страницу сбоку (Peek), не уходя с текущей.
+        if NSEvent.modifierFlags.contains(.option), let peek = onPeekLink { peek(page); return true }
         onOpenLink?(page, PageLink.block(from: url))
         return true
     }

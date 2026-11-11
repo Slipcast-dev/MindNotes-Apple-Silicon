@@ -198,3 +198,33 @@ func runColumnsEditorTests() async {
         }
     }
 }
+
+/// Peek (M14): вторая страница открыта рядом своей сессией на том же сохранении.
+@MainActor
+func runPeekTests() async {
+    await test("Peek: правки основной страницы и страницы сбоку записываются обе") {
+        try await withTempDir { dir in
+            let store = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "T")
+            defer { store.close() }
+            let clock = FakeClock()
+            let session = WorkspaceSession(store: store, name: "T", scheduler: ManualScheduler(clock: clock), clock: clock, ids: RandomIDs())
+            let main = try await session.createPage(parent: nil, title: "Основная")
+            let side = try await session.createPage(parent: nil, title: "Сбоку")
+            let mainEditor = try await session.open(main.id)
+            let peek = try await EditorSession.open(pageID: side.id, store: store, coordinator: session.coordinator, clock: clock, ids: RandomIDs())
+            if peek.document.blocks.isEmpty { try peek.perform(.insertBlock(after: nil, type: .paragraph), recordUndo: false, quiet: true) }
+            try mainEditor.perform(.setPlainText(block: mainEditor.document.blocks[0].id, text: "текст основной"))
+            try peek.perform(.setPlainText(block: peek.document.blocks[0].id, text: "текст сбоку"))
+            try mainEditor.perform(.insertBlock(after: mainEditor.document.blocks[0].id, type: .paragraph))
+            try await peek.close()
+            try await session.coordinator.flush()
+            checkEqual(try await store.blocks(ofPage: side.id).map(\.plainText), ["текст сбоку"], "правка в Peek записана на свою страницу")
+            checkEqual(try await store.blocks(ofPage: main.id).map(\.plainText), ["текст основной", ""], "основная страница не задета")
+            try mainEditor.perform(.setPlainText(block: mainEditor.document.blocks[1].id, text: "после закрытия Peek"))
+            try await session.closeEditor()
+            checkEqual(try await store.blocks(ofPage: main.id).last?.plainText, "после закрытия Peek", "основной редактор работает дальше")
+            try await store.setMeta("peek." + main.id.uuidString, "center")
+            checkEqual(try await store.meta("peek." + main.id.uuidString), "center", "режим Peek хранится в пространстве")
+        }
+    }
+}

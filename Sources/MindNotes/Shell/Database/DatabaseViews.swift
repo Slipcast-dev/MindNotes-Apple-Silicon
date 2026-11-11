@@ -84,7 +84,7 @@ struct RecordCard: View {
     }
 
     var body: some View {
-        Button { shell.openPage(row.id) } label: {
+        Button { shell.openRecord(row.id, database: model.databaseID) } label: {
             VStack(alignment: .leading, spacing: 0) {
                 if cover {
                     Group {
@@ -252,7 +252,7 @@ struct ListKindView: View {
         SectionsScroll(model: model) { section in
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(section.rows) { row in
-                    Button { shell.openPage(row.id) } label: {
+                    Button { shell.openRecord(row.id, database: model.databaseID) } label: {
                         HStack(spacing: 12) {
                             if let icon = row.icon { Text(icon) }
                             Text(row.title.isEmpty ? L("Без названия") : row.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
@@ -405,6 +405,7 @@ struct CalendarKindView: View {
 // MARK: Настройки вида
 
 struct ViewSettingsPopover: View {
+    @EnvironmentObject private var shell: ShellModel
     @ObservedObject var model: DatabaseModel
 
     private var properties: [PropertyDefinition] { model.database?.properties ?? [] }
@@ -432,6 +433,14 @@ struct ViewSettingsPopover: View {
                     if kind != DatabaseView.boardKind { Text("Без группировки").tag(UUID?.none) }
                     ForEach(properties.filter { RecordGroup.isGroupable($0.type) }) { Text($0.name).tag(UUID?.some($0.id)) }
                 }
+            }
+            if !model.isEmbedded {
+                Picker("Открывать записи", selection: Binding(get: { shell.peekMode(for: model.databaseID) }, set: { shell.setPeekMode($0, for: model.databaseID) })) {
+                    Text("Сбоку").tag(ShellModel.PeekMode.side)
+                    Text("По центру").tag(ShellModel.PeekMode.center)
+                    Text("Страницей").tag(ShellModel.PeekMode.page)
+                }
+                .onAppear { shell.loadPeekMode(for: model.databaseID) }
             }
             if kind == DatabaseView.galleryKind {
                 Toggle("Показывать обложку страницы", isOn: Binding(get: { model.state.showCover }, set: { value in

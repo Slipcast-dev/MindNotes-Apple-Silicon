@@ -1189,3 +1189,9 @@
 "Название страницы" = "Page name";
 "Свернуть" = "Collapse";
 "Развернуть" = "Expand";
+
+/* M14: Peek */
+"Закрыть (Esc)" = "Close (Esc)";
+"Открывать записи" = "Open records";
+"Сбоку" = "Side peek";
+"Страницей" = "Full page";
