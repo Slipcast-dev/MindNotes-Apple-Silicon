@@ -1175,3 +1175,7 @@
 "Страницы раздела не удаляются: они перейдут в «%@»." = "Pages in the section are kept: they move to “%@”.";
 "Удалить раздел" = "Delete section";
 "В раздел" = "Move to section";
+
+/* Сворачивание разделов */
+"Развернуть раздел" = "Expand section";
+"Свернуть раздел" = "Collapse section";

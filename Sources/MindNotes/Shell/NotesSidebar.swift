@@ -41,15 +41,34 @@ struct SidebarRow: View {
 
 struct SidebarGroup: View {
     let title: String
+    /// Раздел сворачивается: стрелка перед названием. nil — заголовок без стрелки.
+    var collapsed: Bool? = nil
+    var onToggle: (() -> Void)? = nil
+    /// Над заголовком тащат страницу: она ляжет в этот раздел.
+    var highlighted = false
+
     var body: some View {
-        Text(title.uppercased())
-            .font(.system(size: 10, weight: .semibold))
-            .tracking(1.3)
-            .foregroundColor(Tokens.muted)
-            .padding(.top, 20)
-            .padding(.bottom, 6)
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(spacing: 4) {
+            if let collapsed {
+                Button { onToggle?() } label: {
+                    Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .frame(width: 12, height: 12)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(collapsed ? "Развернуть раздел" : "Свернуть раздел"))
+            }
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.3)
+        }
+        .foregroundColor(highlighted ? Tokens.accent : Tokens.muted)
+        .padding(.top, 20)
+        .padding(.bottom, 6)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(highlighted ? Tokens.accent.opacity(0.12) : .clear).padding(.top, 14))
     }
 }
 
@@ -78,7 +97,7 @@ struct NotesSidebar: View {
 
     /// Строки дерева одного раздела: страницы верхнего уровня этого раздела и их потомки.
     @ViewBuilder private func treeRows(in section: UUID?) -> some View {
-        ForEach(shell.treeRows(collapsed: collapsed, section: section)) { row in
+        ForEach(shell.isSectionCollapsed(section) ? [] : shell.treeRows(collapsed: collapsed, section: section)) { row in
             PageTreeRow(row: row, expanded: !collapsed.contains(row.id),
                         dropZone: drag?.target == row.id ? drag?.zone : nil,
                         isDragged: drag?.page == row.id) {
@@ -95,12 +114,24 @@ struct NotesSidebar: View {
         }
     }
 
+    /// Заголовок стандартного раздела в кадрах строк: свой ID, не совпадающий со страницами.
+    static let defaultSection = UUID(uuidString: "00000000-0000-0000-0000-00000000D5EC")!
+
+    private var sectionHeaders: Set<UUID> { Set(shell.sections.map(\.id)).union([Self.defaultSection]) }
+
     private func updateDrag(_ page: Page, at location: CGPoint) {
         var state = drag ?? TreeDrag(page: page.id, title: page.title.isEmpty ? L("Без названия") : page.title, location: location)
         state.location = location
         state.target = nil
         state.zone = nil
-        if let (id, frame) = rowFrames.first(where: { $0.value.contains(location) }), id != page.id {
+        // Над заголовком раздела: страница ляжет в этот раздел (в начало).
+        if let (id, _) = rowFrames.first(where: { sectionHeaders.contains($0.key) && $0.value.contains(location) }) {
+            state.target = id
+            state.zone = .into
+            drag = state
+            return
+        }
+        if let (id, frame) = rowFrames.first(where: { !sectionHeaders.contains($0.key) && $0.value.contains(location) }), id != page.id {
             let zone = PageTree.DropZone.at(fraction: Double((location.y - frame.minY) / max(frame.height, 1)), allowsInto: !shell.isDatabase(id))
             if shell.pageTree.placement(moving: page.id, onto: id, zone: zone) != nil {
                 state.target = id
@@ -113,7 +144,13 @@ struct NotesSidebar: View {
     private func finishDrag() {
         defer { drag = nil }
         guard let state = drag, let target = state.target, let zone = state.zone else { return }
-        if shell.reorder(state.page, onto: target, zone: zone), zone == .into { collapsed.remove(target) }
+        if sectionHeaders.contains(target) {
+            shell.dropPage(state.page, onSection: target == Self.defaultSection ? nil : target)
+            return
+        }
+        if shell.reorder(state.page, onto: target, zone: zone) {
+            if zone == .into { collapsed.remove(target) } else { shell.followSection(of: target, page: state.page) }
+        }
     }
 
     var body: some View {
@@ -122,7 +159,7 @@ struct NotesSidebar: View {
                     BrandLogo()
                     VStack(alignment: .leading, spacing: 2) {
                         Text(shell.isOpen ? shell.workspaceName : AppEdition.displayName).font(.system(size: 14, weight: .bold)).lineLimit(1)
-                        Text(shell.isOpen ? "Локально на этом Mac" : "Пространство не открыто").font(.system(size: 11)).foregroundColor(Tokens.muted)
+                        if !shell.isOpen { Text("Пространство не открыто").font(.system(size: 11)).foregroundColor(Tokens.muted) }
                     }
                 }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -196,7 +233,11 @@ struct NotesSidebar: View {
                     }
                     if shell.isOpen {
                         // Название раздела задаёт пользователь; оно хранится в пространстве (у другого — своё или «Страницы»).
-                        SidebarGroup(title: shell.pagesTitle ?? L("Страницы"))
+                        SidebarGroup(title: shell.pagesTitle ?? L("Страницы"), collapsed: shell.isSectionCollapsed(nil),
+                                     onToggle: { shell.toggleSection(nil) }, highlighted: drag?.target == Self.defaultSection)
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: RowFramesKey.self, value: [Self.defaultSection: g.frame(in: .named(Self.treeSpace))])
+                            })
                             .contentShape(Rectangle())
                             .onTapGesture(count: 2) { shell.renamePagesSection() }
                             .contextMenu {
@@ -207,7 +248,11 @@ struct NotesSidebar: View {
                         treeRows(in: nil)
                         // Свои разделы: каждый со своими страницами верхнего уровня (схема v9).
                         ForEach(shell.sections) { section in
-                            SidebarGroup(title: section.name)
+                            SidebarGroup(title: section.name, collapsed: shell.isSectionCollapsed(section.id),
+                                         onToggle: { shell.toggleSection(section.id) }, highlighted: drag?.target == section.id)
+                                .background(GeometryReader { g in
+                                    Color.clear.preference(key: RowFramesKey.self, value: [section.id: g.frame(in: .named(Self.treeSpace))])
+                                })
                                 .contentShape(Rectangle())
                                 .onTapGesture(count: 2) { shell.renameSection(section) }
                                 .contextMenu {

@@ -398,6 +398,7 @@ final class ShellModel: ObservableObject {
             let loadedPagesTitle = try await store.meta(Self.pagesTitleKey).flatMap { $0.isEmpty ? nil : $0 }
             let loadedSections = try await store.sections()
             let loadedMembers = try await store.sectionMembers()
+            let loadedCollapsed = Set((try await store.meta(Self.collapsedSectionsKey) ?? "").split(separator: ",").map(String.init))
             let session = WorkspaceSession(store: store, name: name)
             session.coordinator.onStatusChange = { [weak self] in self?.saveStatus = $0 }
             try await session.refreshPages()
@@ -422,6 +423,7 @@ final class ShellModel: ObservableObject {
             pagesTitle = loadedPagesTitle
             sections = loadedSections
             sectionOf = loadedMembers
+            collapsedSections = loadedCollapsed
             tags = loadedTags
             pageTags = loadedPageTags
             databaseIndex = loadedDatabases
@@ -511,6 +513,43 @@ final class ShellModel: ObservableObject {
         }
     }
 
+    /// Свёрнутые разделы пространства: «default» — стандартный, иначе ID раздела. Хранятся в пространстве.
+    @Published private(set) var collapsedSections: Set<String> = []
+    private static let collapsedSectionsKey = "ui.collapsedSections"
+
+    func isSectionCollapsed(_ section: UUID?) -> Bool { collapsedSections.contains(section?.uuidString ?? "default") }
+
+    func toggleSection(_ section: UUID?) {
+        let key = section?.uuidString ?? "default"
+        if collapsedSections.remove(key) == nil { collapsedSections.insert(key) }
+        let value = collapsedSections.sorted().joined(separator: ",")
+        enqueue { try await self.store?.setMeta(Self.collapsedSectionsKey, value) }
+    }
+
+    /// Страницу бросили на заголовок раздела: она становится страницей верхнего уровня этого раздела.
+    func dropPage(_ id: UUID, onSection section: UUID?) {
+        let isRoot = pages.first { $0.id == id }?.parentID == nil
+        act {
+            guard let session = self.session else { return }
+            if !isRoot {
+                try await session.move(id, toParent: nil, afterSibling: nil)
+                self.pages = session.pages
+            }
+            try await self.store?.setSection(page: id, section: section)
+            try await self.reloadSections()
+        }
+        if isSectionCollapsed(section) { toggleSection(section) }
+    }
+
+    /// Страницу поставили рядом со страницей верхнего уровня другого раздела: она переходит в тот же раздел.
+    func followSection(of target: UUID, page: UUID) {
+        guard pages.first(where: { $0.id == target })?.parentID == nil else { return }
+        let known = Set(sections.map(\.id))
+        let section = sectionOf[target].flatMap { known.contains($0) ? $0 : nil }
+        guard sectionOf[page] != section else { return }
+        moveToSection(page, section)
+    }
+
     func moveToSection(_ page: UUID, _ section: UUID?) {
         enqueue {
             try await self.store?.setSection(page: page, section: section)
@@ -549,6 +588,7 @@ final class ShellModel: ObservableObject {
             self.pagesTitle = nil
             self.sections = []
             self.sectionOf = [:]
+            self.collapsedSections = []
             UserDefaults.standard.removeObject(forKey: self.lastWorkspaceKey)
             self.backStack = []
             self.forwardStack = []
