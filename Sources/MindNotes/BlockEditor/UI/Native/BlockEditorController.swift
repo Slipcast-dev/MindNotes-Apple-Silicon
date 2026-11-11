@@ -146,6 +146,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         textView.controller = self
         textView.delegate = self
         // Правка в другом поле той же страницы (колонка или основной текст): вид перестраивается по модели.
+        session.observeSelection(self) { [weak self] in MainActor.assumeIsolated { self?.textView.needsDisplay = true } }
         // Отложенно: свой редактор к этому моменту уже совпадает с моделью, и перестройка ничего не меняет.
         session.observe(self) { [weak self] in
             MainActor.assumeIsolated {
@@ -1042,6 +1043,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     func finishDrag(_ id: UUID, at point: NSPoint) {
+        // Ряд колонок в колонку не кладётся: колонки внутри колонок не поддерживаются.
+        if scope != nil, document.block(id)?.type == .columnList { return }
         if let edge = columnDrop(at: point, dragging: id) {
             // Блок уходит из своей колонки: опустевшая колонка убирается тем же шагом отмены.
             var commands: [EditCommand] = [.makeColumns(target: edge.target, dropped: id, left: edge.left)]
@@ -1056,7 +1059,58 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         let siblings = document.blocks.filter { $0.parentID == block.parentID }
         let previous = siblings.firstIndex { $0.id == id }.flatMap { $0 > 0 ? siblings[$0 - 1].id : nil }
         if target.parent == block.parentID, target.after == previous { return }
-        perform(.moveBlock(id, parent: target.parent, after: target.after))
+        // Блок мог прийти из колонки (из другого поля): опустевшая колонка убирается тем же шагом отмены.
+        var commands: [EditCommand] = [.moveBlock(id, parent: target.parent, after: target.after)]
+        if let column = block.parentID.flatMap({ document.block($0) }), column.type == .column, let row = column.parentID, target.parent != column.id {
+            commands.append(.tidyColumns(row))
+        }
+        perform(commands.count == 1 ? commands[0] : .batch(commands))
+    }
+
+    // MARK: Выделение блоков через поля (M13)
+
+    /// Выделение мышью ушло в другое поле: выделяются целые блоки от первого до последнего, как в Notion.
+    func selectBlocks(from a: UUID, to b: UUID) {
+        guard let i = document.index(of: a), let j = document.index(of: b) else { return }
+        let range = document.blocks[min(i, j)...max(i, j)]
+        session.setBlockSelection(range.filter { $0.type != .column && $0.type != .columnList }.map(\.id))
+        textView.setSelectedRange(NSRange(location: textView.selectedRange().location, length: 0))
+    }
+
+    var hasBlockSelection: Bool { !session.blockSelection.isEmpty }
+
+    func clearBlockSelection() { if hasBlockSelection { session.setBlockSelection([]) } }
+
+    /// Фрагменты выделенных блоков: с начала первого до конца последнего, колонки — по очереди.
+    private func blockSelectionFragments() -> [BlockFragment] {
+        let ids = session.blockSelection
+        guard let first = ids.first, let last = ids.last, let end = document.block(last) else { return [] }
+        var sel = BlockSelection(block: first, offset: 0)
+        sel.focus = BlockPoint(blockID: last, offset: RichText.length(end.content?.runs ?? []) + (end.content == nil ? 1 : 0))
+        return document.fragments(in: sel)
+    }
+
+    /// Удаление выделенных блоков одной правкой; опустевшие колонки убираются.
+    func deleteBlockSelection() {
+        let chosen = Set(session.blockSelection)
+        let top = session.blockSelection.compactMap { document.block($0) }.filter { b in
+            var p = b.parentID
+            while let id = p { if chosen.contains(id) { return false }; p = document.block(id)?.parentID }
+            return true
+        }
+        var rows: [UUID] = []
+        for b in top {
+            if let c = b.parentID.flatMap({ document.block($0) }), c.type == .column, let row = c.parentID, !rows.contains(row) { rows.append(row) }
+        }
+        session.setBlockSelection([])
+        guard !top.isEmpty else { return }
+        // Страница без строк получает пустой абзац той же правкой: одна отмена возвращает всё.
+        var gone = Set(top.map(\.id))
+        for b in top { gone.formUnion(document.descendants(of: b.id).map(\.id)) }
+        let left = document.blocks.contains { !gone.contains($0.id) && $0.type != .column && $0.type != .columnList }
+        var commands: [EditCommand] = top.map { .deleteBlock($0.id) } + rows.map { .tidyColumns($0) }
+        if !left { commands.append(.insertBlock(after: nil, type: .paragraph)) }
+        perform(.batch(commands))
     }
 
     /// Ручка блока в левом поле.
@@ -1157,6 +1211,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     func textView(_ view: NSTextView, shouldChangeTextIn range: NSRange, replacementString: String?) -> Bool {
         if applying { return true }
+        clearBlockSelection()
         guard let text = replacementString else { return false } // Только атрибуты: их источник — модель.
         let start = spanIndex(at: range.location)
         pendingIndex = start
@@ -1554,11 +1609,17 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         case #selector(NSResponder.insertBacktab(_:)):
             run(.outdent)
             return true
+        case #selector(NSResponder.deleteBackward(_:)) where hasBlockSelection, #selector(NSResponder.deleteForward(_:)) where hasBlockSelection:
+            deleteBlockSelection()
+            return true
+        case #selector(NSResponder.cancelOperation(_:)) where hasBlockSelection:
+            clearBlockSelection()
+            return true
         case #selector(NSResponder.deleteBackward(_:)):
             guard range.length == 0, here.offset == 0 else { return false }
             if let b = block, b.isEditable, b.type != .paragraph {
                 perform(.changeType(block: b.id, type: .paragraph)) // Сначала снимается тип блока.
-            } else if let b = block, b.isEditable, b.parentID != nil {
+            } else if let b = block, b.isEditable, let parent = b.parentID, document.block(parent)?.type != .column {
                 perform(.outdent(b.id)) // Затем уменьшается вложенность.
                 restoreCaret(block: b.id, offset: 0)
             } else if let b = block, b.isEditable {
@@ -1597,8 +1658,13 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     func copy(to pasteboard: NSPasteboard) {
         let range = textView.selectedRange()
-        guard range.length > 0 else { return }
-        let fragments = document.fragments(in: selection(for: range))
+        let fragments: [BlockFragment]
+        if hasBlockSelection {
+            fragments = blockSelectionFragments()
+        } else {
+            guard range.length > 0 else { return }
+            fragments = document.fragments(in: selection(for: range))
+        }
         pasteboard.clearContents()
         pasteboard.declareTypes([Self.pasteboardType, .string], owner: nil)
         if let data = try? JSONEncoder().encode(fragments) { pasteboard.setData(data, forType: Self.pasteboardType) }
@@ -1606,6 +1672,11 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     func cut(to pasteboard: NSPasteboard) {
+        if hasBlockSelection {
+            copy(to: pasteboard)
+            deleteBlockSelection()
+            return
+        }
         guard textView.selectedRange().length > 0 else { return }
         copy(to: pasteboard)
         replaceCurrentSelection(with: [])
@@ -1743,6 +1814,15 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     /// Фон выноски и кода, полоска цитаты: рисуются под текстом.
     func drawBackgrounds(in dirty: NSRect) {
+        if hasBlockSelection {
+            let chosen = Set(session.blockSelection)
+            NSColor.controlAccentColor.withAlphaComponent(0.16).setFill()
+            for span in spans where chosen.contains(span.id) {
+                if let r = blockRect(for: span), r.intersects(dirty) {
+                    NSBezierPath(roundedRect: NSRect(x: textView.textContainerOrigin.x - 4, y: r.minY - 2, width: textView.bounds.width - textView.textContainerOrigin.x, height: r.height + 4), xRadius: 4, yRadius: 4).fill()
+                }
+            }
+        }
         drawBlockColors(in: dirty)
         drawSyncedFrames(in: dirty)
         guard let (first, last) = visibleSpanRange(in: dirty) else { return }
@@ -1960,11 +2040,11 @@ final class BlockTextView: NSTextView {
     private var hoveredBlock: UUID? {
         didSet { if oldValue != hoveredBlock { needsDisplay = true } }
     }
-    private var dropLine: CGFloat? {
+    fileprivate var dropLine: CGFloat? {
         didSet { needsDisplay = true }
     }
     /// Бросок на край блока: вертикальная черта — блок встанет колонкой.
-    private var dropEdge: NSRect? {
+    fileprivate var dropEdge: NSRect? {
         didSet { needsDisplay = true }
     }
 
@@ -1996,8 +2076,28 @@ final class BlockTextView: NSTextView {
             return
         }
         var handled = false
+        run { $0.clearBlockSelection() }
         run { handled = $0.handleClick(at: at, clickCount: event.clickCount) }
-        if !handled { super.mouseDown(with: event) }
+        if !handled {
+            super.mouseDown(with: event) // Своё выделение текста; цикл мыши внутри NSTextView.
+            finishSelection(startedAt: at)
+        }
+    }
+
+    /// Поле редактора (основное или колонки) под точкой окна.
+    private func editorView(atWindowPoint point: NSPoint) -> BlockTextView? {
+        var view = window?.contentView?.hitTest(point)
+        while let v = view, !(v is BlockTextView) { view = v.superview }
+        return view as? BlockTextView
+    }
+
+    /// Выделение отпущено над другим полем: целые блоки от начального до блока под курсором.
+    private func finishSelection(startedAt start: NSPoint) {
+        guard let window, let target = editorView(atWindowPoint: window.mouseLocationOutsideOfEventStream), target !== self,
+              let mine = controller, let other = target.controller else { return }
+        let end = target.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard let a = mine.block(atY: start.y)?.id, let b = other.block(atY: end.y)?.id else { return }
+        mine.selectBlocks(from: a, to: b)
     }
 
     /// Перетаскивание блока за ручку: линия показывает место, отпускание выполняет одну команду.
@@ -2006,24 +2106,33 @@ final class BlockTextView: NSTextView {
         guard let start = window.currentEvent.map({ convert($0.locationInWindow, from: nil) }) else { return }
         var last = start
         var moved = false
+        // Поле, над которым курсор: блок можно перенести в другую колонку или в основной текст.
+        var target: BlockTextView = self
         while let event = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
-            last = convert(event.locationInWindow, from: nil)
-            if abs(last.y - start.y) > 3 || abs(last.x - start.x) > 3 { moved = true }
+            let local = convert(event.locationInWindow, from: nil)
+            if abs(local.y - start.y) > 3 || abs(local.x - start.x) > 3 { moved = true }
+            let over = editorView(atWindowPoint: event.locationInWindow) ?? self
+            if over !== target {
+                target.dropLine = nil
+                target.dropEdge = nil
+                target = over
+            }
+            last = target.convert(event.locationInWindow, from: nil)
             if event.type == .leftMouseUp { break }
-            run { c in
+            if let c = target.controller {
                 if let edge = c.columnDrop(at: last, dragging: span.id) {
-                    dropEdge = edge.rect
-                    dropLine = nil
+                    target.dropEdge = edge.rect
+                    target.dropLine = nil
                 } else {
-                    dropEdge = nil
-                    dropLine = c.dropTarget(at: last)?.y
+                    target.dropEdge = nil
+                    target.dropLine = c.dropTarget(at: last)?.y
                 }
             }
             autoscroll(with: event)
         }
-        dropLine = nil
-        dropEdge = nil
-        if moved { run { $0.finishDrag(span.id, at: last) } } // Простое нажатие на ручку ничего не двигает.
+        target.dropLine = nil
+        target.dropEdge = nil
+        if moved { target.controller?.finishDrag(span.id, at: last) } // Простое нажатие на ручку ничего не двигает.
     }
 
     // MARK: Единое меню

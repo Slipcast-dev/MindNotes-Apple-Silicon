@@ -146,4 +146,55 @@ func runColumnsEditorTests() async {
             try await r.close()
         }
     }
+
+    await test("Колонки: перенос блока между полями и выделение блоков через колонки") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "А"), (.paragraph, "Б"), (.paragraph, "В"), (.paragraph, "Низ")])
+            r.tv.setFrameSize(NSSize(width: 700, height: 300))
+            let ids = r.doc.blocks.map(\.id)
+            r.controller.perform(.makeColumns(target: ids[0], dropped: ids[1], left: false))
+            r.controller.perform(.makeColumns(target: ids[1], dropped: ids[2], left: false))
+            r.controller.layoutColumns()
+            await spin()
+            let host = r.tv.subviews.compactMap { $0 as? ColumnsHost }.first!
+            checkEqual(host.columns.count, 3)
+            // Из колонки «В» в основной текст, ниже «Низ»: колонка пустеет и убирается тем же шагом.
+            r.tv.layoutManager?.ensureLayout(for: r.tv.textContainer!)
+            let low = r.controller.span(withID: ids[3])!
+            let y = r.controller.handleRect(for: low)!.maxY + 30
+            r.controller.finishDrag(ids[2], at: NSPoint(x: 200, y: y))
+            r.controller.layoutColumns()
+            await spin()
+            checkEqual(r.doc.block(ids[2])?.parentID, nil, "блок в основном тексте")
+            checkEqual(host.columns.count, 2, "опустевшая колонка убрана")
+            r.tv.undo(nil)
+            r.controller.layoutColumns()
+            await spin()
+            checkEqual(host.columns.count, 3, "одна отмена вернула и блок, и колонку")
+            // Из колонки «Б» в колонку «А»: перенос в другое поле.
+            let leftEditor = host.columns[0].editor
+            leftEditor.textView.layoutManager?.ensureLayout(for: leftEditor.textView.textContainer!)
+            let aSpan = leftEditor.span(withID: ids[0])!
+            leftEditor.finishDrag(ids[1], at: NSPoint(x: 60, y: leftEditor.handleRect(for: aSpan)!.maxY + 2))
+            r.controller.layoutColumns()
+            await spin()
+            checkEqual(r.doc.block(ids[1])?.parentID, r.doc.block(ids[0])?.parentID, "«Б» теперь в колонке «А»")
+            checkEqual(host.columns.count, 2, "колонка «Б» опустела и убрана")
+            // Выделение от «А» (колонка) до «Низ» (основной текст): целые блоки, копирование и удаление.
+            leftEditor.selectBlocks(from: ids[0], to: ids[3])
+            check(r.controller.hasBlockSelection && leftEditor.hasBlockSelection, "выделение общее для всех полей")
+            let board = NSPasteboard(name: NSPasteboard.Name("notes.test.\(UUID().uuidString)"))
+            r.controller.copy(to: board)
+            checkEqual(board.string(forType: .string), "А\nБ\nВ\nНиз", "копирование — блоки по очереди")
+            r.controller.deleteBlockSelection()
+            r.controller.layoutColumns()
+            await spin()
+            check(!r.doc.blocks.contains { ["А", "Б", "В", "Низ"].contains($0.plainText) }, "выделенные блоки удалены")
+            check(!r.doc.blocks.contains { $0.type == .columnList || $0.type == .column }, "пустой ряд убран")
+            check(!r.doc.blocks.isEmpty, "страница не осталась без строки")
+            r.tv.undo(nil)
+            check(r.doc.blocks.contains { $0.plainText == "Низ" }, "⌘Z вернул удалённое")
+            try await r.close()
+        }
+    }
 }

@@ -24,7 +24,22 @@ final class EditorSession {
     private var observers: [ObjectIdentifier: () -> Void] = [:]
 
     func observe(_ owner: AnyObject, _ body: @escaping () -> Void) { observers[ObjectIdentifier(owner)] = body }
-    func stopObserving(_ owner: AnyObject) { observers[ObjectIdentifier(owner)] = nil }
+    func stopObserving(_ owner: AnyObject) {
+        observers[ObjectIdentifier(owner)] = nil
+        selectionObservers[ObjectIdentifier(owner)] = nil
+    }
+
+    /// Выделенные целиком блоки через поля (колонки и основной текст), в порядке документа.
+    private(set) var blockSelection: [UUID] = []
+    private var selectionObservers: [ObjectIdentifier: () -> Void] = [:]
+
+    func observeSelection(_ owner: AnyObject, _ body: @escaping () -> Void) { selectionObservers[ObjectIdentifier(owner)] = body }
+
+    func setBlockSelection(_ ids: [UUID]) {
+        guard ids != blockSelection else { return }
+        blockSelection = ids
+        for body in selectionObservers.values { body() }
+    }
     private func notifyObservers() { for body in observers.values { body() } }
 
     var pageID: UUID { document.pageID }
