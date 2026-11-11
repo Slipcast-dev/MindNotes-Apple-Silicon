@@ -231,7 +231,16 @@ struct DatabaseScreen: View {
             .toggleStyle(.checkbox)
             .labelsHidden()
             .accessibilityLabel(Text("Выбрать запись"))
-            .frame(width: 30, alignment: .leading)
+            .frame(width: 18, alignment: .leading)
+            // Ручка: строку переносят за неё, чтобы перетаскивание не мешало правке ячеек.
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 10))
+                .foregroundColor(Tokens.muted)
+                .frame(width: 12, height: 36)
+                .contentShape(Rectangle())
+                .onDrag { NSItemProvider(object: "\(row.id.uuidString)|table" as NSString) }
+                .help(model.canReorder ? L("Перетащите, чтобы изменить порядок") : L("Порядок задан сортировкой"))
+                .accessibilityLabel(Text("Переместить запись"))
             ForEach(model.visibleColumns) { property in
                 Group {
                     if property.type == .title { titleCell(row) } else {
@@ -245,6 +254,7 @@ struct DatabaseScreen: View {
             }
         }
         .overlay(Rectangle().fill(Tokens.line).frame(height: 1), alignment: .bottom)
+        .acceptsRecord { id, _ in model.reorder(record: id, before: row.id) }
         .contextMenu {
             Button("Открыть") { shell.openPage(row.id) }
             Button("Дублировать") { shell.duplicatePage(row.id) }

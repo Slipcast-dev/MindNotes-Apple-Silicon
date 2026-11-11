@@ -181,11 +181,11 @@ final class DatabaseModel: ObservableObject {
             var loaded: [RecordSection] = []
             if let property = current.groupProperty(fresh.properties, kind: kind) {
                 for group in RecordGroup.groups(for: property, people: people) {
-                    let page = try await store.queryRecords(database: fresh, state: current.narrowed(by: [group.rule]), limit: limits[group.id] ?? Self.pageSize, offset: 0)
+                    let page = try await store.queryRecords(database: fresh, state: current.narrowed(by: [group.rule]), limit: limits[group.id] ?? Self.pageSize, offset: 0, manualView: manualOrderView)
                     loaded.append(RecordSection(id: group.id, group: group, rows: page.rows, total: page.total))
                 }
             } else {
-                let page = try await store.queryRecords(database: fresh, state: current, limit: limits["all"] ?? Self.pageSize, offset: 0)
+                let page = try await store.queryRecords(database: fresh, state: current, limit: limits["all"] ?? Self.pageSize, offset: 0, manualView: manualOrderView)
                 loaded = [RecordSection(id: "all", group: nil, rows: page.rows, total: page.total)]
             }
             sections = loaded
@@ -229,6 +229,32 @@ final class DatabaseModel: ObservableObject {
     func showMonth(_ value: LocalDate) {
         month = value.firstOfMonth
         reload()
+    }
+
+    /// Ручной порядок есть у представлений базы; встроенное представление показывает порядок добавления.
+    private var manualOrderView: UUID? { isEmbedded ? nil : activeView?.id }
+    /// Перетаскивать записи можно, пока у вида нет сортировки, как в Notion.
+    var canReorder: Bool { manualOrderView != nil && state.sorts.isEmpty }
+
+    /// Запись встаёт перед `before` (nil — в конец). На доске перенос в другую колонку меняет и значение группы.
+    func reorder(record id: UUID, before: UUID?, from source: RecordSection? = nil, to target: RecordSection? = nil) {
+        guard id != before else { return }
+        guard canReorder, let view = manualOrderView else {
+            if let target, source?.id != target.id { move(record: id, from: source, to: target) }
+            report(isEmbedded ? L("Порядок записей меняется в самой базе, а не во встроенном представлении.")
+                              : L("Порядок задан сортировкой: уберите её, чтобы расставлять записи вручную."))
+            return
+        }
+        var change: (property: UUID, value: PropertyValue?)?
+        if let target, let group = target.group, source?.id != target.id,
+           let type = database?.property(group.property)?.type, let row = rows.first(where: { $0.id == id }) {
+            change = (group.property, group.value(replacing: row.values[group.property], from: source?.group, type: type))
+        }
+        perform { [store] in
+            let now = SystemClock().nowMillis()
+            if let change { try await store.setValue(pages: [id], property: change.property, value: change.value, now: now) }
+            try await store.moveRecord(id, before: before, view: view)
+        }
     }
 
     /// Перенос карточки между группами: меняется значение свойства группировки.

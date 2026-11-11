@@ -1058,3 +1058,12 @@
 "Файлы и медиа" = "Files & media";
 "Добавить файл…" = "Add File…";
 "Файл недоступен." = "The file is unavailable.";
+
+/* M10.3: ручной порядок */
+"Ручной порядок есть только у представлений базы." = "Manual order exists only in database views.";
+"Запись недоступна." = "The record is unavailable.";
+"Порядок записей меняется в самой базе, а не во встроенном представлении." = "Change the record order in the database itself, not in an embedded view.";
+"Порядок задан сортировкой: уберите её, чтобы расставлять записи вручную." = "The order is set by a sort: remove it to arrange records by hand.";
+"Перетащите, чтобы изменить порядок" = "Drag to change the order";
+"Порядок задан сортировкой" = "The order is set by a sort";
+"Переместить запись" = "Move record";

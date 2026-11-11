@@ -158,10 +158,16 @@ enum DatabaseQuerySQL {
     }
 
     /// Соединения и выражения сортировки: пустые значения всегда в конце, ничья — по порядку записей.
-    static func order(_ sorts: [SortRule], properties: [PropertyDefinition]) -> (joins: Fragment, order: Fragment) {
+    /// Без сортировки и с `manualView` — ручной порядок этого представления; записи без места в нём идут в конце.
+    static func order(_ sorts: [SortRule], properties: [PropertyDefinition], manualView: UUID? = nil) -> (joins: Fragment, order: Fragment) {
         var joins = Fragment(sql: "", args: [])
         var order = Fragment(sql: "", args: [])
         var terms: [String] = []
+        if sorts.isEmpty, let manualView {
+            joins.sql += " LEFT JOIN view_record_order vo ON vo.view_id = ? AND vo.page_id = p.id"
+            joins.args.append(SQLValue(manualView))
+            terms.append("vo.sort_key IS NULL, vo.sort_key")
+        }
         for (index, sort) in sorts.enumerated() {
             guard var def = properties.first(where: { $0.id == sort.property }) else { continue }
             def.type = def.valueType
@@ -273,9 +279,14 @@ extension SQLiteWorkspace {
 
     /// Страница записей под фильтром; строки за пределами страницы не читаются (FR-11).
     func queryRecords(database: Database, state: DatabaseViewState, limit: Int, offset: Int) async throws -> RecordPage {
+        try await queryRecords(database: database, state: state, limit: limit, offset: offset, manualView: nil)
+    }
+
+    /// `manualView` — представление, чей ручной порядок действует, когда сортировок нет.
+    func queryRecords(database: Database, state: DatabaseViewState, limit: Int, offset: Int, manualView: UUID?) async throws -> RecordPage {
         try await reader.run { db in
             let filter = DatabaseQuerySQL.compile(state.filter, properties: database.properties)
-            let (joins, order) = DatabaseQuerySQL.order(state.sorts, properties: database.properties)
+            let (joins, order) = DatabaseQuerySQL.order(state.sorts, properties: database.properties, manualView: manualView)
             let whereSQL = "p.database_id = ? AND p.deleted_at IS NULL" + (filter.map { " AND \($0.sql)" } ?? "")
             let whereArgs = [SQLValue(database.id)] + (filter?.args ?? [])
             let total = try db.scalarInt("SELECT count(*) FROM pages p WHERE \(whereSQL)", whereArgs) ?? 0
@@ -1093,7 +1104,7 @@ extension SQLiteWorkspace {
 
     /// Часть дублирования страниц: база в поддереве копируется целиком, копия записи остаётся в базе и сохраняет значения.
     static func duplicateDatabaseData(_ db: SQLiteConnection, pageMap: [UUID: UUID], ids: IDGenerator, now: Int64) throws {
-        var databaseMap: [UUID: UUID] = [:], propertyMap: [UUID: UUID] = [:], optionMap: [UUID: UUID] = [:]
+        var databaseMap: [UUID: UUID] = [:], propertyMap: [UUID: UUID] = [:], optionMap: [UUID: UUID] = [:], viewMap: [UUID: UUID] = [:]
         var relationConfigs: [UUID: PropertyConfig] = [:], rollupConfigs: [UUID: PropertyConfig] = [:]
         for old in pageMap.keys {
             guard let id = try db.query("SELECT id FROM databases WHERE page_id=?", [SQLValue(old)], { $0.uuid(0) }).first ?? nil, let page = pageMap[old] else { continue }
@@ -1119,15 +1130,17 @@ extension SQLiteWorkspace {
                     try db.run("INSERT INTO property_options(id, property_id, name, color, sort_key) VALUES(?,?,?,?,?)", [SQLValue(no), SQLValue(np), .text(o.name), SQLValue(o.color), .text(o.key)])
                 }
             }
-            let views = try db.query("SELECT name, kind, sort_key, state_json FROM database_views WHERE database_id=?", [SQLValue(id)]) { (name: $0.text(0), kind: $0.text(1), key: $0.text(2), json: $0.text(3)) }
+            let views = try db.query("SELECT name, kind, sort_key, state_json, id FROM database_views WHERE database_id=?", [SQLValue(id)]) { (name: $0.text(0), kind: $0.text(1), key: $0.text(2), json: $0.text(3), id: $0.uuid(4)) }
             for v in views {
+                let newView = ids.next()
+                if let old = v.id { viewMap[old] = newView }
                 var json = v.json
                 for (from, to) in propertyMap.merging(optionMap, uniquingKeysWith: { a, _ in a }) {
                     // В JSON идентификаторы записаны кодировщиком UUID — прописными буквами.
                     json = json.replacingOccurrences(of: from.uuidString, with: to.uuidString)
                 }
                 try db.run("INSERT INTO database_views(id, database_id, name, kind, sort_key, state_json) VALUES(?,?,?,?,?,?)",
-                           [SQLValue(ids.next()), SQLValue(copy), .text(v.name), .text(v.kind), .text(v.key), .text(json)])
+                           [SQLValue(newView), SQLValue(copy), .text(v.name), .text(v.kind), .text(v.key), .text(json)])
             }
         }
         // Связь копии смотрит на копию цели, если цель скопирована. Пара вне копии не получает второй обратной стороны:
@@ -1204,6 +1217,14 @@ extension SQLiteWorkspace {
                 guard let property, let option else { continue }
                 try db.run("INSERT INTO property_value_options(page_id, property_id, option_id) VALUES(?,?,?)",
                            [SQLValue(new), SQLValue(propertyMap[property] ?? property), SQLValue(optionMap[option] ?? option)])
+            }
+        }
+        // Ручной порядок копии: те же места у скопированных записей.
+        for (oldView, newView) in viewMap {
+            let rows = try db.query("SELECT page_id, sort_key FROM view_record_order WHERE view_id=?", [SQLValue(oldView)]) { ($0.uuid(0), $0.text(1)) }
+            for (page, key) in rows {
+                guard let page, let copied = pageMap[page] else { continue }
+                try db.run("INSERT OR IGNORE INTO view_record_order(view_id, page_id, sort_key) VALUES(?,?,?)", [SQLValue(newView), SQLValue(copied), .text(key)])
             }
         }
     }

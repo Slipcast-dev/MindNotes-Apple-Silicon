@@ -171,7 +171,13 @@ struct BoardView: View {
             if let group = section.group {
                 GroupHeader(group: group, count: section.total, property: model.database?.property(group.property))
             }
-            ForEach(section.rows) { RecordCard(model: model, row: $0, dragTag: section.id) }
+            ForEach(section.rows) { row in
+                // Карточка, брошенная на другую, встаёт перед ней — в этой же или в соседней колонке.
+                RecordCard(model: model, row: row, dragTag: section.id)
+                    .acceptsRecord { id, from in
+                        model.reorder(record: id, before: row.id, from: model.sections.first { $0.id == from }, to: section)
+                    }
+            }
             if section.rows.count < section.total {
                 Button(L("Показать ещё (осталось %d)", section.total - section.rows.count)) { model.showMore(section.id) }
                     .buttonStyle(NotesButtonStyle(kind: .plain))
@@ -183,7 +189,8 @@ struct BoardView: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(Tokens.side))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Tokens.line))
         .acceptsRecord { id, from in
-            model.move(record: id, from: model.sections.first { $0.id == from }, to: section)
+            let source = model.sections.first { $0.id == from }
+            if model.canReorder { model.reorder(record: id, before: nil, from: source, to: section) } else { model.move(record: id, from: source, to: section) }
         }
     }
 }
@@ -257,6 +264,8 @@ struct ListKindView: View {
                     }
                     .buttonStyle(.plain)
                     .overlay(Rectangle().fill(Tokens.line).frame(height: 1), alignment: .bottom)
+                    .onDrag { NSItemProvider(object: "\(row.id.uuidString)|\(section.id)" as NSString) }
+                    .acceptsRecord { id, _ in model.reorder(record: id, before: row.id) }
                 }
             }
         }
@@ -269,7 +278,10 @@ struct GalleryView: View {
     var body: some View {
         SectionsScroll(model: model) { section in
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: 320), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
-                ForEach(section.rows) { RecordCard(model: model, row: $0, dragTag: section.id, cover: model.state.showCover) }
+                ForEach(section.rows) { row in
+                    RecordCard(model: model, row: row, dragTag: section.id, cover: model.state.showCover)
+                        .acceptsRecord { id, _ in model.reorder(record: id, before: row.id) }
+                }
             }
         }
     }
