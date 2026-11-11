@@ -87,6 +87,8 @@ extension BlockDocument {
         for i in si...ei where !hidden.contains(blocks[i].id) {
             let b = blocks[i]
             // Оригинал синхронизированного блока копируется копией, как в Notion: содержимое остаётся одно (ADR-0012).
+            // Колонки копируются содержимым по очереди: плоские фрагменты не держат ряд.
+            if b.type == .columnList || b.type == .column { continue }
             if b.type == .synced {
                 out.append(AtomData.syncedRef(source: b.id))
                 hidden.formUnion(descendants(of: b.id).map(\.id))

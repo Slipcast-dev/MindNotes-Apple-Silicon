@@ -430,7 +430,8 @@ enum BlockEditing {
 
         case let .outdent(id):
             guard let b = document.block(id) else { throw EditError.blockNotFound(id) }
-            guard let parentID = b.parentID, let parent = document.block(parentID) else {
+            // Из колонки на уровень ряда не выносится: блок под рядом без колонки не виден (ADR-0013).
+            guard let parentID = b.parentID, let parent = document.block(parentID), parent.type != .column else {
                 return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
             }
             var n = b
@@ -459,7 +460,7 @@ enum BlockEditing {
 
         case let .makeColumns(targetID, droppedID, left):
             guard targetID != droppedID, let target = document.block(targetID), let dropped = document.block(droppedID),
-                  target.type != .column, target.type != .columnList,
+                  target.type != .column, target.type != .columnList, dropped.type != .column, dropped.type != .columnList,
                   !document.descendants(of: droppedID).contains(where: { $0.id == targetID }) else {
                 return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
             }

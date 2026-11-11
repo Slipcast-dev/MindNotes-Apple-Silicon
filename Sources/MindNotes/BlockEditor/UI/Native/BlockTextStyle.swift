@@ -669,3 +669,150 @@ final class LiveViewHost: NSView {
         onResize?(bounds.height)
     }
 }
+
+/// Место ряда колонок в основном тексте (ADR-0013): высота — по самой высокой колонке.
+final class ColumnsPlaceholderCell: NSTextAttachmentCell {
+    private let height: () -> CGFloat
+
+    init(height: @escaping () -> CGFloat) {
+        self.height = height
+        super.init(textCell: "")
+    }
+
+    required init(coder: NSCoder) { fatalError("не используется") }
+
+    override func cellFrame(for textContainer: NSTextContainer, proposedLineFragment lineFrag: NSRect, glyphPosition position: NSPoint, characterIndex charIndex: Int) -> NSRect {
+        NSRect(x: 0, y: 0, width: max(40, lineFrag.width - position.x - 1), height: max(28, height()))
+    }
+
+    override func draw(withFrame frame: NSRect, in view: NSView?) {}
+}
+
+/// Ряд колонок поверх места в тексте: поле редактора на каждую колонку, между ними — полоски ширины.
+/// На узком окне колонки идут друг под другом.
+@MainActor
+final class ColumnsHost: NSView {
+    struct Column {
+        let id: UUID
+        let editor: BlockEditorController
+    }
+
+    static let gap: CGFloat = 20
+    static let stackBelow: CGFloat = 480
+
+    private(set) var columns: [Column] = []
+    var ratios: [Double] = []
+    private var heights: [UUID: CGFloat] = [:]
+    /// Высота изменилась: основной текст пересчитывает место.
+    var onHeight: (() -> Void)?
+    /// Ширины после перетаскивания полоски: одна правка.
+    var onRatios: (([Double]) -> Void)?
+    private var dragging: (index: Int, startX: CGFloat, start: [Double])?
+
+    override var isFlipped: Bool { true }
+
+    var stacked: Bool { bounds.width < Self.stackBelow }
+
+    var contentHeight: CGFloat {
+        let list = columns.map { heights[$0.id] ?? 24 }
+        guard !list.isEmpty else { return 28 }
+        return stacked ? list.reduce(0, +) + Self.gap * CGFloat(list.count - 1) : list.max() ?? 28
+    }
+
+    var columnIDs: [UUID] { columns.map(\.id) }
+
+    func setColumns(_ list: [Column]) {
+        for old in columns where !list.contains(where: { $0.id == old.id }) { old.editor.textView.removeFromSuperview() }
+        columns = list
+        for column in list where column.editor.textView.superview !== self {
+            addSubview(column.editor.textView)
+            column.editor.onHeightChange = { [weak self] h in
+                guard let self, self.heights[column.id] != h else { return }
+                self.heights[column.id] = h
+                self.needsLayout = true
+                self.onHeight?()
+            }
+        }
+        needsLayout = true
+    }
+
+    private func frames() -> [NSRect] {
+        let count = CGFloat(columns.count)
+        guard count > 0 else { return [] }
+        if stacked {
+            var y: CGFloat = 0
+            return columns.map { c in
+                let h = heights[c.id] ?? 24
+                defer { y += h + Self.gap }
+                return NSRect(x: 0, y: y, width: bounds.width, height: h)
+            }
+        }
+        let usable = bounds.width - Self.gap * (count - 1)
+        let parts = ratios.count == columns.count ? ratios : Array(repeating: 1 / Double(columns.count), count: columns.count)
+        var x: CGFloat = 0
+        return zip(columns, parts).map { c, r in
+            let w = max(40, usable * CGFloat(r))
+            defer { x += w + Self.gap }
+            return NSRect(x: x, y: 0, width: w, height: max(heights[c.id] ?? 24, contentHeight))
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        for (column, frame) in zip(columns, frames()) where column.editor.textView.frame != frame {
+            column.editor.textView.frame = frame
+        }
+    }
+
+    // MARK: Ширина колонок
+
+    private func gripIndex(at point: NSPoint) -> Int? {
+        guard !stacked else { return nil }
+        let list = frames()
+        for i in 0..<max(0, list.count - 1) {
+            let zone = NSRect(x: list[i].maxX, y: 0, width: Self.gap, height: bounds.height)
+            if zone.contains(point) { return i }
+        }
+        return nil
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        return gripIndex(at: local) != nil ? self : super.hitTest(point)
+    }
+
+    override func resetCursorRects() {
+        guard !stacked else { return }
+        let list = frames()
+        for i in 0..<max(0, list.count - 1) {
+            addCursorRect(NSRect(x: list[i].maxX, y: 0, width: Self.gap, height: bounds.height), cursor: .resizeLeftRight)
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let i = gripIndex(at: point) else { return super.mouseDown(with: event) }
+        dragging = (i, point.x, ratios.count == columns.count ? ratios : Array(repeating: 1 / Double(columns.count), count: columns.count))
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let drag = dragging else { return super.mouseDragged(with: event) }
+        let usable = max(1, bounds.width - Self.gap * CGFloat(columns.count - 1))
+        let delta = Double((convert(event.locationInWindow, from: nil).x - drag.startX) / usable)
+        var next = drag.start
+        // Ширина переходит между двумя соседними колонками; каждая не уже 10%.
+        let pair = drag.start[drag.index] + drag.start[drag.index + 1]
+        let left = min(pair - 0.1, max(0.1, drag.start[drag.index] + delta))
+        next[drag.index] = left
+        next[drag.index + 1] = pair - left
+        ratios = next
+        needsLayout = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard dragging != nil else { return super.mouseUp(with: event) }
+        dragging = nil
+        onRatios?(ratios)
+        window?.invalidateCursorRects(for: self)
+    }
+}

@@ -12,6 +12,8 @@ final class PageEditorModel: ObservableObject {
     /// Открытое встроенное представление.
     @Published var editingEmbed: Block?
     private let panels: EditorPanels
+    /// Панели «/» и форматирования у полей колонок (ADR-0013).
+    private var columnPanels: [EditorPanels] = []
 
     var pageID: UUID { session.pageID }
 
@@ -20,6 +22,10 @@ final class PageEditorModel: ObservableObject {
         controller = BlockEditorController(session: session, style: style)
         panels = EditorPanels(controller: controller)
         controller.onError = onError
+        controller.configureColumnEditor = { [weak self] editor in
+            // Свои панели у поля колонки; набор настроек уже унаследован, панели переопределяют свои пункты.
+            self?.columnPanels.append(EditorPanels(controller: editor))
+        }
         controller.onHeightChange = { [weak self] in self?.contentHeight = $0 }
         controller.updateHeight(force: true)
         controller.onEditTable = { [weak self] block in
@@ -45,7 +51,10 @@ final class PageEditorModel: ObservableObject {
 
     func emergencyText(title: String) -> String { session.emergencyText(title: title) }
 
-    func closePanels() { panels.close() }
+    func closePanels() {
+        panels.close()
+        columnPanels.forEach { $0.close() }
+    }
 }
 
 struct EditingTable: Identifiable {

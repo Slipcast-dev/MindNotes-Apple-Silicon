@@ -111,9 +111,18 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     /// Метки, снятые для следующего ввода (⌘B в конце жирного текста).
     private(set) var pendingRemoved: Set<String> = []
 
-    init(session: EditorSession, style: BlockTextStyle = BlockTextStyle()) {
+    /// Поле одной колонки (ADR-0013): показывает только потомков этого блока-колонки. nil — вся страница.
+    let scope: UUID?
+    /// Настройка поля колонки так же, как основного редактора (ссылки, вложения, меню); задаёт оболочка.
+    var configureColumnEditor: ((BlockEditorController) -> Void)?
+    /// Ряды колонок: ID ряда → вид с полями колонок поверх места в тексте.
+    private var columnHosts: [UUID: ColumnsHost] = [:]
+    private var syncPending = false
+
+    init(session: EditorSession, style: BlockTextStyle = BlockTextStyle(), scope: UUID? = nil) {
         self.session = session
         self.style = style
+        self.scope = scope
         let storage = NSTextStorage()
         let layout = NSLayoutManager()
         storage.addLayoutManager(layout)
@@ -136,6 +145,21 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         }
         textView.controller = self
         textView.delegate = self
+        // Правка в другом поле той же страницы (колонка или основной текст): вид перестраивается по модели.
+        // Отложенно: свой редактор к этому моменту уже совпадает с моделью, и перестройка ничего не меняет.
+        session.observe(self) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.syncPending else { return }
+                self.syncPending = true
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.syncPending = false
+                    guard !self.applying, !self.textView.hasMarkedText() else { return }
+                    self.syncView()
+                    self.layoutColumns()
+                }
+            }
+        }
         textView.drawsBackground = false
         textView.isRichText = false // Оформление задаёт модель: панель шрифтов и ⌘B не должны менять только вид.
         textView.importsGraphics = false
@@ -166,8 +190,18 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         var lastNumber: [UUID?: (id: UUID, value: Int)] = [:]
         var previousSibling: [UUID?: UUID] = [:]
         var out: [Block] = []
+        // Колонки: основной редактор не показывает содержимое рядов, поле колонки — только своё (ADR-0013).
+        var outside: Set<UUID> = []
+        if let scope { depth[scope] = -1 }
         for block in document.blocks {
             let parent = block.parentID.flatMap { document.block($0) }
+            if scope != nil {
+                // Глубина есть только у самой колонки (−1) и у уже взятых блоков: берём только её потомков.
+                guard let p = block.parentID, depth[p] != nil else { continue }
+            } else if let p = parent, p.type == .columnList || outside.contains(p.id) {
+                outside.insert(block.id)
+                continue
+            }
             depth[block.id] = parent.map { (depth[$0.id] ?? 0) + 1 } ?? 0
             if block.type == .numbered {
                 let key = block.parentID
@@ -266,7 +300,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     /// `force`: сообщить высоту, даже если она не менялась (подписчик появился позже первого расчёта).
     func updateHeight(force: Bool = false) {
-        defer { layoutLiveViews() }
+        defer { layoutLiveViews(); layoutColumns() }
         guard let manager = textView.layoutManager, let container = textView.textContainer else { return }
         manager.ensureLayout(for: container)
         var height = manager.usedRect(for: container).height
@@ -379,12 +413,110 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     private var liveLayoutPending = false
 
     private func scheduleLiveLayout() {
-        guard !liveViews.isEmpty, !liveLayoutPending else { return }
+        guard !liveViews.isEmpty || !columnHosts.isEmpty, !liveLayoutPending else { return }
         liveLayoutPending = true
         DispatchQueue.main.async { [weak self] in
             self?.liveLayoutPending = false
             self?.layoutLiveViews()
+            self?.layoutColumns()
         }
+    }
+
+    // MARK: Колонки (M13, ADR-0013)
+
+    /// Ставит ряды колонок на их места: поле на каждую колонку, состав колонок — по модели.
+    func layoutColumns() {
+        guard scope == nil, let manager = textView.layoutManager, let container = textView.textContainer else { return }
+        let rows = visible.filter { $0.type == .columnList }
+        for (id, host) in columnHosts where !rows.contains(where: { $0.id == id }) {
+            host.removeFromSuperview()
+            for c in host.columns { session.stopObserving(c.editor) }
+            columnHosts[id] = nil
+        }
+        guard !rows.isEmpty else { return }
+        manager.ensureLayout(for: container)
+        let shown = Dictionary(spans.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for row in rows {
+            guard let span = shown[row.id] else { continue }
+            let host = columnHosts[row.id] ?? makeColumnsHost(row.id)
+            let columns = document.blocks.filter { $0.parentID == row.id && $0.type == .column }
+            if host.columnIDs != columns.map(\.id) {
+                let reuse = Dictionary(host.columns.map { ($0.id, $0.editor) }, uniquingKeysWith: { a, _ in a })
+                host.setColumns(columns.map { c in
+                    if let editor = reuse[c.id] { return ColumnsHost.Column(id: c.id, editor: editor) }
+                    let editor = BlockEditorController(session: session, style: style, scope: c.id)
+                    editor.inherit(from: self)
+                    configureColumnEditor?(editor)
+                    editor.renderAll()
+                    return ColumnsHost.Column(id: c.id, editor: editor)
+                })
+            }
+            host.ratios = AtomData.normalizedRatios(columns.map(AtomData.columnRatio(of:)))
+            let glyphs = manager.glyphRange(forCharacterRange: NSRange(location: span.location, length: 1), actualCharacterRange: nil)
+            var rect = manager.boundingRect(forGlyphRange: glyphs, in: container)
+                .offsetBy(dx: textView.textContainerOrigin.x, dy: textView.textContainerOrigin.y)
+            rect.size.height = host.contentHeight
+            // У поля колонки своё поле под ручку блока: ряд сдвигается на него влево, текст колонок встаёт по краю страницы.
+            rect.origin.x -= Self.gutter
+            rect.size.width += Self.gutter
+            if host.superview !== textView { textView.addSubview(host) }
+            if host.frame != rect { host.frame = rect }
+            host.needsLayout = true
+        }
+    }
+
+    /// Поле колонки умеет то же, что основной редактор: ссылки, вложения, упоминания, превью, представления.
+    func inherit(from main: BlockEditorController) {
+        onError = main.onError
+        pageSearch = main.pageSearch
+        chooseLinkKind = main.chooseLinkKind
+        fetchLinkPreview = main.fetchLinkPreview
+        liveView = main.liveView
+        onOpenURL = main.onOpenURL
+        pageTitle = main.pageTitle
+        peopleSource = main.peopleSource
+        requestMentionDate = main.requestMentionDate
+        scheduleReminder = main.scheduleReminder
+        onOpenLink = main.onOpenLink
+        addAttachment = main.addAttachment
+        assetURL = main.assetURL
+        pickFile = main.pickFile
+        onEditTable = main.onEditTable
+        onPlayVideo = main.onPlayVideo
+        pickDatabaseView = main.pickDatabaseView
+        embedSummary = main.embedSummary
+        onOpenEmbed = main.onOpenEmbed
+        requestLink = main.requestLink
+    }
+
+    private func makeColumnsHost(_ rowID: UUID) -> ColumnsHost {
+        let host = ColumnsHost()
+        host.onHeight = { [weak self] in self?.columnsHeightChanged(rowID) }
+        host.onRatios = { [weak self] ratios in _ = self?.perform(.setColumnRatios(rowID, ratios)) }
+        columnHosts[rowID] = host
+        return host
+    }
+
+    /// Колонка выросла или уменьшилась: место ряда в тексте пересчитывается.
+    private func columnsHeightChanged(_ rowID: UUID) {
+        guard let span = spans.first(where: { $0.id == rowID }), let manager = textView.layoutManager else { return }
+        manager.invalidateLayout(forCharacterRange: NSRange(location: span.location, length: 1), actualCharacterRange: nil)
+        updateHeight()
+        textView.needsDisplay = true
+    }
+
+    /// Бросок блока на левый или правый край другого блока: блок встаёт колонкой рядом (как в Notion).
+    func columnDrop(at point: NSPoint, dragging id: UUID) -> (target: UUID, left: Bool, rect: NSRect)? {
+        guard let span = block(atY: point.y), span.id != id, let target = document.block(span.id),
+              target.type != .columnList, let rect = blockRect(for: span) else { return nil }
+        let left = textView.textContainerOrigin.x + CGFloat(depths[span.id] ?? 0) * BlockTextStyle.nestIndent
+        let width = (textView.textContainer?.size.width ?? textView.bounds.width) - CGFloat(depths[span.id] ?? 0) * BlockTextStyle.nestIndent
+        let zone = min(60, width * 0.15)
+        // Только над самим блоком и внутри текста: ручка левее, обычный перенос вверх-вниз колонок не создаёт.
+        guard point.y >= rect.minY, point.y <= rect.maxY, point.x >= left + 6 else { return nil }
+        if point.x < left + zone { return (span.id, true, NSRect(x: left - 4, y: rect.minY, width: 3, height: rect.height)) }
+        if point.x > left + width - zone { return (span.id, false, NSRect(x: left + width, y: rect.minY, width: 3, height: rect.height)) }
+        return nil
     }
 
     /// Ставит живые представления на места их блоков; лишние убирает.
@@ -497,6 +629,11 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             caretKeep(range)
         case .deleteBlock:
             perform(.batch(topSelectedBlockIDs().map { .deleteBlock($0) }))
+            // Опустевшая колонка убирается; ряд из одной колонки распускается.
+            if let scope, !document.blocks.contains(where: { $0.parentID == scope }), let row = document.block(scope)?.parentID {
+                perform(.tidyColumns(row))
+                return
+            }
             if document.blocks.isEmpty { perform(.insertBlock(after: nil, type: .paragraph)) }
         case .linkPage, .beginPageLink:
             if case .beginPageLink = action {
@@ -777,6 +914,9 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             let url = AtomData.url(of: block)
             return EmbedBlockCell(provider: url.map { LinkCard.embed($0).provider } ?? "", address: url?.absoluteString ?? block.plainText,
                                   ink: style.ink, muted: style.muted, line: style.line, soft: style.soft)
+        case .columnList:
+            let id = block.id
+            return ColumnsPlaceholderCell { [weak self] in self?.columnHosts[id]?.contentHeight ?? 40 }
         case .databaseView where liveHost(for: block) != nil:
             return LiveViewPlaceholderCell(height: CGFloat(AtomData.viewHeight(of: block)), line: style.line)
         case .databaseView:
@@ -902,6 +1042,15 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     }
 
     func finishDrag(_ id: UUID, at point: NSPoint) {
+        if let edge = columnDrop(at: point, dragging: id) {
+            // Блок уходит из своей колонки: опустевшая колонка убирается тем же шагом отмены.
+            var commands: [EditCommand] = [.makeColumns(target: edge.target, dropped: id, left: edge.left)]
+            if let column = document.block(id)?.parentID.flatMap({ document.block($0) }), column.type == .column, let row = column.parentID {
+                commands.append(.tidyColumns(row))
+            }
+            perform(.batch(commands))
+            return
+        }
         guard let target = dropTarget(at: point), target.after != id, let block = document.block(id) else { return }
         // То же место — не правка: нет записи и лишнего шага отмены.
         let siblings = document.blocks.filter { $0.parentID == block.parentID }
@@ -1802,12 +1951,20 @@ final class BlockTextView: NSTextView {
             NSColor.controlAccentColor.setFill()
             NSRect(x: textContainerOrigin.x, y: y, width: bounds.width - textContainerOrigin.x, height: 2).fill()
         }
+        if let edge = dropEdge {
+            NSColor.controlAccentColor.setFill()
+            edge.fill()
+        }
     }
 
     private var hoveredBlock: UUID? {
         didSet { if oldValue != hoveredBlock { needsDisplay = true } }
     }
     private var dropLine: CGFloat? {
+        didSet { needsDisplay = true }
+    }
+    /// Бросок на край блока: вертикальная черта — блок встанет колонкой.
+    private var dropEdge: NSRect? {
         didSet { needsDisplay = true }
     }
 
@@ -1851,12 +2008,21 @@ final class BlockTextView: NSTextView {
         var moved = false
         while let event = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
             last = convert(event.locationInWindow, from: nil)
-            if abs(last.y - start.y) > 3 { moved = true }
+            if abs(last.y - start.y) > 3 || abs(last.x - start.x) > 3 { moved = true }
             if event.type == .leftMouseUp { break }
-            run { dropLine = $0.dropTarget(at: last)?.y }
+            run { c in
+                if let edge = c.columnDrop(at: last, dragging: span.id) {
+                    dropEdge = edge.rect
+                    dropLine = nil
+                } else {
+                    dropEdge = nil
+                    dropLine = c.dropTarget(at: last)?.y
+                }
+            }
             autoscroll(with: event)
         }
         dropLine = nil
+        dropEdge = nil
         if moved { run { $0.finishDrag(span.id, at: last) } } // Простое нажатие на ручку ничего не двигает.
     }
 

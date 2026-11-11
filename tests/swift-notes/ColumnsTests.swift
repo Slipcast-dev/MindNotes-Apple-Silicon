@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// M13, шаг 2 (ADR-0013): модель колонок — ряд, колонки, доли ширины, распускание.
 func runColumnsTests() async {
@@ -56,5 +56,94 @@ func runColumnsTests() async {
         d = try apply(.tidyColumns(row), d)
         checkEqual(d.blocks.map(\.plainText), ["Б", "А", "хвост"], "ряд распущен, порядок сохранён")
         check(!d.blocks.contains { $0.type == .column || $0.type == .columnList }, "ни ряда, ни колонок")
+    }
+}
+
+/// Колонки в настоящем редакторе: поля колонок поверх места в тексте, общая модель и отмена.
+@MainActor
+func runColumnsEditorTests() async {
+    func spin() async { for _ in 0..<5 { RunLoop.main.run(until: Date().addingTimeInterval(0.02)); await Task.yield() } }
+
+    await test("Колонки в редакторе: поля колонок, ввод, место по высоте, бросок на край, отмена") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "Левая"), (.paragraph, "Правая"), (.paragraph, "Ниже")])
+            r.tv.setFrameSize(NSSize(width: 700, height: 300))
+            let left = r.doc.blocks[0].id, right = r.doc.blocks[1].id
+            r.controller.perform(.makeColumns(target: left, dropped: right, left: false))
+            r.controller.layoutColumns()
+            await spin()
+            checkEqual(r.tv.string, "\u{FFFC}\nНиже", "в основном тексте — место ряда и абзац ниже")
+            let host = r.tv.subviews.compactMap { $0 as? ColumnsHost }.first
+            check(host != nil, "поля колонок поставлены")
+            guard let host else { return }
+            checkEqual(host.columns.count, 2)
+            checkEqual(host.columns.map { $0.editor.textView.string }, ["Левая", "Правая"], "каждое поле — своя колонка")
+            check(host.columns[0].editor.textView.frame.maxX <= host.columns[1].editor.textView.frame.minX, "колонки рядом")
+
+            // Ввод в правой колонке меняет общую модель; основной текст не трогается.
+            let rightEditor = host.columns[1].editor
+            rightEditor.textView.window?.makeFirstResponder(rightEditor.textView)
+            rightEditor.textView.setSelectedRange(NSRange(location: 6, length: 0))
+            rightEditor.textView.insertText("!", replacementRange: NSRange(location: NSNotFound, length: 0))
+            checkEqual(r.doc.block(right)?.plainText, "Правая!")
+            await spin()
+            checkEqual(r.tv.string, "\u{FFFC}\nНиже")
+
+            // Enter в колонке: новый блок остаётся в ней же; место ряда растёт.
+            let before = host.frame.height
+            rightEditor.textView.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+            rightEditor.textView.insertText("ещё", replacementRange: NSRange(location: NSNotFound, length: 0))
+            await spin()
+            let column = r.doc.block(right)!.parentID!
+            checkEqual(r.doc.blocks.filter { $0.parentID == column }.map(\.plainText), ["Правая!", "ещё"], "новая строка в колонке")
+            check(host.frame.height > before, "место ряда выросло: \(before) → \(host.frame.height)")
+
+            // Из колонки на уровень ряда не выносится.
+            rightEditor.perform(.outdent(r.doc.blocks.first { $0.plainText == "ещё" }!.id))
+            checkEqual(r.doc.block(r.doc.blocks.first { $0.plainText == "ещё" }!.id)?.parentID, column)
+
+            // Бросок «Ниже» на правый край места ряда — не колонка (это сам ряд); на левый край «Левой» в поле — третья колонка.
+            let below = r.doc.blocks.first { $0.plainText == "Ниже" }!.id
+            r.controller.perform(.makeColumns(target: left, dropped: below, left: true))
+            r.controller.layoutColumns()
+            await spin()
+            checkEqual(host.columns.count, 3, "третья колонка")
+            checkEqual(host.columns.first?.editor.textView.string, "Ниже", "встала слева")
+
+            // Удаление единственного блока колонки убирает колонку.
+            let first = host.columns[0].editor
+            first.textView.setSelectedRange(NSRange(location: 0, length: 0))
+            first.run(.deleteBlock)
+            r.controller.layoutColumns()
+            await spin()
+            checkEqual(host.columns.count, 2, "пустая колонка убрана")
+            r.checkSync("основной текст после правок в колонках")
+
+            // Отмена из основного редактора возвращает изменения колонок.
+            for _ in 0..<6 { r.tv.undo(nil) }
+            await spin()
+            r.controller.layoutColumns()
+            check(r.doc.blocks.contains { $0.type == .columnList }, "ряд на месте после нескольких отмен")
+            try await r.close()
+        }
+    }
+
+    await test("Колонки: бросок на край — только над блоком и внутри текста") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "Первый"), (.paragraph, "Второй")])
+            r.tv.setFrameSize(NSSize(width: 600, height: 300))
+            r.tv.layoutManager?.ensureLayout(for: r.tv.textContainer!)
+            let first = r.controller.spans[0], dragged = r.doc.blocks[1].id
+            let line = r.controller.handleRect(for: first)!
+            let y = line.midY
+            let right = r.controller.columnDrop(at: NSPoint(x: 590, y: y), dragging: dragged)
+            checkEqual(right?.target, r.doc.blocks[0].id)
+            checkEqual(right?.left, false, "правый край")
+            checkEqual(r.controller.columnDrop(at: NSPoint(x: BlockEditorController.gutter + 20, y: y), dragging: dragged)?.left, true, "левый край")
+            check(r.controller.columnDrop(at: NSPoint(x: 300, y: y), dragging: dragged) == nil, "середина — обычный перенос")
+            check(r.controller.columnDrop(at: NSPoint(x: 10, y: y), dragging: dragged) == nil, "над ручкой — обычный перенос")
+            check(r.controller.columnDrop(at: NSPoint(x: 590, y: 2000), dragging: dragged) == nil, "ниже всех блоков — обычный перенос")
+            try await r.close()
+        }
     }
 }

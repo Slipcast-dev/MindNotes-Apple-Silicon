@@ -20,6 +20,12 @@ final class EditorSession {
 
     /// Срабатывает после каждой правки, отмены и повтора.
     var onChange: (() -> Void)?
+    /// Все редакторы этой страницы (основной и поля колонок) узнают о правке любого из них.
+    private var observers: [ObjectIdentifier: () -> Void] = [:]
+
+    func observe(_ owner: AnyObject, _ body: @escaping () -> Void) { observers[ObjectIdentifier(owner)] = body }
+    func stopObserving(_ owner: AnyObject) { observers[ObjectIdentifier(owner)] = nil }
+    private func notifyObservers() { for body in observers.values { body() } }
 
     var pageID: UUID { document.pageID }
     var canUndo: Bool { undo.canUndo }
@@ -127,6 +133,7 @@ final class EditorSession {
         if let s = result.selection { selection = s }
         submit(result.changes, quiet: quiet)
         onChange?()
+        notifyObservers()
         scheduleSnapshotIfDue()
         return result
     }
@@ -146,6 +153,7 @@ final class EditorSession {
         selection = s
         submit(changes)
         onChange?()
+        notifyObservers()
     }
 
     /// Слой перевода (ADR-0012): родитель-копия становится оригиналом, страница блока — по цепочке родителей,
