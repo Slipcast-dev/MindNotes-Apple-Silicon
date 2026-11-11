@@ -78,6 +78,8 @@ struct MindNotesApp: App {
                 Divider()
                 Button("Главная") { delegate.shell.goHome() }
                     .keyboardShortcut("h", modifiers: [.command, .shift])
+                Button("Чат с ИИ") { if delegate.shell.isOpen { AIChatModel.shared.toggle() } }
+                    .keyboardShortcut("j", modifiers: [.command, .shift])
             }
             CommandGroup(after: .appInfo) {
                 Button("Проверить обновления…") { Task { await delegate.updater.check(silent: false) } }

@@ -54,5 +54,6 @@ func runAllNotesTests() async {
     await runTimelineTests()
     await runLocalizationTests()
     await runVideoTests()
+    await runAITests()
     await runAcceptanceTests()
 }

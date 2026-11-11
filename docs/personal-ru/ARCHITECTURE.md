@@ -4,7 +4,7 @@
 
 Статус: действующее устройство приложения после M0–M14 (схема пространства v10). Что сделано — `STATUS.md`, решения — ADR в `adr/`.
 
-Ограничения: один модуль, сборка `swiftc`, без внешних зависимостей, только arm64 и macOS 26 (ADR-0009, `scripts/target.sh`). Сеть — только превью ссылок и обновления, в `Shell/Network/` (ADR-0011, ADR-0014). Цель: 10 тыс. страниц, 100 тыс. блоков, один пользователь, один процесс на пространство.
+Ограничения: один модуль, сборка `swiftc`, без внешних зависимостей, только arm64 и macOS 26 (ADR-0009, `scripts/target.sh`). Сеть — только превью ссылок, обновления и необязательный ИИ, в `Shell/Network/` (ADR-0011, ADR-0014, ADR-0016). Цель: 10 тыс. страниц, 100 тыс. блоков, один пользователь, один процесс на пространство.
 
 ## 1. Модули и границы
 
@@ -12,7 +12,7 @@
 Sources/MindNotes/
   App/                       # точка входа, AppDelegate, настройки оформления
   Core/                      # AppEdition (имя, id, каталог данных, перенос со старых имён), локализация
-  Workspace/Domain/          # Page, Block, RichText, базы и формулы, хронология, упоминания, комментарии, разделы, расширения, обновления
+  Workspace/Domain/          # AI.swift: протокол ИИ, поток, инструменты и правила подтверждения без сети; Page, Block, RichText, базы и формулы, хронология, упоминания, комментарии, разделы, расширения, обновления
   Workspace/Services/        # WorkspaceSession, EditorSession (в т. ч. синхронизированные блоки), SaveCoordinator, перенос данных
   Persistence/               # SQLiteConnection, очереди, блокировка, Migrations/ (v1–v10), SQLiteWorkspace+*, SearchIndex
   BlockEditor/Commands/      # BlockDocument, EditCommand, UndoStack, фрагменты, данные неделимых блоков
@@ -20,7 +20,8 @@ Sources/MindNotes/
   Backup/                    # TarArchive, BackupService, RestoreService
   ImportExport/              # Markdown, CSV, папки, экспорт Notion, экспорт пространства
   Shell/                     # RootView, ShellModel, боковая панель, Screens/, Database/, расширения, токены оформления
-  Shell/Network/             # единственное место с сетью: превью ссылок и обновления
+  Shell/AI/                  # ИИ-ассистент (ADR-0016): настройки, панель над выделением, чат и агент с подтверждением
+  Shell/Network/             # единственное место с сетью: превью ссылок, обновления, клиент ИИ и ключ в Keychain
 ```
 
 | Слой | Импорт | Может использовать |

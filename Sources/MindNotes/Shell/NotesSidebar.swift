@@ -82,6 +82,9 @@ struct RowFramesKey: PreferenceKey {
 struct NotesSidebar: View {
     static let treeSpace = "pageTree"
     @EnvironmentObject private var shell: ShellModel
+    /// Пункт «ИИ» виден только при включённом ИИ (ADR-0016).
+    @ObservedObject private var ai = AISettings.shared
+    @ObservedObject private var chat = AIChatModel.shared
     /// Свёрнутые страницы дерева. По умолчанию всё развёрнуто.
     @State private var collapsed: Set<UUID> = []
     /// Перетаскивание страницы внутри панели: свой жест, без системного буфера обмена.
@@ -213,6 +216,9 @@ struct NotesSidebar: View {
                     .buttonStyle(.plain)
                 }
                 SidebarRow(title: L("Главная"), symbol: "house", active: shell.section == .home) { shell.goHome() }
+                if shell.isOpen, ai.enabled {
+                    SidebarRow(title: L("ИИ"), symbol: "sparkles", active: chat.isOpen, tint: AIStyle.tint) { chat.toggle() }
+                }
                 SidebarRow(title: L("Импорт"), symbol: "square.and.arrow.down", active: shell.section == .files) { shell.goFiles() }
 
                 if shell.isOpen {
@@ -395,6 +401,7 @@ struct PageTreeRow: View {
                         ForEach(shell.sections) { section in Button(section.name) { shell.moveToSection(page.id, section.id) } }
                     }
                 }
+                if AISettings.shared.enabled { AIExcludeMenuItem(page: page.id) }
                 Divider()
                 Button("Удалить") { shell.trash(page.id) }
     }

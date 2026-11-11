@@ -60,6 +60,7 @@ final class PageEditorModel: ObservableObject {
     func closePanels() {
         panels.close()
         columnPanels.forEach { $0.close() }
+        AIAssist.shared.close()
     }
 }
 
@@ -271,8 +272,9 @@ final class EditorPanels {
             toolbarPanel?.orderOut(nil)
             return
         }
-        let size = NSSize(width: 376, height: 40)
-        let view = FormatToolbarView(controller: controller)
+        let ai = controller.aiAvailable?() == true
+        let size = NSSize(width: ai ? 506 : 376, height: 40)
+        let view = FormatToolbarView(controller: controller, ai: ai)
         let p = toolbarPanel ?? panel(size)
         p.contentView = NSHostingView(rootView: view)
         p.setContentSize(size)
@@ -320,9 +322,24 @@ struct SlashMenuView: View {
 @MainActor
 struct FormatToolbarView: View {
     let controller: BlockEditorController
+    /// Кнопка «Спросить ИИ» слева, как в Notion (ADR-0016).
+    var ai = false
 
     var body: some View {
         HStack(spacing: 2) {
+            if ai {
+                Button { controller.requestAI() } label: {
+                    Label(L("Спросить ИИ"), systemImage: "sparkles")
+                        .font(.system(size: 13))
+                        .foregroundColor(AIStyle.tint)
+                        .padding(.horizontal, 6)
+                        .frame(height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(L("Спросить ИИ") + " (⌘J)")
+                Rectangle().fill(Tokens.line).frame(width: 1, height: 20)
+            }
             Menu(L("Тип")) {
                 ForEach(Array(EditorAction.blockTypes.enumerated()), id: \.offset) { _, item in
                     Button(item.title) { controller.run(item.action) }
@@ -414,6 +431,12 @@ struct FormatCommands: Commands {
             Menu(L("Вставить блок")) { buttons(EditorAction.inserts) }
             Divider()
             buttons(EditorAction.blockActions)
+            Divider()
+            // ИИ (ADR-0016): без включённого ИИ пункт ничего не делает.
+            Button(L("Спросить ИИ")) {
+                Task { @MainActor in (NSApp.keyWindow?.firstResponder as? BlockTextView)?.controller?.requestAI() }
+            }
+            .keyboardShortcut("j", modifiers: .command)
         }
     }
 }

@@ -467,6 +467,8 @@ final class ShellModel: ObservableObject {
             let loadedDatabases = try await store.databaseIndex()
             try await closeSession()
             self.store = store
+            AIWorkspace.shared.attach(store)
+            AIPropertyFiller.shared.resume(store: store, shell: self)
             dailyFormulas?.invalidate()
             dailyFormulas = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self, weak store] _ in
                 Task { @MainActor in
@@ -668,6 +670,11 @@ final class ShellModel: ObservableObject {
         editor = nil
         session = nil
         store = nil
+        // Чат и панель ИИ относятся к закрытому пространству.
+        AIAssist.shared.close()
+        AIChatModel.shared.reset()
+        AIWorkspace.shared.detach()
+        AIPropertyFiller.shared.detach()
         pages = []
         workspaceName = ""
         look = WorkspaceLook()
@@ -941,6 +948,17 @@ final class ShellModel: ObservableObject {
             MentionReminders.schedule(when, text: text) { self?.errorMessage = $0 }
         }
         c.pickDatabaseView = { [weak self] in self?.pickDatabaseFragment() }
+        // ИИ (ADR-0016): только при включённом ИИ, согласии и ключе; иначе пробел и ⌘J работают как раньше.
+        c.aiAvailable = { AISettings.isEnabled && AISettings.shared.hasKey }
+        // Автообновление ИИ-свойств записи после правки её страницы (FR-AI-8); без ИИ — сразу выход.
+        c.session.observe(AIPropertyFiller.shared) { [weak self] in
+            guard AISettings.isEnabled, let self else { return }
+            AIPropertyFiller.shared.recordEdited(id, shell: self)
+        }
+        c.onAIRequest = { [weak self] editor, range in
+            AIAssist.shared.shell = self
+            AIAssist.shared.present(controller: editor, range: range)
+        }
         c.embedSummary = { [weak self] in self?.embedSummary($0) }
         // Живое представление базы прямо в тексте (M13): тот же экран, что и «Открыть целиком».
         c.liveView = { [weak self, weak model] block in
@@ -2182,5 +2200,85 @@ final class ShellModel: ObservableObject {
     func moveTargets(for id: UUID) -> [Page] {
         let banned = pageTree.subtree(of: id)
         return pages.filter { !banned.contains($0.id) && !isDatabase($0.id) && !isRecordInLiveDatabase($0) }
+    }
+
+    // MARK: ИИ (ADR-0016)
+
+    /// Выполняет шаг в общей очереди навигации и ждёт его: правки ИИ не пересекаются с переходами пользователя.
+    func aiRun<T>(_ body: @escaping @MainActor () async throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<T, Error>) in
+            let previous = navigation
+            navigation = Task { @MainActor in
+                await previous?.value
+                do { done.resume(returning: try await body()) } catch { done.resume(throwing: error) }
+            }
+        }
+    }
+
+    /// Блоки страницы: у открытой — из редактора (с несохранёнными правками), у остальных — из базы после записи.
+    func aiBlocks(of id: UUID) async throws -> [Block] {
+        if let editor, editor.pageID == id { return editor.controller.document.blocks }
+        guard let session, let store else { throw WorkspaceError.storage(code: 0, detail: "пространство закрыто") }
+        try await session.coordinator.flush()
+        return try await store.blocks(ofPage: id)
+    }
+
+    /// Открывает страницу в редакторе (если она ещё не открыта) и возвращает его: правка идёт через команды и отмену.
+    func aiEditor(for id: UUID) async throws -> PageEditorModel {
+        try await aiRun {
+            if let editor = self.editor, editor.pageID == id { return editor }
+            guard self.pages.contains(where: { $0.id == id }), !self.isDatabase(id) else { throw WorkspaceError.storage(code: 0, detail: "страница не найдена") }
+            try await self.show(id)
+            guard let editor = self.editor, editor.pageID == id else { throw WorkspaceError.storage(code: 0, detail: "страница не открылась") }
+            return editor
+        }
+    }
+
+    /// Новая страница с содержимым; открывается, как после импорта.
+    func aiCreatePage(parent: UUID?, title: String, fragments: [BlockFragment]) async throws -> UUID {
+        try await aiRun {
+            guard let session = self.session else { throw WorkspaceError.storage(code: 0, detail: "пространство закрыто") }
+            let parentID = parent.flatMap { id in self.pages.contains { $0.id == id } ? id : nil }
+            let page = try await session.createPage(parent: parentID, title: title)
+            self.pages = session.pages
+            let opened = try await session.open(page.id)
+            if let first = opened.document.blocks.first, !fragments.isEmpty {
+                try opened.perform(.replaceRange(BlockSelection(block: first.id, offset: 0), fragments), recordUndo: false)
+            }
+            self.pages = session.pages
+            self.installEditor(opened, id: page.id)
+            return page.id
+        }
+    }
+
+    /// В корзину и обратно — для предложения и его отмены.
+    func aiTrash(_ id: UUID) async throws {
+        trash(id)
+        try await aiRun { try await self.reloadTrash() }
+    }
+
+    /// База по ID её страницы (агент видит базы как страницы).
+    func aiDatabase(page: UUID) async throws -> Database? {
+        guard let store, let id = databaseIndex[page] else { return nil }
+        return try await store.database(id)
+    }
+
+    /// Записи и значения изменились не через экран базы: обновить список страниц и открытую базу.
+    func aiRecordsChanged() async throws {
+        try await aiRun {
+            guard let session = self.session else { return }
+            try await session.refreshPages()
+            self.pages = session.pages
+            self.databaseModel?.reload()
+        }
+    }
+
+    func aiRestoreFromTrash(_ id: UUID) async throws {
+        let item: TrashItem? = try await aiRun {
+            try await self.reloadTrash()
+            return self.trashItems.first { $0.page.id == id }
+        }
+        if let item { restoreFromTrash(item) }
+        try await aiRun {}
     }
 }

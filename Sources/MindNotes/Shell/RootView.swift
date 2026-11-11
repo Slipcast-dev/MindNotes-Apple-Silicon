@@ -96,6 +96,7 @@ struct NotesLayout: View {
                     if shell.sidebarCollapsed { peekSidebar }
                 }
                 .overlay { if let peek = shell.peek { PeekOverlay(editor: peek, mode: shell.peekMode) } }
+                .overlay(alignment: .topTrailing) { aiChat }
                 .animation(.easeInOut(duration: 0.15), value: shell.sidebarCollapsed)
             }
         }
@@ -103,6 +104,17 @@ struct NotesLayout: View {
         .background(Tokens.paper)
         .overlay(Rectangle().fill(Tokens.line).frame(height: 1), alignment: .top)
         .overlay(alignment: .bottomTrailing) { noticeView }
+    }
+
+    /// Чат с ИИ (ADR-0016): плавающая панель справа; при выключенном ИИ — подсказка про настройки.
+    @ObservedObject private var chat = AIChatModel.shared
+    @ViewBuilder private var aiChat: some View {
+        if chat.isOpen, shell.isOpen {
+            AIChatPanel(chat: chat)
+                .padding(.top, Tokens.crumbHeight + 8)
+                .padding([.trailing, .bottom], 12)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+        }
     }
 
     /// Граница панели тянется: ширина 200–480, запоминается при отпускании.
@@ -251,6 +263,7 @@ struct CrumbBar: View {
                     if !shell.isDatabase(id), let page { Button("История версий…") { shell.historyPage = page } }
                     if !shell.isDatabase(id) { Button("Экспорт в Markdown…") { shell.exportMarkdown(id) } }
                     if shell.isDatabase(id) { Button("Экспорт в CSV…") { shell.exportDatabaseCSV(page: id) } }
+                    if AISettings.shared.enabled { AIExcludeMenuItem(page: id) }
                     Divider()
                     Button("Удалить страницу") { shell.trash(id) }
                 } label: { Image(systemName: "ellipsis") }

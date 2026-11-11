@@ -397,6 +397,8 @@ struct PropertiesSheet: View {
                 }
             }
             if property.type.usesOptions { OptionsEditor(model: model, property: property).padding(.leading, 26) }
+            // ИИ-заполнение текстового свойства (ADR-0016, FR-AI-8): только при включённом ИИ.
+            if AIValues.fillable.contains(property.type), AISettings.shared.enabled { AIPropertyControls(model: model, property: property).padding(.leading, 26) }
         }
     }
 

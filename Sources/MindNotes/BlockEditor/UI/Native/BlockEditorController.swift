@@ -88,6 +88,10 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     /// Предпросмотр встроенного представления: nil, пока данные не загружены.
     var embedSummary: ((Block) -> EmbedSummary?)?
     var onOpenEmbed: ((Block) -> Void)?
+    /// ИИ (ADR-0016): доступен ли сейчас; nil или false — пробел и ⌘J работают как без ИИ.
+    var aiAvailable: (() -> Bool)?
+    /// Запрос к ИИ: редактор (основной или поле колонки) и выделенный диапазон или курсор на пустой строке.
+    var onAIRequest: ((BlockEditorController, NSRange) -> Void)?
     /// Миниатюры занимают много памяти: кэш ограничен.
     private let imageCache: NSCache<NSUUID, NSImage> = {
         let cache = NSCache<NSUUID, NSImage>()
@@ -370,6 +374,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             syncView()
             restoreSelection()
             loadNewSyncedCopies()
+            updateAIHint()
             return true
         } catch {
             onError?((error as? LocalizedError)?.errorDescription ?? "\(error)")
@@ -498,6 +503,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         embedSummary = main.embedSummary
         onOpenEmbed = main.onOpenEmbed
         requestLink = main.requestLink
+        aiAvailable = main.aiAvailable
+        onAIRequest = main.onAIRequest
     }
 
     private func makeColumnsHost(_ rowID: UUID) -> ColumnsHost {
@@ -573,12 +580,14 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         session.undoStep()
         syncView()
         restoreSelection()
+        updateAIHint()
     }
 
     func redo() {
         session.redoStep()
         syncView()
         restoreSelection()
+        updateAIHint()
     }
 
     var canUndo: Bool { session.canUndo }
@@ -1250,6 +1259,14 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         if view.hasMarkedText() { return true }
         let endIndex = spanIndex(at: range.location + range.length)
         let block = document.block(spans[start].id)
+        // Пробел в пустом абзаце открывает поле ИИ (FR-AI-4); сам пробел не вводится и не попадает в отмену.
+        if text == " ", range.length == 0, slash == nil, block?.type == .paragraph, block?.content != nil, spans[start].length == 0,
+           aiAvailable?() == true, let ask = onAIRequest {
+            pendingIndex = nil
+            typedText = nil
+            DispatchQueue.main.async { [weak self] in if let self { ask(self, range) } }
+            return false
+        }
         // Упоминание неделимо: правка его части берёт его целиком, вставка внутрь уходит за его конец.
         if start == endIndex, let content = block?.content {
             let local = (range.location - spans[start].location)..<(range.location + range.length - spans[start].location)
@@ -1285,6 +1302,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         if !textView.hasMarkedText() { commitText(at: index) }
         applyTypingAttributes()
         updateHeight()
+        updateAIHint()
     }
 
     /// Длина блока считается по фактическому тексту вида: при составном вводе модель ещё не менялась.
@@ -1499,6 +1517,44 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         return textView.firstRect(forCharacterRange: textView.selectedRange(), actualRange: &actual)
     }
 
+    /// Прямоугольник диапазона на экране: под ним встаёт панель ИИ.
+    func screenRect(for range: NSRange) -> NSRect {
+        var actual = NSRange()
+        let first = textView.firstRect(forCharacterRange: NSRange(location: range.location, length: 0), actualRange: &actual)
+        guard range.length > 0 else { return first }
+        let last = textView.firstRect(forCharacterRange: NSRange(location: range.location + range.length, length: 0), actualRange: &actual)
+        return NSRect(x: first.minX, y: min(first.minY, last.minY), width: max(first.width, 1), height: abs(first.maxY - min(first.minY, last.minY)))
+    }
+
+    /// ⌘J и кнопка «Спросить ИИ»: выделенный текст или текущая строка.
+    func requestAI() {
+        guard aiAvailable?() == true, let ask = onAIRequest, !spans.isEmpty else { return }
+        if textView.hasMarkedText() { textView.unmarkText() }
+        closeSlash()
+        ask(self, textView.selectedRange())
+    }
+
+    /// Применяет ответ ИИ одной правкой отмены: замена диапазона или вставка блоков ниже него.
+    /// Диапазон сверяется с исходным текстом: если текст изменился, правка не выполняется.
+    @discardableResult
+    func applyAI(range: NSRange, expected: String, fragments: [BlockFragment], below: Bool) -> Bool {
+        let length = (textView.string as NSString).length
+        guard range.location + range.length <= length, (textView.string as NSString).substring(with: range) == expected else {
+            onError?(NSLocalizedString("Текст изменился, пока ИИ отвечал. Попробуйте снова.", comment: ""))
+            return false
+        }
+        guard !fragments.isEmpty else { return false }
+        if below {
+            let end = point(at: range.location + range.length)
+            let span = spans[spanIndex(at: range.location + range.length)]
+            let atEnd = BlockSelection(block: end.blockID, offset: span.length)
+            // Пустой первый фрагмент оставляет блок как есть: ответ встаёт следующими блоками.
+            let empty = BlockFragment(type: .paragraph, content: BlockContent())
+            return perform(.replaceRange(atEnd, [empty] + fragments))
+        }
+        return perform(.replaceRange(selection(for: range), fragments))
+    }
+
     /// Составной ввод завершился без обычного изменения текста.
     func markedTextEnded() {
         guard !applying else { return }
@@ -1528,6 +1584,26 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         applyTypingAttributes()
         if slash != nil { updateSlash() }
         reportSelection()
+        updateAIHint()
+    }
+
+    /// Подсказка «пробел для ИИ» у курсора в пустом абзаце (FR-AI-4); без ИИ её нет.
+    func updateAIHint() {
+        textView.aiHintRect = aiHintRect()
+    }
+
+    private func aiHintRect() -> NSRect? {
+        guard aiAvailable?() == true, textView.window?.firstResponder === textView, !textView.hasMarkedText(), slash == nil, !spans.isEmpty else { return nil }
+        let range = textView.selectedRange()
+        guard range.length == 0 else { return nil }
+        let span = spans[spanIndex(at: range.location)]
+        guard span.length == 0, let block = document.block(span.id), block.type == .paragraph, block.content != nil,
+              let window = textView.window else { return nil }
+        var actual = NSRange()
+        let screen = textView.firstRect(forCharacterRange: range, actualRange: &actual)
+        let local = textView.convert(window.convertFromScreen(screen), from: nil)
+        let size = (BlockTextView.aiHint as NSString).size(withAttributes: textView.aiHintAttributes)
+        return NSRect(x: local.minX + 1, y: min(local.minY, local.maxY), width: size.width + 2, height: max(size.height, abs(local.height)))
     }
 
     /// Курсор не останавливается внутри упоминания: выходит к краю в сторону движения.
@@ -1999,6 +2075,30 @@ enum SystemAI {
 final class BlockTextView: NSTextView {
     weak var controller: BlockEditorController?
 
+    static var aiHint: String { NSLocalizedString("Нажмите «пробел» для ИИ или «/» для команд", comment: "") }
+    var aiHintAttributes: [NSAttributedString.Key: Any] {
+        [.font: (typingAttributes[.font] as? NSFont) ?? font ?? NSFont.systemFont(ofSize: 15), .foregroundColor: NSColor.placeholderTextColor]
+    }
+    /// Где нарисована подсказка ИИ; nil — её нет. Перерисовывается только её место.
+    var aiHintRect: NSRect? {
+        didSet {
+            guard oldValue != aiHintRect else { return }
+            for rect in [oldValue, aiHintRect].compactMap({ $0 }) { setNeedsDisplay(rect.insetBy(dx: -2, dy: -2)) }
+        }
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let done = super.resignFirstResponder()
+        if done { aiHintRect = nil }
+        return done
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let done = super.becomeFirstResponder()
+        if done { DispatchQueue.main.async { [weak self] in self?.controller?.updateAIHint() } }
+        return done
+    }
+
     private func run(_ body: (BlockEditorController) -> Void) {
         guard let controller else { return }
         body(controller)
@@ -2068,6 +2168,9 @@ final class BlockTextView: NSTextView {
         if let edge = dropEdge {
             NSColor.controlAccentColor.setFill()
             edge.fill()
+        }
+        if let rect = aiHintRect, rect.intersects(dirtyRect) {
+            (Self.aiHint as NSString).draw(at: rect.origin, withAttributes: aiHintAttributes)
         }
     }
 
