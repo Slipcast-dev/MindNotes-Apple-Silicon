@@ -1179,3 +1179,5 @@
 /* Сворачивание разделов */
 "Развернуть раздел" = "Expand section";
 "Свернуть раздел" = "Collapse section";
+
+"Щелчок — свернуть или развернуть; правый щелчок — переименовать" = "Click to collapse or expand; right-click to rename";

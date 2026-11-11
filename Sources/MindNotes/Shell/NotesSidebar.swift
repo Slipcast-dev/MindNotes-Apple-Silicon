@@ -239,12 +239,12 @@ struct NotesSidebar: View {
                                 Color.clear.preference(key: RowFramesKey.self, value: [Self.defaultSection: g.frame(in: .named(Self.treeSpace))])
                             })
                             .contentShape(Rectangle())
-                            .onTapGesture(count: 2) { shell.renamePagesSection() }
+                            .onTapGesture { shell.toggleSection(nil) }
                             .contextMenu {
                                 Button("Переименовать раздел…") { shell.renamePagesSection() }
                                 if shell.pagesTitle != nil { Button("Вернуть «Страницы»") { shell.setPagesTitle(nil) } }
                             }
-                            .help(L("Двойной щелчок — переименовать раздел"))
+                            .help(L("Щелчок — свернуть или развернуть; правый щелчок — переименовать"))
                         treeRows(in: nil)
                         // Свои разделы: каждый со своими страницами верхнего уровня (схема v9).
                         ForEach(shell.sections) { section in
@@ -254,7 +254,7 @@ struct NotesSidebar: View {
                                     Color.clear.preference(key: RowFramesKey.self, value: [section.id: g.frame(in: .named(Self.treeSpace))])
                                 })
                                 .contentShape(Rectangle())
-                                .onTapGesture(count: 2) { shell.renameSection(section) }
+                                .onTapGesture { shell.toggleSection(section.id) }
                                 .contextMenu {
                                     Button("Новая страница в разделе") { shell.createPage(inSection: section.id) }
                                     Button("Переименовать раздел…") { shell.renameSection(section) }
@@ -263,7 +263,7 @@ struct NotesSidebar: View {
                                     Divider()
                                     Button("Удалить раздел…") { shell.deleteSection(section) }
                                 }
-                                .help(L("Двойной щелчок — переименовать раздел"))
+                                .help(L("Щелчок — свернуть или развернуть; правый щелчок — переименовать"))
                             treeRows(in: section.id)
                         }
                         SidebarRow(title: L("Новый раздел"), symbol: "plus.rectangle.on.folder") { shell.addSection() }
