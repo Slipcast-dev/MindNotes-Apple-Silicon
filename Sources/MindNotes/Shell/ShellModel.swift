@@ -577,7 +577,7 @@ final class ShellModel: ObservableObject {
         keep["page"] = nil
         let embedded = DatabaseModel.EmbeddedView(id: block.id, name: "", kind: AtomData.viewKind(of: block), state: DatabaseViewState(json: AtomData.viewState(of: block))) { [weak editor, keep] kind, state in
             guard let json = try? state.jsonString() else { return }
-            editor?.controller.perform(.setAtomData(block: block.id, json: AtomData.databaseViewJSON(page: page, kind: kind, state: json, keeping: keep), plain: ""))
+            editor?.controller.updateEmbedded(block.id, json: AtomData.databaseViewJSON(page: page, kind: kind, state: json, keeping: keep))
         }
         return DatabaseModel(store: store, databaseID: database, pageID: page, embedded: embedded, flush: { try await coordinator.flush() },
                              pagesChanged: { [weak self] in
@@ -725,6 +725,11 @@ final class ShellModel: ObservableObject {
         }
         editor?.controller.pickDatabaseView = { [weak self] in self?.pickDatabaseFragment() }
         editor?.controller.embedSummary = { [weak self] in self?.embedSummary($0) }
+        // Живое представление базы прямо в тексте (M13): тот же экран, что и «Открыть целиком».
+        editor?.controller.liveView = { [weak self] block in
+            guard let self, let editor = self.editor, let model = self.embeddedModel(for: block, editor: editor) else { return nil }
+            return NSHostingView(rootView: DatabaseScreen(model: model, compact: true).environment(\.databaseInset, 14).environmentObject(self))
+        }
         embedCache = [:]
         editor?.controller.onOpenLink = { [weak self] page, block in self?.followLink(to: page, block: block) }
         editor?.controller.onPlayVideo = { [weak self] url, name in self?.playingVideo = PlayingVideo(url: url, name: name) }

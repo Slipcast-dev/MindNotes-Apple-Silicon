@@ -592,3 +592,80 @@ final class SyncedCaptionCell: NSTextAttachmentCell {
                                        attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: color])
     }
 }
+
+/// Место живого представления (M13, ADR-0013): поверх него контроллер ставит настоящий экран базы.
+final class LiveViewPlaceholderCell: NSTextAttachmentCell {
+    private let height: CGFloat
+    private let line: NSColor
+
+    init(height: CGFloat, line: NSColor) {
+        self.height = height
+        self.line = line
+        super.init(textCell: "")
+    }
+
+    required init(coder: NSCoder) { fatalError("не используется") }
+
+    override func cellFrame(for textContainer: NSTextContainer, proposedLineFragment lineFrag: NSRect, glyphPosition position: NSPoint, characterIndex charIndex: Int) -> NSRect {
+        NSRect(x: 0, y: 0, width: max(40, lineFrag.width - position.x - 1), height: height)
+    }
+
+    override func draw(withFrame frame: NSRect, in view: NSView?) {
+        line.setStroke()
+        NSBezierPath(roundedRect: frame.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8).stroke()
+    }
+}
+
+/// Рамка живого представления: экран базы и полоска снизу, за которую тянется высота.
+final class LiveViewHost: NSView {
+    let content: NSView
+    var onResize: ((CGFloat) -> Void)?
+    private var dragStart: (y: CGFloat, height: CGFloat)?
+    static let grip: CGFloat = 8
+
+    init(content: NSView) {
+        self.content = content
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.masksToBounds = true
+        addSubview(content)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        content.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - Self.grip))
+    }
+
+    private var gripRect: NSRect { NSRect(x: 0, y: bounds.height - Self.grip, width: bounds.width, height: Self.grip) }
+
+    override func resetCursorRects() { addCursorRect(gripRect, cursor: .resizeUpDown) }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        return gripRect.contains(local) ? self : super.hitTest(point)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard gripRect.contains(convert(event.locationInWindow, from: nil)) else { return super.mouseDown(with: event) }
+        dragStart = (event.locationInWindow.y, bounds.height)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = dragStart else { return super.mouseDragged(with: event) }
+        // Окно считает y снизу вверх: движение вниз увеличивает высоту.
+        let height = min(900, max(200, start.height + (start.y - event.locationInWindow.y)))
+        setFrameSize(NSSize(width: frame.width, height: height))
+        needsLayout = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard dragStart != nil else { return super.mouseUp(with: event) }
+        dragStart = nil
+        onResize?(bounds.height)
+    }
+}

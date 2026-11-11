@@ -49,6 +49,10 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     var chooseLinkKind: ((URL) -> BlockType?)?
     /// Превью закладки: заголовок, описание и сохранённая картинка; nil — сеть выключена или запрос не удался.
     var fetchLinkPreview: ((URL) async -> (title: String?, description: String?, asset: UUID?)?)?
+    /// Живое представление базы для блока (M13); nil — показывается прежняя карточка.
+    var liveView: ((Block) -> NSView?)?
+    /// Показанные живые представления по ID блока; nil в словаре — вид не получился, нужна карточка.
+    private var liveViews: [UUID: LiveViewHost?] = [:]
     /// Открыть адрес закладки или окно встраивания.
     var onOpenURL: ((URL, BlockType) -> Void)?
     /// Заголовок открытой страницы: текст напоминания.
@@ -120,6 +124,16 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         textView = BlockTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 100), textContainer: container)
         super.init()
         self.style.atomCell = { [weak self] in self?.cell(for: $0) }
+        // Живые представления едут вместе с текстом: после любой правки и при смене ширины их места пересчитываются.
+        textView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: textView, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scheduleLiveLayout() }
+        }
+        if let storage = textView.textStorage {
+            NotificationCenter.default.addObserver(forName: NSTextStorage.didProcessEditingNotification, object: storage, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.scheduleLiveLayout() }
+            }
+        }
         textView.controller = self
         textView.delegate = self
         textView.drawsBackground = false
@@ -252,6 +266,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     /// `force`: сообщить высоту, даже если она не менялась (подписчик появился позже первого расчёта).
     func updateHeight(force: Bool = false) {
+        defer { layoutLiveViews() }
         guard let manager = textView.layoutManager, let container = textView.textContainer else { return }
         manager.ensureLayout(for: container)
         var height = manager.usedRect(for: container).height
@@ -328,6 +343,70 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         applying = false
         applyTypingAttributes()
         textView.scrollRangeToVisible(r)
+    }
+
+    // MARK: Живые представления (M13, ADR-0013)
+
+    private func liveHost(for block: Block) -> LiveViewHost? {
+        if let known = liveViews[block.id] { return known }
+        guard let provider = liveView, block.contentVersion <= 1 else { return nil }
+        guard let view = provider(block) else {
+            liveViews[block.id] = .some(nil)
+            return nil
+        }
+        let host = LiveViewHost(content: view)
+        host.onResize = { [weak self] height in self?.setLiveHeight(block.id, Double(height)) }
+        liveViews[block.id] = host
+        return host
+    }
+
+    /// Высота живого представления: одна правка, ⌘Z возвращает прежнюю.
+    func setLiveHeight(_ id: UUID, _ height: Double) {
+        guard let block = document.block(id), block.type == .databaseView else { return }
+        _ = try? session.perform(.setAtomData(block: id, json: AtomData.withViewHeight(block, height), plain: block.plainText))
+        syncView()
+        layoutLiveViews()
+    }
+
+    /// Состояние встроенного представления (фильтр, вид) меняется без прокрутки к курсору: правка идёт из самого вида.
+    func updateEmbedded(_ id: UUID, json: String) {
+        guard let block = document.block(id) else { return }
+        _ = try? session.perform(.setAtomData(block: id, json: json, plain: block.plainText))
+        syncView()
+        layoutLiveViews()
+    }
+
+    private var liveLayoutPending = false
+
+    private func scheduleLiveLayout() {
+        guard !liveViews.isEmpty, !liveLayoutPending else { return }
+        liveLayoutPending = true
+        DispatchQueue.main.async { [weak self] in
+            self?.liveLayoutPending = false
+            self?.layoutLiveViews()
+        }
+    }
+
+    /// Ставит живые представления на места их блоков; лишние убирает.
+    func layoutLiveViews() {
+        guard !liveViews.isEmpty, let manager = textView.layoutManager, let container = textView.textContainer else { return }
+        manager.ensureLayout(for: container)
+        let shown = Dictionary(spans.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for (id, entry) in liveViews {
+            guard let host = entry else { continue }
+            guard let span = shown[id], span.length > 0, document.block(id)?.type == .databaseView else {
+                host.removeFromSuperview()
+                if document.block(id) == nil { liveViews[id] = nil }
+                continue
+            }
+            let glyphs = manager.glyphRange(forCharacterRange: NSRange(location: span.location, length: 1), actualCharacterRange: nil)
+            var rect = manager.boundingRect(forGlyphRange: glyphs, in: container)
+                .offsetBy(dx: textView.textContainerOrigin.x, dy: textView.textContainerOrigin.y)
+            // Строка с местом выше самого места на межстрочный интервал: высота — из блока.
+            if let block = document.block(id) { rect.size.height = CGFloat(AtomData.viewHeight(of: block)) }
+            if host.superview !== textView { textView.addSubview(host) }
+            if host.frame != rect { host.frame = rect }
+        }
     }
 
     /// Вставленная копия синхронизированного блока получает содержимое оригинала из хранилища.
@@ -698,6 +777,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             let url = AtomData.url(of: block)
             return EmbedBlockCell(provider: url.map { LinkCard.embed($0).provider } ?? "", address: url?.absoluteString ?? block.plainText,
                                   ink: style.ink, muted: style.muted, line: style.line, soft: style.soft)
+        case .databaseView where liveHost(for: block) != nil:
+            return LiveViewPlaceholderCell(height: CGFloat(AtomData.viewHeight(of: block)), line: style.line)
         case .databaseView:
             // Ячейка спрашивает данные при каждой отрисовке: загрузка не меняет высоту и не сдвигает текст.
             return DatabaseViewBlockCell(summary: { [weak self] in self?.embedSummary?(block) }, ink: style.ink, muted: style.muted, line: style.line, soft: style.soft)

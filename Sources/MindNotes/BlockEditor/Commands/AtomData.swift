@@ -54,6 +54,27 @@ enum AtomData {
         return UUID(uuidString: s)
     }
 
+    /// Высота живого представления в тексте (M13), точки; хранится в блоке.
+    static let viewHeights: ClosedRange<Double> = 200...900
+    static let defaultViewHeight = 380.0
+
+    static func viewHeight(of block: Block) -> Double {
+        let raw: Double
+        switch block.atomJSON["height"] {
+        case .int(let v)?: raw = Double(v)
+        case .double(let v)?: raw = v
+        default: raw = defaultViewHeight
+        }
+        return raw.isFinite ? min(viewHeights.upperBound, max(viewHeights.lowerBound, raw.rounded())) : defaultViewHeight
+    }
+
+    /// Данные блока с новой высотой; остальные поля не меняются.
+    static func withViewHeight(_ block: Block, _ height: Double) -> String {
+        var object = block.atomJSON
+        object["height"] = .int(Int64(min(viewHeights.upperBound, max(viewHeights.lowerBound, height.rounded()))))
+        return json(object)
+    }
+
     static func viewKind(of block: Block) -> String {
         if case .string(let s)? = block.atomJSON["kind"] { return s }
         return "table"

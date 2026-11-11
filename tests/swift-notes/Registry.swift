@@ -25,6 +25,7 @@ func runAllNotesTests() async {
     await runMentionTests()
     await runLinkCardTests()
     await runSyncedBlockTests()
+    await runLiveViewTests()
     await runDatabaseTests()
     await runRelationTests()
     await runRollupTests()

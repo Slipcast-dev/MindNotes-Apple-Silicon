@@ -151,6 +151,7 @@ extension View {
 // MARK: Доска
 
 struct BoardView: View {
+    @Environment(\.databaseInset) private var inset
     @ObservedObject var model: DatabaseModel
 
     var body: some View {
@@ -161,7 +162,7 @@ struct BoardView: View {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(model.sections) { column($0) }
                 }
-                .padding(.horizontal, Tokens.contentPadding)
+                .padding(.horizontal, inset)
                 .padding(.vertical, 14)
             }
         }
@@ -197,13 +198,14 @@ struct BoardView: View {
 }
 
 struct EmptyKindNote: View {
+    @Environment(\.databaseInset) private var inset
     let text: String
     var body: some View {
         Text(text)
             .font(.system(size: 13))
             .foregroundColor(Tokens.muted)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, Tokens.contentPadding)
+            .padding(.horizontal, inset)
             .padding(.vertical, 18)
     }
 }
@@ -212,6 +214,7 @@ struct EmptyKindNote: View {
 
 /// Разделы вида: группа, её карточки и подгрузка. Список и галерея отличаются только раскладкой карточек.
 private struct SectionsScroll<Cards: View>: View {
+    @Environment(\.databaseInset) private var inset
     @ObservedObject var model: DatabaseModel
     @ViewBuilder let cards: (RecordSection) -> Cards
 
@@ -234,7 +237,7 @@ private struct SectionsScroll<Cards: View>: View {
                         .foregroundColor(Tokens.muted)
                 }
             }
-            .padding(.horizontal, Tokens.contentPadding)
+            .padding(.horizontal, inset)
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -291,6 +294,7 @@ struct GalleryView: View {
 // MARK: Календарь
 
 struct CalendarKindView: View {
+    @Environment(\.databaseInset) private var inset
     @EnvironmentObject private var shell: ShellModel
     @ObservedObject var model: DatabaseModel
 
@@ -340,7 +344,7 @@ struct CalendarKindView: View {
                             ForEach(model.calendarDays, id: \.self) { dayCell($0) }
                         }
                     }
-                    .padding(.horizontal, Tokens.contentPadding)
+                    .padding(.horizontal, inset)
                     .padding(.vertical, 14)
                 }
                 Rectangle().fill(Tokens.line).frame(width: 1)

@@ -1,11 +1,24 @@
 import AppKit
 import SwiftUI
 
+private struct DatabaseInsetKey: EnvironmentKey { static let defaultValue: CGFloat = Tokens.contentPadding }
+
+extension EnvironmentValues {
+    /// Боковой отступ экрана базы: во встроенном в текст виде меньше (M13).
+    var databaseInset: CGFloat {
+        get { self[DatabaseInsetKey.self] }
+        set { self[DatabaseInsetKey.self] = newValue }
+    }
+}
+
 /// Экран базы по макету: надзаголовок, заголовок, кнопки, вкладки представлений, таблица.
 struct DatabaseScreen: View {
+    @Environment(\.databaseInset) private var inset
     @Environment(\.undoManager) private var undoManager
     @EnvironmentObject private var shell: ShellModel
     @ObservedObject var model: DatabaseModel
+    /// Живое представление в тексте страницы (M13): компактная шапка, как у встроенной базы в Notion.
+    var compact = false
     @State private var title = ""
     /// Ширина столбцов во время перетаскивания границы и точка отсчёта жеста.
     @State private var liveWidths: [UUID: CGFloat] = [:]
@@ -21,6 +34,14 @@ struct DatabaseScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
+                if compact {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(page?.title.isEmpty == false ? page?.title ?? "" : L("Без названия")).font(.system(size: 17, weight: .semibold))
+                        Text(L("Записей: %d", model.total)).font(.system(size: 12)).foregroundColor(Tokens.muted)
+                    }
+                    .padding(.bottom, 8)
+                    toolbar
+                } else {
                 Eyebrow(text: L(model.isEmbedded ? "Встроенное представление" : "База данных"))
                 if model.isEmbedded {
                     Text(page?.title.isEmpty == false ? page?.title ?? "" : L("Без названия"))
@@ -39,9 +60,10 @@ struct DatabaseScreen: View {
                 Text(L("Записей: %d", model.total)).font(.system(size: 14)).foregroundColor(Tokens.muted).padding(.bottom, 18)
                 toolbar
                 if !model.isEmbedded { tabs.padding(.top, 14) }
+                }
             }
-            .padding(.horizontal, Tokens.contentPadding)
-            .padding(.top, 28)
+            .padding(.horizontal, compact ? 14 : inset)
+            .padding(.top, compact ? 12 : 28)
             if !model.selection.isEmpty, kind == DatabaseView.tableKind { bulkBar }
             content
         }
@@ -170,7 +192,7 @@ struct DatabaseScreen: View {
             Button("Снять выбор") { model.selection = [] }.buttonStyle(NotesButtonStyle(kind: .plain))
             Spacer()
         }
-        .padding(.horizontal, Tokens.contentPadding)
+        .padding(.horizontal, inset)
         .padding(.vertical, 6)
         .background(Tokens.soft)
     }
@@ -241,7 +263,7 @@ struct DatabaseScreen: View {
                     footer
                 }
             }
-            .padding(.horizontal, Tokens.contentPadding)
+            .padding(.horizontal, inset)
             .padding(.bottom, 30)
         }
     }

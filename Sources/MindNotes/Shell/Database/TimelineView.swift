@@ -21,6 +21,7 @@ struct TimelineLinkDrag: Equatable {
 
 /// Хронология (M11): полосы по свойству даты на шкале, которая растёт при прокрутке в обе стороны.
 struct TimelineKindView: View {
+    @Environment(\.databaseInset) private var inset
     @ObservedObject var model: DatabaseModel
 
     static let headerHeight: CGFloat = 40
@@ -44,12 +45,12 @@ struct TimelineKindView: View {
     var body: some View {
         if let property = dateProperty {
             VStack(alignment: .leading, spacing: 0) {
-                toolbar.padding(.horizontal, Tokens.contentPadding).padding(.vertical, 10)
+                toolbar.padding(.horizontal, inset).padding(.vertical, 10)
                 if model.calendarTotal > DatabaseModel.calendarLimit {
                     Text(L("Показаны не все записи: %d из %d. Сузьте фильтр.", DatabaseModel.calendarLimit, model.calendarTotal))
                         .font(.system(size: 12))
                         .foregroundColor(Tokens.danger)
-                        .padding(.horizontal, Tokens.contentPadding)
+                        .padding(.horizontal, inset)
                         .padding(.bottom, 6)
                 }
                 Rectangle().fill(Tokens.line).frame(height: 1)
