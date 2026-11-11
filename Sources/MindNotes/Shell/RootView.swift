@@ -153,7 +153,7 @@ struct CrumbBar: View {
         case .trash: return L("Корзина")
         case .templates: return L("Шаблоны")
         case .tag(let id): return shell.tags.first { $0.id == id }?.name ?? L("Тег")
-        case .files: return L("Файлы")
+        case .files: return L("Импорт")
         default: return L("Главная")
         }
     }

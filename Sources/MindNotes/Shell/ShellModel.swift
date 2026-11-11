@@ -1572,13 +1572,22 @@ final class ShellModel: ObservableObject {
     // MARK: Импорт
 
     /// Одна точка входа: Markdown или текст — страница, CSV — база, папка или .zip — экспорт Notion и папки Markdown.
-    func presentImport() {
+    /// Источник на экране «Импорт»: окно выбора сразу показывает только подходящее. nil — любой.
+    enum ImportKind { case text, table, folder, notion }
+
+    func presentImport(_ kind: ImportKind? = nil) {
         let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = true
+        panel.canChooseFiles = kind != .folder
+        panel.canChooseDirectories = kind == nil || kind == .folder
         panel.allowsMultipleSelection = false
         panel.prompt = L("Импортировать")
         panel.message = L("Файл Markdown, CSV, папка или архив экспорта Notion (.zip). Оригиналы не меняются.")
+        switch kind {
+        case .text?: panel.allowedContentTypes = ["md", "markdown", "txt"].compactMap { UTType(filenameExtension: $0) }
+        case .table?: panel.allowedContentTypes = ["csv", "tsv"].compactMap { UTType(filenameExtension: $0) }
+        case .notion?: panel.allowedContentTypes = [.zip]
+        default: break
+        }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
         switch url.pathExtension.lowercased() {

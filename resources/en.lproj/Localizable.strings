@@ -1139,3 +1139,18 @@
 "Сделать синхронизированным" = "Turn into synced block";
 "Отвязать копию" = "Unsync copy";
 "Копии синхронизированных блоков (содержимое — у оригинала)" = "Synced copies (content stays with the original)";
+
+/* Импорт вместо «Файлов» */
+"Перенос в пространство" = "Into the workspace";
+"Файлы переносятся в пространство страницами и базами. Сами файлы не меняются." = "Files become pages and databases in the workspace. The files themselves are not changed.";
+"Markdown или текст" = "Markdown or text";
+"Файл .md или .txt становится страницей" = "An .md or .txt file becomes a page";
+"Таблица CSV" = "CSV table";
+"Строки становятся записями базы" = "Rows become database records";
+"Папки и файлы — дерево страниц" = "Folders and files become a page tree";
+"Экспорт Notion" = "Notion export";
+"Архив .zip из Notion со связями" = "A .zip export from Notion, with relations";
+"Откройте пространство, чтобы импортировать в него файлы. Посмотреть файл можно и сейчас." = "Open a workspace to import files into it. You can preview a file now.";
+"Недавние файлы" = "Recent files";
+"Посмотреть файл…" = "Preview a file…";
+"Здесь появятся файлы, которые вы открывали для просмотра." = "Files you open for preview appear here.";

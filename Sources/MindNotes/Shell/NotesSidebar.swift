@@ -156,7 +156,7 @@ struct NotesSidebar: View {
                     .buttonStyle(.plain)
                 }
                 SidebarRow(title: L("Главная"), symbol: "house", active: shell.section == .home) { shell.goHome() }
-                SidebarRow(title: L("Файлы"), symbol: "doc", active: shell.section == .files) { shell.goFiles() }
+                SidebarRow(title: L("Импорт"), symbol: "square.and.arrow.down", active: shell.section == .files) { shell.goFiles() }
 
                 if shell.isOpen {
                     SidebarRow(title: L("Новая страница"), symbol: "plus") { shell.createPage() }
@@ -203,7 +203,6 @@ struct NotesSidebar: View {
                     SidebarGroup(title: L("Пространство"))
                     if shell.isOpen {
                         SidebarRow(title: L("Шаблоны"), symbol: "square.on.square", active: shell.section == .templates) { shell.goTemplates() }
-                        SidebarRow(title: L("Импорт"), symbol: "square.and.arrow.down") { shell.presentImport() }
                     }
                 }
                 .coordinateSpace(name: Self.treeSpace)
