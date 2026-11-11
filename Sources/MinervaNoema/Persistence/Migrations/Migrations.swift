@@ -11,9 +11,18 @@ enum Migrations {
     static let applicationID: Int64 = 0x47525A4E // "GRZN"
 
     /// Полный список миграций. Изменять уже выпущенные миграции нельзя: только добавлять новые и fixture прошлой версии.
-    static let all: [Migration] = [v1, v2, v3, v4, v5, v6]
+    static let all: [Migration] = [v1, v2, v3, v4, v5, v6, v7]
 
     static var supportedVersion: Int { all.last?.version ?? 0 }
+
+    private static let v7 = Migration(version: 7, name: "формулы") { db in
+        try db.execute(schemaV7)
+    }
+
+    /// Ошибка вычисления формулы в записи: значение пустое, текст ошибки показывается в ячейке.
+    static let schemaV7 = """
+    ALTER TABLE property_values ADD COLUMN calc_error TEXT;
+    """
 
     private static let v6 = Migration(version: 6, name: "связи баз") { db in
         try db.execute(schemaV6)

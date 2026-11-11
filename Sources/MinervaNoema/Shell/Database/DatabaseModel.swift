@@ -382,6 +382,7 @@ enum PropertyDisplay {
             return names.isEmpty ? nil : names.joined(separator: ", ")
         case .relation(let links)?: return links.isEmpty ? nil : links.map { $0.title.isEmpty ? L("Без названия") : $0.title }.joined(separator: ", ")
         case .time(let ms)?: return time(ms)
+        case .error?: return L("Ошибка формулы")
         case nil: return nil
         }
     }

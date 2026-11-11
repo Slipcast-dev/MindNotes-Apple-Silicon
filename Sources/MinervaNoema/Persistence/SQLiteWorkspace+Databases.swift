@@ -218,7 +218,7 @@ extension SQLiteWorkspace {
         }
     }
 
-    private static func loadDatabase(_ db: SQLiteConnection, _ id: UUID) throws -> Database? {
+    static func loadDatabase(_ db: SQLiteConnection, _ id: UUID) throws -> Database? {
         guard let page = try db.query("SELECT page_id FROM databases WHERE id=?", [SQLValue(id)], { $0.uuid(0) }).first ?? nil else { return nil }
         var properties = try db.query("SELECT id, name, type, sort_key, config_json FROM property_definitions WHERE database_id=? ORDER BY sort_key, id", [SQLValue(id)]) { r -> PropertyDefinition? in
             guard let pid = r.uuid(0) else { return nil }
@@ -272,10 +272,11 @@ extension SQLiteWorkspace {
         let args = pages.map { SQLValue($0) }
         var out: [UUID: [UUID: PropertyValue]] = [:]
         _ = try db.query("""
-        SELECT page_id, property_id, value_text, value_num, value_date, value_date_end, value_ts, value_ts_end, value_tz, unconverted
+        SELECT page_id, property_id, value_text, value_num, value_date, value_date_end, value_ts, value_ts_end, value_tz, unconverted, calc_error
         FROM property_values WHERE page_id IN (\(marks))
         """, args) { r in
             guard let page = r.uuid(0), let prop = r.uuid(1), let type = types[prop] else { return }
+            if let error = r.optText(10) { out[page, default: [:]][prop] = .error(error); return }
             if let raw = r.optText(9) { out[page, default: [:]][prop] = .unconverted(raw); return }
             let value: PropertyValue?
             switch type {
@@ -547,7 +548,7 @@ extension SQLiteWorkspace {
                 try db.run("INSERT OR IGNORE INTO property_value_options(page_id, property_id, option_id) VALUES(?,?,?)", keys + [SQLValue(id)])
             }
             return
-        case .relation, .time: return
+        case .relation, .time, .error: return
         }
         try db.run("""
         INSERT INTO property_values(page_id, property_id, value_text, value_num, value_date, value_date_end, value_ts, value_ts_end, value_tz, unconverted, updated_at)
@@ -580,8 +581,10 @@ extension SQLiteWorkspace {
                     try Self.writeValue(db, page: page, def: def, value: value, now: now)
                     try db.run("UPDATE pages SET updated_at=? WHERE id=?", [.int(now), SQLValue(page)])
                 }
-                // Свёртка может стоять и на парной стороне связи.
-                try Self.recalcRollups(db, touched: touched, properties: Set([def.id, def.linkOwner] + (def.config.pair.map { [$0] } ?? [])), now: now)
+                // Свёртка может стоять и на парной стороне связи; формулы с «Изменено» тоже зависят от правки.
+                var changed: Set<UUID> = Set([def.id, def.linkOwner] + (def.config.pair.map { [$0] } ?? []))
+                changed.formUnion(try Self.editedStamps(db, pages: Set(pages)))
+                try Self.recalcRollups(db, touched: touched, properties: changed, now: now)
             }
         }
     }
@@ -589,7 +592,7 @@ extension SQLiteWorkspace {
     // MARK: Свойства
 
     func addProperty(database: UUID, name: String, type: PropertyType, id: UUID, now: Int64) async throws {
-        guard PropertyType.creatable.contains(type), type != .relation, type != .rollup else { throw Self.storageError("Этот тип свойства нельзя создать.") }
+        guard PropertyType.creatable.contains(type), ![.relation, .rollup, .formula].contains(type) else { throw Self.storageError("Этот тип свойства нельзя создать.") }
         try await writer.run { db in
             let last = try db.scalarText("SELECT sort_key FROM property_definitions WHERE database_id=? ORDER BY sort_key DESC, id DESC LIMIT 1", [SQLValue(database)])
             try db.run("INSERT INTO property_definitions(id, database_id, name, type, sort_key, created_at) VALUES(?,?,?,?,?,?)",
@@ -649,7 +652,11 @@ extension SQLiteWorkspace {
                     if state.dateProperty == id { state.dateProperty = nil }
                 }
                 try db.run("DELETE FROM property_definitions WHERE id=?", [SQLValue(id)])
-                try Self.clearBrokenRollups(db, now: SystemClock().nowMillis())
+                let now = SystemClock().nowMillis()
+                try Self.clearBrokenRollups(db, now: now)
+                // Формулы, ссылавшиеся на свойство, получают ошибку «нет свойства», а не устаревшее значение (AT-18).
+                let pages = Set(try db.query("SELECT id FROM pages WHERE database_id=?", [SQLValue(def.databaseID)]) { $0.uuid(0) }.compactMap { $0 })
+                try Self.recalcRollups(db, touched: pages, properties: [id], now: now)
             }
         }
     }
@@ -984,7 +991,7 @@ extension SQLiteWorkspace {
                 let np = ids.next()
                 propertyMap[pid] = np
                 if p.type == PropertyType.relation.rawValue { relationConfigs[np] = PropertyConfig(json: p.config) }
-                if p.type == PropertyType.rollup.rawValue { rollupConfigs[np] = PropertyConfig(json: p.config) }
+                if p.type == PropertyType.rollup.rawValue || p.type == PropertyType.formula.rawValue { rollupConfigs[np] = PropertyConfig(json: p.config) }
                 try db.run("INSERT INTO property_definitions(id, database_id, name, type, sort_key, created_at, config_json) VALUES(?,?,?,?,?,?,?)",
                            [SQLValue(np), SQLValue(copy), .text(p.name), .text(p.type), .text(p.key), .int(now), SQLValue(p.config)])
                 let options = try db.query("SELECT id, name, color, sort_key FROM property_options WHERE property_id=?", [SQLValue(pid)]) { (id: $0.uuid(0), name: $0.text(1), color: $0.optText(2), key: $0.text(3)) }
@@ -1027,6 +1034,10 @@ extension SQLiteWorkspace {
             var config = old
             config.rollupRelation = old.rollupRelation.map { propertyMap[$0] ?? $0 }
             config.rollupProperty = old.rollupProperty.map { propertyMap[$0] ?? $0 }
+            // Формула копии ссылается на свойства копии: ID в тексте заменяются.
+            if let text = old.formula {
+                config.formula = propertyMap.reduce(text) { $0.replacingOccurrences(of: $1.key.uuidString, with: $1.value.uuidString) }
+            }
             try db.run("UPDATE property_definitions SET config_json=? WHERE id=?", [.text(try config.jsonString()), SQLValue(copyID)])
         }
 

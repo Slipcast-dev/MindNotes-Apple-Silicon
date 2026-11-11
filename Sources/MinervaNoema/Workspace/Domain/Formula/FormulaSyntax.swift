@@ -26,6 +26,11 @@ struct FormulaError: Error, Equatable, LocalizedError {
         self.range = range
     }
 
+    init(message: String, range: FormulaRange) {
+        self.message = message
+        self.range = range
+    }
+
     var errorDescription: String? { message }
 }
 

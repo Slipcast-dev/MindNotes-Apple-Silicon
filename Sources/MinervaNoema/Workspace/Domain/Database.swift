@@ -21,15 +21,17 @@ struct PropertyType: RawRepresentable, Hashable, Codable {
     static let editedTime = PropertyType(rawValue: "edited_time")
     /// Свёртка: агрегат значений связанных записей. Хранится готовым значением и пересчитывается по зависимостям.
     static let rollup = PropertyType(rawValue: "rollup")
+    /// Формула: вычисляется из свойств своей записи, хранится готовым значением.
+    static let formula = PropertyType(rawValue: "formula")
 
     /// Типы, которые можно выбрать; заголовок у базы один и создаётся вместе с ней.
-    static let creatable: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url, .relation, .rollup, .createdTime, .editedTime]
+    static let creatable: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url, .relation, .rollup, .formula, .createdTime, .editedTime]
     /// Типы с собственными значениями, между которыми возможна смена типа с предпросмотром.
     static let convertible: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url]
     var isKnown: Bool { self == .title || Self.creatable.contains(self) }
     var usesOptions: Bool { self == .status || self == .select || self == .multiSelect }
     /// Значение вычисляется из страницы: правка вручную невозможна.
-    var isComputed: Bool { self == .createdTime || self == .editedTime || self == .rollup }
+    var isComputed: Bool { self == .createdTime || self == .editedTime || self == .rollup || self == .formula }
     var isTimestamp: Bool { self == .createdTime || self == .editedTime }
 }
 
@@ -45,6 +47,9 @@ struct PropertyConfig: Equatable {
     var rollupRelation: UUID?
     var rollupProperty: UUID?
     var aggregate: RollupAggregate?
+    /// Формула: текст со ссылками по ID и тип результата, проверенный при сохранении.
+    var formula: String?
+    var formulaType: FormulaType?
     var extra: [String: JSONValue] = [:]
 
     private struct Known: Codable {
@@ -54,6 +59,8 @@ struct PropertyConfig: Equatable {
         var relation: UUID?
         var property: UUID?
         var aggregate: RollupAggregate?
+        var formula: String?
+        var result: FormulaType?
     }
 
     static func rollup(relation: UUID, property: UUID, aggregate: RollupAggregate) -> PropertyConfig {
@@ -80,17 +87,20 @@ struct PropertyConfig: Equatable {
             rollupRelation = known.relation
             rollupProperty = known.property
             aggregate = known.aggregate
-            for key in ["target", "pair", "back", "relation", "property", "aggregate"] { object[key] = nil }
+            formula = known.formula
+            formulaType = known.result
+            for key in ["target", "pair", "back", "relation", "property", "aggregate", "formula", "result"] { object[key] = nil }
         }
         extra = object
     }
 
-    var isEmpty: Bool { target == nil && pair == nil && !isBackSide && rollupRelation == nil && rollupProperty == nil && aggregate == nil && extra.isEmpty }
+    var isEmpty: Bool { target == nil && pair == nil && !isBackSide && rollupRelation == nil && rollupProperty == nil && aggregate == nil && formula == nil && formulaType == nil && extra.isEmpty }
 
     func jsonString() throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let known = try encoder.encode(Known(target: target, pair: pair, back: isBackSide ? true : nil, relation: rollupRelation, property: rollupProperty, aggregate: aggregate))
+        let known = try encoder.encode(Known(target: target, pair: pair, back: isBackSide ? true : nil, relation: rollupRelation, property: rollupProperty, aggregate: aggregate,
+                                                    formula: formula, result: formulaType))
         guard case .object(let fields) = try JSONDecoder().decode(JSONValue.self, from: known) else { return "{}" }
         return String(decoding: try encoder.encode(JSONValue.object(extra.merging(fields) { _, new in new })), as: UTF8.self)
     }
@@ -131,6 +141,15 @@ struct PropertyDefinition: Equatable, Identifiable {
     /// Тип хранимого значения: у свёртки — тип её результата, у остальных — сам тип.
     /// По нему работают фильтры, сортировка и показ.
     var valueType: PropertyType {
+        if type == .formula {
+            switch config.formulaType {
+            case .number?: return .number
+            case .text?: return .text
+            case .bool?: return .checkbox
+            case .date?: return .date
+            case nil: return type
+            }
+        }
         guard type == .rollup else { return type }
         return config.aggregate?.resultType ?? type
     }
@@ -287,6 +306,8 @@ enum PropertyValue: Hashable {
     case relation([LinkedPage])
     /// Время создания или изменения записи, мс UTC.
     case time(Int64)
+    /// Ошибка вычисления формулы в этой записи: видна в ячейке, значения нет.
+    case error(String)
 }
 
 /// Разбор пользовательского ввода и текста при смене типа.
@@ -368,6 +389,7 @@ enum PropertyConversion {
         case .date(let d): return d.end.map { "\(d.start.localText) — \($0.localText)" } ?? d.start.localText
         case .relation(let pages): return pages.map(\.title).joined(separator: ", ")
         case .time(let ms): return DatePoint.moment(ms: ms, zone: TimeZone.current.identifier).localText
+        case .error: return ""
         }
     }
 

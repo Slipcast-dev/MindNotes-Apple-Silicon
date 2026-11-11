@@ -20,8 +20,22 @@ extension SQLiteWorkspace {
 
     private static func marks(_ n: Int) -> String { Array(repeating: "?", count: n).joined(separator: ",") }
 
+    /// Есть ли вычисляемые свойства (свёртки или формулы): иначе пересчёт не нужен вовсе.
     static func hasRollups(_ db: SQLiteConnection) throws -> Bool {
-        try db.scalarInt("SELECT 1 FROM property_definitions WHERE type=? LIMIT 1", [.text(PropertyType.rollup.rawValue)]) != nil
+        try db.scalarInt("SELECT 1 FROM property_definitions WHERE type IN (?, ?) LIMIT 1", [.text(PropertyType.rollup.rawValue), .text(PropertyType.formula.rawValue)]) != nil
+    }
+
+    /// Свойства «Изменено» баз этих записей: правка записи меняет их значение.
+    static func editedStamps(_ db: SQLiteConnection, pages: Set<UUID>) throws -> Set<UUID> {
+        guard !pages.isEmpty, try hasRollups(db) else { return [] }
+        var out: Set<UUID> = []
+        for part in chunks(Array(pages)) {
+            let sql = "SELECT DISTINCT d.id FROM property_definitions d JOIN pages p ON p.database_id = d.database_id WHERE d.type = ? AND p.id IN (" + marks(part.count) + ")"
+            for id in try db.query(sql, [.text(PropertyType.editedTime.rawValue)] + part.map { SQLValue($0) }, { $0.uuid(0) }) {
+                if let id { out.insert(id) }
+            }
+        }
+        return out
     }
 
     /// Проверка настроек свёртки. nil — источник удалён или больше не подходит: значения такой свёртки очищаются.
@@ -71,6 +85,11 @@ extension SQLiteWorkspace {
     static func recalcRollups(_ db: SQLiteConnection, touched start: Set<UUID>, properties start2: Set<UUID>?, now: Int64) throws {
         guard !start.isEmpty, try hasRollups(db) else { return }
         let all = try allRollups(db)
+        let formulas = try allFormulas(db)
+        var databaseProperties: [UUID: [PropertyDefinition]] = [:]
+        for f in formulas where databaseProperties[f.def.databaseID] == nil {
+            databaseProperties[f.def.databaseID] = try loadDatabase(db, f.def.databaseID)?.properties ?? []
+        }
         // Настройки проверяются один раз на пересчёт и только у свёрток, которых изменение может касаться.
         var resolved: [UUID: LiveRollup?] = [:]
         func live(_ def: PropertyDefinition) -> LiveRollup? {
@@ -93,6 +112,19 @@ extension SQLiteWorkspace {
                 try recompute(db, r, pages: Array(scope), now: now)
                 next.formUnion(scope)
                 nextProps.insert(r.def.id)
+            }
+            // Формулы зависят только от свойств своей записи: пересчитываются затронутые записи своей базы.
+            for f in formulas {
+                if let changed, f.dependencies.isDisjoint(with: changed) { continue }
+                var scope: [UUID] = []
+                for part in chunks(Array(touched)) {
+                    scope += try db.query("SELECT id FROM pages WHERE database_id=? AND id IN (" + marks(part.count) + ")",
+                                          [SQLValue(f.def.databaseID)] + part.map { SQLValue($0) }) { $0.uuid(0) }.compactMap { $0 }
+                }
+                guard !scope.isEmpty else { continue }
+                try recomputeFormula(db, f, pages: scope, properties: databaseProperties[f.def.databaseID] ?? [], now: now)
+                next.formUnion(scope)
+                nextProps.insert(f.def.id)
             }
             if next.isEmpty { return }
             touched = next
@@ -155,12 +187,14 @@ extension SQLiteWorkspace {
         }
     }
 
-    private static func storeComputed(_ db: SQLiteConnection, page: UUID, property: UUID, value: PropertyValue?, now: Int64) throws {
+    static func storeComputed(_ db: SQLiteConnection, page: UUID, property: UUID, value: PropertyValue?, now: Int64) throws {
         try db.run("DELETE FROM property_values WHERE page_id=? AND property_id=?", [SQLValue(page), SQLValue(property)])
         guard let value else { return }
-        var text: String?, num: Double?, date: String?, dateEnd: String?, ts: Int64?, tsEnd: Int64?, tz: String?
+        var text: String?, num: Double?, date: String?, dateEnd: String?, ts: Int64?, tsEnd: Int64?, tz: String?, error: String?
         switch value {
         case .number(let n): num = n
+        case .checkbox(let b): num = b ? 1 : 0
+        case .error(let message): error = message
         case .text(let s): text = s
         case .date(let d):
             date = d.start.localText
@@ -170,10 +204,10 @@ extension SQLiteWorkspace {
         default: return
         }
         try db.run("""
-        INSERT INTO property_values(page_id, property_id, value_text, value_num, value_date, value_date_end, value_ts, value_ts_end, value_tz, unconverted, updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,NULL,?)
+        INSERT INTO property_values(page_id, property_id, value_text, value_num, value_date, value_date_end, value_ts, value_ts_end, value_tz, unconverted, calc_error, updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,NULL,?,?)
         """, [SQLValue(page), SQLValue(property), SQLValue(text), num.map { .real($0) } ?? .null, SQLValue(date), SQLValue(dateEnd),
-              SQLValue(ts), SQLValue(tsEnd), SQLValue(tz), .int(now)])
+              SQLValue(ts), SQLValue(tsEnd), SQLValue(tz), SQLValue(error), .int(now)])
     }
 
     /// Свёртки, чей источник пропал или больше не подходит, теряют значения: устаревшее число хуже пустой ячейки.
@@ -197,7 +231,10 @@ extension SQLiteWorkspace {
 
     /// После изменения источника (тип свойства, варианты) пересчитываются все свёртки, которые на него смотрят.
     static func recalcDependents(_ db: SQLiteConnection, of property: UUID, now: Int64) throws {
-        guard try hasRollups(db), try allRollups(db).contains(where: { $0.config.rollupProperty == property }) else { return }
+        guard try hasRollups(db) else { return }
+        let rollupUses = try allRollups(db).contains { $0.config.rollupProperty == property }
+        let formulaUses = try allFormulas(db).contains { $0.dependencies.contains(property) }
+        guard rollupUses || formulaUses else { return }
         try clearBrokenRollups(db, now: now)
         guard let def = try? definition(db, property) else { return }
         let pages = Set(try db.query("SELECT id FROM pages WHERE database_id=?", [SQLValue(def.databaseID)]) { $0.uuid(0) }.compactMap { $0 })
@@ -221,6 +258,8 @@ extension SQLiteWorkspace {
                 guard try Self.chainLength(db, from: id) <= RollupLimits.maxChain else {
                     throw WorkspaceError.storage(code: 0, detail: NSLocalizedString("Слишком длинная цепочка свёрток.", comment: ""))
                 }
+                // Через формулы свёртка может замкнуться на себя.
+                try Self.checkNoCycle(db, through: id)
                 _ = try Self.recomputeAll(db, rollup, now: now)
             }
         }

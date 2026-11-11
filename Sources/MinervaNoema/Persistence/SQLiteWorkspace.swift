@@ -20,7 +20,7 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
     let reader: DatabaseQueue
     /// Точки для тестов аварий и отказов: `before-commit`, `after-commit`.
     var faultHook: ((String) throws -> Void)?
-    private let clock: WallClock
+    let clock: WallClock
 
     // MARK: Открытие
 
@@ -407,6 +407,9 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
                     """, titled.map { SQLValue($0) }) { $0.uuid(0) }.compactMap { $0 })
                     if !titleProps.isEmpty { try Self.recalcRollups(db, touched: titled, properties: titleProps, now: now) }
                 }
+                // Правка текста меняет «Изменено»: формулы с ним пересчитываются. Служебная правка его не меняет.
+                let stamps = try Self.editedStamps(db, pages: batch.touchedPages.union(batch.titles.keys))
+                if !stamps.isEmpty { try Self.recalcRollups(db, touched: batch.touchedPages.union(batch.titles.keys), properties: stamps, now: now) }
                 for id in batch.touchedPages {
                     try db.run("UPDATE pages SET updated_at=?, content_rev=content_rev+1 WHERE id=?", [.int(now), SQLValue(id)])
                 }

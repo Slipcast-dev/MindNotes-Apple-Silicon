@@ -25,6 +25,7 @@ func runAllNotesTests() async {
     await runRelationTests()
     await runRollupTests()
     await runFormulaTests()
+    await runFormulaStoreTests()
     await runBackupTests()
     await runVerticalScenario()
     await runGapTests()
