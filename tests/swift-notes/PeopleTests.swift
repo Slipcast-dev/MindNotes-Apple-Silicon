@@ -133,8 +133,8 @@ func runPeopleTests() async {
 
             let w = try SQLiteWorkspace.open(at: url)
             defer { w.close() }
-            checkEqual(try w.maintenanceWrite { try $0.scalarInt("PRAGMA user_version") }, 9, "открытие доводит до последней версии")
-            for table in ["page_sections", "page_section_members"] {
+            checkEqual(try w.maintenanceWrite { try $0.scalarInt("PRAGMA user_version") }, 10, "открытие доводит до последней версии")
+            for table in ["page_sections", "page_section_members", "comments"] {
                 let found = try w.maintenanceWrite { try $0.scalarInt("SELECT 1 FROM sqlite_master WHERE name=?", [.text(table)]) }
                 check(found != nil, "таблица v9 \(table)")
             }

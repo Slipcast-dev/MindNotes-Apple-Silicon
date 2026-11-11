@@ -11,6 +11,8 @@ struct BlockTextStyle {
     /// Плашка неделимого блока, которую строит контроллер: изображение, файл, таблица.
     var atomCell: ((Block) -> NSTextAttachmentCell?)?
 
+    /// Метки открытых веток комментариев: такой текст подсвечен; решённые и удалённые — нет.
+    var activeComments: Set<String> = []
     /// Атрибут текста упоминания: набор рядом с ним не перенимает его оформление.
     static let mentionKey = NSAttributedString.Key("MindNotesMention")
     static let markerIndent: CGFloat = 24
@@ -121,6 +123,15 @@ struct BlockTextStyle {
             attrs[.backgroundColor] = soft
             attrs[.foregroundColor] = marks.contains { PageLink.page(fromMark: $0) != nil } ? ink : accent
             attrs[Self.mentionKey] = true
+        }
+        if let comment = marks.first(where: { activeComments.contains($0) }), let thread = Comment.thread(fromMark: comment) {
+            // Прокомментированный текст: жёлтая подложка, щелчок открывает ветку.
+            attrs[.backgroundColor] = NSColor.systemYellow.withAlphaComponent(0.28)
+            attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            attrs[.underlineColor] = NSColor.systemYellow
+            if attrs[.link] == nil, !marks.contains(where: { $0.hasPrefix("a:") }) {
+                attrs[.link] = URL(string: "notes://comment/" + thread.uuidString.lowercased())
+            }
         }
         for mark in marks {
             if mark.hasPrefix("c:"), let c = Self.colors.first(where: { "c:\($0.name)" == mark }) { attrs[.foregroundColor] = Self.rgb(c.text) }

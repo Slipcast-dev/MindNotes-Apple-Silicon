@@ -228,3 +228,49 @@ func runPeekTests() async {
         }
     }
 }
+
+/// Комментарии (M14, схема v10).
+func runCommentTests() async {
+    await test("Комментарии: ветки, ответы, решено, удаление, автор, корзина, метка в тексте") {
+        try await withTempDir { dir in
+            let w = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "T")
+            defer { w.close() }
+            let page = try await w.createPage(parent: nil, title: "Страница", id: UUID(), now: 1)
+            let anna = try await w.addPerson(name: "Анна", color: nil, emoji: nil, id: UUID(), now: 1)
+            let block = UUID(), thread = UUID()
+            try await w.addComment(page: page.id, block: block, thread: nil, author: anna.id, body: "  Проверить цифры ", anchor: "итог 120", id: thread, now: 2)
+            try await w.addComment(page: page.id, block: nil, thread: thread, author: nil, body: "Проверил", anchor: "", id: UUID(), now: 3)
+            try await w.addComment(page: page.id, block: nil, thread: nil, author: UUID(), body: "О странице", anchor: "", id: UUID(), now: 4)
+            await checkThrows("пустой комментарий") { try await w.addComment(page: page.id, block: nil, thread: nil, author: nil, body: "  ", anchor: "", id: UUID(), now: 5) }
+            await checkThrows("ответ в чужую ветку") { try await w.addComment(page: page.id, block: nil, thread: UUID(), author: nil, body: "x", anchor: "", id: UUID(), now: 5) }
+            var list = try await w.comments(page: page.id)
+            let threads = CommentThread.group(list)
+            checkEqual(threads.count, 2)
+            checkEqual(threads[0].root.body, "Проверить цифры", "пробелы сняты")
+            checkEqual(threads[0].root.authorName, "Анна")
+            checkEqual(threads[0].replies.map(\.body), ["Проверил"])
+            checkEqual(threads[1].root.authorID, nil, "неизвестный автор не записывается")
+            try await w.resolveThread(thread, resolved: true, now: 6)
+            list = try await w.comments(page: page.id)
+            check(list.first { $0.id == thread }?.resolved == true, "решено")
+            try await w.deletePerson(anna.id, now: 7)
+            list = try await w.comments(page: page.id)
+            checkEqual(list.first { $0.id == thread }?.authorID, nil, "удалённый человек — комментарий без автора")
+            try await w.deleteComment(thread)
+            checkEqual(try await w.comments(page: page.id).count, 1, "удаление первого комментария удаляет ветку")
+            let batch = UUID()
+            try await w.trashPage(page.id, batch: batch, now: 8)
+            checkEqual(try await w.comments(page: page.id).count, 1, "в корзине комментарии сохраняются")
+            try await w.purgeTrash(batch: batch)
+            checkEqual(try await w.comments(page: page.id).count, 0, "удаление навсегда убирает и комментарии")
+        }
+        // Метка в тексте: набор рядом не продлевает комментарий, экспорт отмечает потерю.
+        let mark = Comment.mark(UUID())
+        let runs = [TextRun("итог 120", marks: [mark]), TextRun(" руб.")]
+        checkEqual(RichText.replace(runs, range: 8..<8, with: "!").first?.text, "итог 120", "набор после не входит в комментарий")
+        let block = Block(id: UUID(), pageID: UUID(), sortKey: "a", content: BlockContent(runs: runs), createdAt: 1)
+        let md = MarkdownExport.export(title: "Т", blocks: [block], assetFolder: "f") { _ in nil }
+        check(md.markdown.contains("итог 120 руб."), "текст выгружается")
+        check(md.report.contains { $0.reason.hasPrefix("Комментарии не выгружаются") }, "комментарии отмечены в отчёте")
+    }
+}

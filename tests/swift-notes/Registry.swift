@@ -32,6 +32,7 @@ func runAllNotesTests() async {
     await runColumnsTests()
     await runColumnsEditorTests()
     await runPeekTests()
+    await runCommentTests()
     await runDatabaseTests()
     await runRelationTests()
     await runRollupTests()

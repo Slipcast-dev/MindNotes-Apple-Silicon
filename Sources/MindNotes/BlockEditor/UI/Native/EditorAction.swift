@@ -29,6 +29,8 @@ enum EditorAction: Equatable {
     case insertEmbed
     case refreshLinkPreview
     /// Синхронизированный блок (ADR-0012).
+    /// Комментарий к выделенному тексту (M14).
+    case comment
     case makeSynced
     case unsyncCopy
     /// Запрашивает изображение или файл у пользователя.

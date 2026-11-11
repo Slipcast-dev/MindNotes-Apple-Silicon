@@ -67,6 +67,10 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     private var lastCaret = 0
     /// Нажата внутренняя ссылка: страница и, возможно, блок.
     var onOpenLink: ((UUID, UUID?) -> Void)?
+    /// Комментарий к выделенному: оболочка спрашивает текст и записывает ветку; nil — отменено.
+    var requestComment: ((_ block: UUID, _ anchor: String, _ thread: UUID) async -> Bool)?
+    /// Щелчок по прокомментированному тексту: открыть ветку.
+    var onOpenComment: ((UUID) -> Void)?
     /// ⌥-щелчок по ссылке на страницу: открыть её сбоку.
     var onPeekLink: ((UUID) -> Void)?
     /// Копирует файл в пространство; ошибки показывает вызывающий.
@@ -482,6 +486,9 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         scheduleReminder = main.scheduleReminder
         onOpenLink = main.onOpenLink
         onPeekLink = main.onPeekLink
+        requestComment = main.requestComment
+        onOpenComment = main.onOpenComment
+        style.activeComments = main.style.activeComments
         addAttachment = main.addAttachment
         assetURL = main.assetURL
         pickFile = main.pickFile
@@ -648,6 +655,15 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
                 guard let self, let text, let url = LinkCard.url(text) else { return }
                 self.insertLinkCard(action == .insertBookmark ? .bookmark : .embed, url: url)
             }
+        case .comment:
+            guard range.length > 0, let ask = requestComment else { return }
+            let thread = UUID()
+            let anchor = (textView.string as NSString).substring(with: range)
+            Task { @MainActor [weak self] in
+                guard let self, await ask(id, anchor, thread) else { return }
+                // Ветка записана: выделенный текст получает её метку одной правкой.
+                self.perform(.formatText(sel, .toggle(Comment.mark(thread))))
+            }
         case .makeSynced:
             let ids = topSelectedBlockIDs()
             perform(.makeSynced(ids))
@@ -720,6 +736,15 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             _ = try? self.session.perform(.setAtomData(block: id, json: json, plain: AtomData.linkPlain(url: url, title: result.title)), recordUndo: false)
             self.syncView()
         }
+    }
+
+    /// Открытые ветки комментариев: их текст подсвечен; поле колонок получают то же.
+    func setActiveComments(_ threads: Set<UUID>) {
+        let marks = Set(threads.map(Comment.mark))
+        guard marks != style.activeComments else { return }
+        style.activeComments = marks
+        renderAll()
+        for host in columnHosts.values { for c in host.columns { c.editor.setActiveComments(threads) } }
     }
 
     /// Переименование страницы или человека: подписи на открытой странице меняются без шага отмены,
@@ -1555,6 +1580,10 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     /// Внутренние ссылки открывают страницу; внешние — системный браузер, только по нажатию.
     func textView(_ view: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
         let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:))
+        if let url, url.absoluteString.hasPrefix("notes://comment/"), let thread = UUID(uuidString: url.lastPathComponent) {
+            onOpenComment?(thread)
+            return true
+        }
         guard let url, let page = PageLink.page(from: url) else { return false }
         // ⌥-щелчок открывает страницу сбоку (Peek), не уходя с текущей.
         if NSEvent.modifierFlags.contains(.option), let peek = onPeekLink { peek(page); return true }
@@ -2167,6 +2196,7 @@ final class BlockTextView: NSTextView {
         add(sub(t("Цвет текста"), EditorAction.colors))
         add(sub(t("Цветной маркер"), EditorAction.highlights))
         add(sub(t("Цвет блока"), EditorAction.blockColors))
+        if selected.length > 0 { add(menuItem(EditorAction.Item(title: t("Комментировать…"), action: .comment))) }
         if let controller, controller.isInsideSyncedCopy {
             add(menuItem(EditorAction.Item(title: t("Отвязать копию"), action: .unsyncCopy)))
         }

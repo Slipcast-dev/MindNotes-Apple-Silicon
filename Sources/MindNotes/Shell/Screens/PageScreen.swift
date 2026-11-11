@@ -141,6 +141,12 @@ struct PageScreen: View {
                     } label: { Label("Обратные ссылки", systemImage: "arrow.up.right") }
                     .buttonStyle(NotesButtonStyle(kind: .plain))
                     .popover(isPresented: $showsBacklinks, arrowEdge: .bottom) { backlinksPopover }
+                    Button { shell.focusedThread = nil; shell.showsComments = true } label: {
+                        let open = shell.commentThreads.filter { !$0.root.resolved }.count
+                        Label(open > 0 ? L("Комментарии: %d", open) : L("Комментарии"), systemImage: "text.bubble")
+                    }
+                    .buttonStyle(NotesButtonStyle(kind: .plain))
+                    .popover(isPresented: $shell.showsComments, arrowEdge: .bottom) { CommentsPanel(page: editor.pageID) }
             Menu {
                         ForEach(Array(EditorAction.slashItems.enumerated()), id: \.offset) { _, item in
                             Button(item.title) { editor.controller.run(item.action) }

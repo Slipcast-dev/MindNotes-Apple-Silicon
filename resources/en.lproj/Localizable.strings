@@ -1195,3 +1195,22 @@
 "Открывать записи" = "Open records";
 "Сбоку" = "Side peek";
 "Страницей" = "Full page";
+
+/* M14: комментарии */
+"Комментировать…" = "Comment…";
+"Комментарий" = "Comment";
+"Комментарии" = "Comments";
+"Комментарии: %d" = "Comments: %d";
+"Автор" = "Author";
+"Без автора" = "No author";
+"Автор новых комментариев — из справочника людей («Настройки» → «Люди»)" = "Author of new comments — from the people directory (Settings → People)";
+"Комментарий к странице…" = "Comment on the page…";
+"Показывать решённые" = "Show resolved";
+"Комментариев пока нет. Выделите текст и выберите «Комментировать…» в меню правой кнопки." = "No comments yet. Select text and choose “Comment…” from the right-click menu.";
+"К странице" = "On the page";
+"Удалить ветку" = "Delete thread";
+"Удалить комментарий" = "Delete comment";
+"Ответить…" = "Reply…";
+"Открыть снова" = "Reopen";
+"Решено" = "Resolve";
+"Комментарии не выгружаются (остаются в пространстве)" = "Comments are not exported (they stay in the workspace)";

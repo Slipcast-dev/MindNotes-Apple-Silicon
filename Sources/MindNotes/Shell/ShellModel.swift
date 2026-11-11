@@ -909,6 +909,14 @@ final class ShellModel: ObservableObject {
         }
         c.onOpenLink = { [weak self] page, block in self?.followLink(to: page, block: block) }
         c.onPeekLink = { [weak self] page in self?.peekPage(page) }
+        c.requestComment = { [weak self] block, anchor, thread in
+            guard let self, let body = PromptAlert.ask(L("Комментарий"), value: "") else { return false }
+            return await self.addComment(page: id, block: block, anchor: anchor, body: body, newID: thread)
+        }
+        c.onOpenComment = { [weak self] thread in
+            self?.focusedThread = thread
+            self?.showsComments = true
+        }
         c.onPlayVideo = { [weak self] url, name in self?.playingVideo = PlayingVideo(url: url, name: name) }
         c.addAttachment = { [weak self] url in
             guard let store = self?.store else { throw WorkspaceError.storage(code: 0, detail: "пространство закрыто") }
@@ -936,6 +944,9 @@ final class ShellModel: ObservableObject {
         if let editor { configure(editor, page: id) }
         editor?.controller.renderAll()
         backlinks = []
+        comments = []
+        showsComments = false
+        loadComments(id)
         section = .page(id)
         UserDefaults.standard.set(id.uuidString, forKey: lastPageKey)
     }
@@ -1030,6 +1041,71 @@ final class ShellModel: ObservableObject {
     }
 
     /// Переход по ссылке. Страница в корзине не подменяется другой (FR-04).
+    // MARK: Комментарии (M14)
+
+    /// Комментарии открытой страницы, автор новых комментариев и ветка, к которой перешли щелчком по тексту.
+    @Published private(set) var comments: [Comment] = []
+    @Published private(set) var commentAuthor: UUID?
+    @Published var showsComments = false
+    @Published var focusedThread: UUID?
+    private static let commentAuthorKey = "comments.author"
+
+    var commentThreads: [CommentThread] { CommentThread.group(comments) }
+
+    func loadComments(_ page: UUID) {
+        enqueue {
+            guard let store = self.store else { return }
+            if self.commentAuthor == nil, let raw = try await store.meta(Self.commentAuthorKey) { self.commentAuthor = UUID(uuidString: raw) }
+            self.comments = try await store.comments(page: page)
+            self.highlightComments()
+        }
+    }
+
+    /// Подсветка в тексте — только у открытых веток.
+    private func highlightComments() {
+        let open = Set(commentThreads.filter { !$0.root.resolved }.map(\.id))
+        editor?.controller.setActiveComments(open)
+    }
+
+    func setCommentAuthor(_ id: UUID?) {
+        commentAuthor = id
+        enqueue { try await self.store?.setMeta(Self.commentAuthorKey, id?.uuidString ?? "") }
+    }
+
+    /// Новая ветка: к странице (`block == nil`) или к выделенному тексту (ID ветки задаёт редактор).
+    func addComment(page: UUID, block: UUID?, anchor: String, body: String, thread: UUID? = nil, newID: UUID = UUID()) async -> Bool {
+        guard let store, Comment.clean(body) != nil else { return false }
+        do {
+            try await store.addComment(page: page, block: block, thread: thread, author: commentAuthor, body: body, anchor: anchor, id: newID, now: SystemClock().nowMillis())
+            comments = try await store.comments(page: page)
+            highlightComments()
+            return true
+        } catch {
+            errorMessage = Self.describe(error)
+            return false
+        }
+    }
+
+    func reply(to thread: UUID, page: UUID, body: String) {
+        Task { _ = await addComment(page: page, block: nil, anchor: "", body: body, thread: thread) }
+    }
+
+    func resolveThread(_ thread: UUID, _ resolved: Bool, page: UUID) {
+        enqueue {
+            try await self.store?.resolveThread(thread, resolved: resolved, now: SystemClock().nowMillis())
+            self.comments = try await self.store?.comments(page: page) ?? []
+            self.highlightComments()
+        }
+    }
+
+    func deleteComment(_ id: UUID, page: UUID) {
+        enqueue {
+            try await self.store?.deleteComment(id)
+            self.comments = try await self.store?.comments(page: page) ?? []
+            self.highlightComments()
+        }
+    }
+
     // MARK: Peek (M14)
 
     enum PeekMode: String, CaseIterable { case side, center, page }

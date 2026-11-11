@@ -11,9 +11,30 @@ enum Migrations {
     static let applicationID: Int64 = 0x47525A4E // "GRZN"
 
     /// Полный список миграций. Изменять уже выпущенные миграции нельзя: только добавлять новые и fixture прошлой версии.
-    static let all: [Migration] = [v1, v2, v3, v4, v5, v6, v7, v8, v9]
+    static let all: [Migration] = [v1, v2, v3, v4, v5, v6, v7, v8, v9, v10]
 
     static var supportedVersion: Int { all.last?.version ?? 0 }
+
+    private static let v10 = Migration(version: 10, name: "комментарии") { db in
+        try db.execute(schemaV10)
+    }
+
+    /// Комментарии (M14): ветка — первый комментарий и ответы с тем же `thread_id`; у текста — блок и метка `cm:` в его отрезках.
+    static let schemaV10 = """
+    CREATE TABLE comments (
+        id TEXT PRIMARY KEY,
+        page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+        block_id TEXT,
+        thread_id TEXT NOT NULL,
+        author_id TEXT REFERENCES people(id) ON DELETE SET NULL,
+        body TEXT NOT NULL,
+        anchor_text TEXT NOT NULL DEFAULT '',
+        resolved INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX comments_page ON comments(page_id, thread_id, created_at);
+    """
 
     private static let v9 = Migration(version: 9, name: "разделы страниц") { db in
         try db.execute(schemaV9)

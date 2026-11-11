@@ -48,7 +48,7 @@ enum RichText {
         if !text.isEmpty {
             let source = left.last?.marks ?? right.first?.marks ?? []
             // Набор рядом с упоминанием — обычный текст: упоминание не растёт.
-            let marks = source.filter { !Mention.isMentionMark($0, in: source) }
+            let marks = source.filter { !Mention.isMentionMark($0, in: source) && !$0.hasPrefix(Comment.markPrefix) }
             let extra = left.last?.extra ?? right.first?.extra ?? [:]
             out.append(TextRun(text, marks: marks, extra: extra))
         }
