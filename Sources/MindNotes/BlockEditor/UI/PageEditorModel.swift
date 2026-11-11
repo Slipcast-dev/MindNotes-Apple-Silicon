@@ -166,6 +166,30 @@ final class EditorPanels {
             alert.addButton(withTitle: L("Отмена"))
             if alert.runModal() == .alertFirstButtonReturn { done(field.stringValue) }
         }
+        controller.requestMentionDate = { done in
+            let alert = NSAlert()
+            alert.messageText = L("Дата или напоминание")
+            let picker = NSDatePicker(frame: NSRect(x: 0, y: 52, width: 260, height: 24))
+            picker.datePickerStyle = .textFieldAndStepper
+            picker.datePickerElements = [.yearMonthDay, .hourMinute]
+            picker.dateValue = Date()
+            let withTime = NSButton(checkboxWithTitle: L("Указать время"), target: nil, action: nil)
+            withTime.frame = NSRect(x: 0, y: 26, width: 260, height: 20)
+            let remind = NSButton(checkboxWithTitle: L("Напомнить в это время"), target: nil, action: nil)
+            remind.frame = NSRect(x: 0, y: 0, width: 260, height: 20)
+            let box = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 78))
+            [picker, withTime, remind].forEach(box.addSubview)
+            alert.accessoryView = box
+            alert.addButton(withTitle: L("Вставить"))
+            alert.addButton(withTitle: L("Отмена"))
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            let c = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: picker.dateValue)
+            let day = String(format: "%04d-%02d-%02d", c.year ?? 1, c.month ?? 1, c.day ?? 1)
+            let moment = day + String(format: "T%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+            // Напоминание всегда со временем; без него дата — просто день.
+            let timed = withTime.state == .on || remind.state == .on
+            done(timed ? moment : day, remind.state == .on ? moment : nil)
+        }
     }
 
     /// Панель держит контроллер, поэтому при уходе со страницы её нужно отсоединить от окна.

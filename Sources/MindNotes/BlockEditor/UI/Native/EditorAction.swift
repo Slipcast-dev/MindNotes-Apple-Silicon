@@ -19,6 +19,11 @@ enum EditorAction: Equatable {
     case linkPage(UUID, String)
     /// Начинает набор ссылки: вводит «[[».
     case beginPageLink
+    /// `@`-упоминания (M12): страница, человек, дата (`ГГГГ-ММ-ДД` или с временем) и выбор даты в окне.
+    case mentionPage(UUID, String)
+    case mentionPerson(Person)
+    case mentionDate(String)
+    case pickMentionDate
     /// Запрашивает изображение или файл у пользователя.
     case attach(BlockType)
     case insertTable

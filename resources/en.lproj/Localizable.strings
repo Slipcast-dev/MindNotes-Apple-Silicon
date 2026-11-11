@@ -1107,3 +1107,13 @@
 "Цвет блока" = "Block colour";
 "Фон: %@" = "Background: %@";
 "Цвет блоков" = "Block colours";
+
+/* M12: упоминания */
+"Завтра" = "Tomorrow";
+"Дата или напоминание…" = "Date or reminder…";
+"Дата или напоминание" = "Date or reminder";
+"Указать время" = "Include time";
+"Напомнить в это время" = "Remind me at this time";
+"Напоминание" = "Reminder";
+"Время напоминания уже прошло: уведомление не запланировано." = "The reminder time has passed: no notification was scheduled.";
+"Уведомления выключены для MindNotes в Системных настройках: напоминание не придёт." = "Notifications are turned off for MindNotes in System Settings: the reminder will not appear.";

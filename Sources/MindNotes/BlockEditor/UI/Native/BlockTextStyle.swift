@@ -11,6 +11,8 @@ struct BlockTextStyle {
     /// Плашка неделимого блока, которую строит контроллер: изображение, файл, таблица.
     var atomCell: ((Block) -> NSTextAttachmentCell?)?
 
+    /// Атрибут текста упоминания: набор рядом с ним не перенимает его оформление.
+    static let mentionKey = NSAttributedString.Key("MindNotesMention")
     static let markerIndent: CGFloat = 24
     static let nestIndent: CGFloat = 24
     static let checkboxSize: CGFloat = 14
@@ -114,6 +116,12 @@ struct BlockTextStyle {
         attrs[.font] = styled
         if marks.contains("u") { attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue }
         if marks.contains("s") { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+        if marks.contains(Mention.flag) {
+            // Упоминание — плашка: видно, что это одно целое, а не набранный текст.
+            attrs[.backgroundColor] = soft
+            attrs[.foregroundColor] = marks.contains { PageLink.page(fromMark: $0) != nil } ? ink : accent
+            attrs[Self.mentionKey] = true
+        }
         for mark in marks {
             if mark.hasPrefix("c:"), let c = Self.colors.first(where: { "c:\($0.name)" == mark }) { attrs[.foregroundColor] = Self.rgb(c.text) }
             if mark.hasPrefix("bg:"), let c = Self.colors.first(where: { "bg:\($0.name)" == mark }) {

@@ -19,7 +19,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     /// Открытое меню «/»: где стоит косая черта и что введено после неё.
     struct SlashState: Equatable {
-        enum Kind { case blocks, pageLink }
+        enum Kind { case blocks, pageLink, mention }
         var kind: Kind = .blocks
         var blockID: UUID
         var slashOffset: Int
@@ -45,6 +45,16 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     var requestLink: ((String?, @escaping (String?) -> Void) -> Void)?
     /// Страницы для «[[»: запрос → найденные.
     var pageSearch: ((String) -> [(id: UUID, title: String)])?
+    /// Заголовок открытой страницы: текст напоминания.
+    var pageTitle: (() -> String)?
+    /// Справочник людей для «@».
+    var peopleSource: (() -> [Person])?
+    /// Выбор даты для «@»: окно возвращает дату (`ГГГГ-ММ-ДД` или с временем) и время напоминания или nil.
+    var requestMentionDate: ((@escaping (String, String?) -> Void) -> Void)?
+    /// Напоминание к дате упоминания: время `ГГГГ-ММ-ДДTЧЧ:ММ` и текст уведомления.
+    var scheduleReminder: ((String, String) -> Void)?
+    /// Курсор до последнего перемещения: по нему видно, с какой стороны он вошёл в упоминание.
+    private var lastCaret = 0
     /// Нажата внутренняя ссылка: страница и, возможно, блок.
     var onOpenLink: ((UUID, UUID?) -> Void)?
     /// Копирует файл в пространство; ошибки показывает вызывающий.
@@ -395,6 +405,21 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             if case .beginPageLink = action {
                 textView.insertText("[[", replacementRange: range)
             }
+        case .mentionPage(let page, let title):
+            insertMention(Mention.page(page, title: title), at: range)
+        case .mentionPerson(let person):
+            insertMention(Mention.person(person), at: range)
+        case .mentionDate(let iso):
+            if let run = Mention.date(iso, label: Self.dateLabel(iso)) { insertMention(run, at: range) }
+        case .pickMentionDate:
+            requestMentionDate? { [weak self] iso, reminder in
+                guard let self, let run = Mention.date(iso, label: Self.dateLabel(iso), reminder: reminder) else { return }
+                self.insertMention(run, at: self.textView.selectedRange())
+                if let reminder {
+                    let page = self.pageTitle?() ?? ""
+                    self.scheduleReminder?(reminder, page.isEmpty ? run.text : "\(run.text) — \(page)")
+                }
+            }
         case .attach(let type):
             guard let url = pickFile?(type) else { return }
             insertFiles([url], type: type)
@@ -415,6 +440,38 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             perform(.insertBlock(after: tail.id, type: .paragraph))
             if let s = session.selection { perform(.replaceRange(s, fragments)) }
         }
+    }
+
+    /// Переименование страницы или человека: подписи на открытой странице меняются без шага отмены,
+    /// иначе следующая правка блока записала бы прежнюю подпись поверх обновлённой в хранилище.
+    func relabel(_ command: EditCommand) {
+        let caret = textView.selectedRange()
+        do {
+            guard try !session.perform(command, recordUndo: false, quiet: true).changes.isEmpty else { return }
+        } catch { return }
+        syncView()
+        let length = textView.textStorage?.length ?? 0
+        textView.setSelectedRange(NSRange(location: min(caret.location, length), length: 0))
+    }
+
+    /// Упоминание и пробел после него встают на место выделения; набор дальше идёт обычным текстом.
+    private func insertMention(_ run: TextRun, at range: NSRange) {
+        let sel = selection(for: range)
+        perform(.replaceRange(sel, [BlockFragment(type: .paragraph, content: BlockContent(runs: [run, TextRun(" ")]))]))
+    }
+
+    /// Подпись даты упоминания на языке интерфейса: «12 ноября 2026 г.» или с временем.
+    static func dateLabel(_ iso: String) -> String {
+        let parts = iso.split(separator: "T")
+        guard let day = LocalDate(iso: String(parts[0])) else { return iso }
+        let f = DateFormatter()
+        f.locale = Locale.current
+        f.timeZone = .current
+        f.dateStyle = .long
+        f.timeStyle = .none
+        var text = f.string(from: day.date(in: .current))
+        if parts.count == 2 { text += ", " + parts[1] }
+        return text
     }
 
     /// Неделимые блоки встают на место выделения; ниже всегда остаётся строка для ввода.
@@ -797,6 +854,16 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         if view.hasMarkedText() { return true }
         let endIndex = spanIndex(at: range.location + range.length)
         let block = document.block(spans[start].id)
+        // Упоминание неделимо: правка его части берёт его целиком, вставка внутрь уходит за его конец.
+        if start == endIndex, let content = block?.content {
+            let local = (range.location - spans[start].location)..<(range.location + range.length - spans[start].location)
+            if let whole = Mention.atomic(local, in: content.runs) {
+                pendingIndex = nil
+                typedText = nil
+                replaceWithCommand(range: NSRange(location: spans[start].location + whole.lowerBound, length: whole.count), text: text)
+                return false
+            }
+        }
         if start == endIndex, block?.isEditable == true, !BlockFragment.containsLineSeparator(text) { return true }
         // Граница блока или неделимый блок: штатная правка испортила бы структуру.
         pendingIndex = nil
@@ -894,6 +961,12 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         if typed == "[", block.type != .code, slash == nil, offset >= 2, (text as NSString).substring(with: NSRange(location: offset - 2, length: 2)) == "[[" {
             slash = SlashState(kind: .pageLink, blockID: id, slashOffset: offset - 2, query: "", selected: 0)
         }
+        if typed == "@", block.type != .code, slash == nil {
+            let before = (text as NSString).substring(to: max(0, offset - 1))
+            if before.isEmpty || before.last?.isWhitespace == true {
+                slash = SlashState(kind: .mention, blockID: id, slashOffset: offset - 1, query: "", selected: 0)
+            }
+        }
         if slash != nil { updateSlash(); return }
 
         guard block.type == .paragraph else { return }
@@ -918,7 +991,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         guard var state = slash else { return }
         guard let block = document.block(state.blockID), let content = block.content else { return closeSlash() }
         let caret = textView.selectedRange().location
-        let trigger = state.kind == .blocks ? "/" : "[["
+        let trigger = state.kind == .blocks ? "/" : state.kind == .mention ? "@" : "[["
         guard let span = spans.first(where: { $0.id == state.blockID }), caret >= span.location + state.slashOffset + trigger.utf16.count, caret <= span.end else { return closeSlash() }
         let text = content.plainText as NSString
         guard text.length >= state.slashOffset + trigger.utf16.count, text.substring(with: NSRange(location: state.slashOffset, length: trigger.utf16.count)) == trigger else { return closeSlash() }
@@ -936,7 +1009,32 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         case .blocks: return EditorAction.filterSlash(state.query)
         case .pageLink:
             return (pageSearch?(state.query) ?? []).map { EditorAction.Item(title: $0.title.isEmpty ? NSLocalizedString("Без названия", comment: "") : $0.title, action: .linkPage($0.id, $0.title)) }
+        case .mention:
+            return mentionItems(state.query)
         }
+    }
+
+    /// Пункты «@»: даты, люди, страницы — как в Notion; запрос сужает все три списка.
+    private func mentionItems(_ query: String) -> [EditorAction.Item] {
+        let t: (String) -> String = { NSLocalizedString($0, comment: "") }
+        let key = SearchText.normalize(query.trimmingCharacters(in: .whitespaces))
+        func fits(_ text: String, _ aliases: [String] = []) -> Bool {
+            key.isEmpty || ([text] + aliases).contains { SearchText.normalize($0).contains(key) }
+        }
+        let today = LocalDate(date: Date(), in: .current)
+        var items: [EditorAction.Item] = []
+        if fits(t("Сегодня"), ["today", "дата"]) { items.append(EditorAction.Item(title: t("Сегодня"), action: .mentionDate(today.iso))) }
+        if fits(t("Завтра"), ["tomorrow", "дата"]) { items.append(EditorAction.Item(title: t("Завтра"), action: .mentionDate(today.adding(days: 1).iso))) }
+        if fits(t("Дата или напоминание…"), ["date", "remind", "дата", "напомнить"]) {
+            items.append(EditorAction.Item(title: t("Дата или напоминание…"), action: .pickMentionDate))
+        }
+        for person in (peopleSource?() ?? []) where fits(person.name) {
+            items.append(EditorAction.Item(title: "@" + person.name, action: .mentionPerson(person)))
+        }
+        for page in (pageSearch?(query) ?? []).prefix(8) {
+            items.append(EditorAction.Item(title: "↗ " + (page.title.isEmpty ? t("Без названия") : page.title), action: .mentionPage(page.id, page.title)))
+        }
+        return items
     }
 
     func closeSlash() {
@@ -975,6 +1073,16 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         case .beginPageLink:
             perform(.replaceRange(cut, []))
             run(.beginPageLink)
+        case .mentionPage, .mentionPerson, .mentionDate:
+            // «@запрос» заменяется упоминанием одной правкой.
+            let run: TextRun?
+            switch action {
+            case let .mentionPage(page, title): run = Mention.page(page, title: title)
+            case let .mentionPerson(person): run = Mention.person(person)
+            case let .mentionDate(iso): run = Mention.date(iso, label: Self.dateLabel(iso))
+            default: run = nil
+            }
+            if let run { perform(.replaceRange(cut, [BlockFragment(type: .paragraph, content: BlockContent(runs: [run, TextRun(" ")]))])) }
         case .turnInto(let type):
             perform(.batch([.replaceRange(cut, []), .changeType(block: state.blockID, type: type)]))
         case .insert(let type):
@@ -1014,6 +1122,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     func textViewDidChangeSelection(_ notification: Notification) {
         guard !applying, !spans.isEmpty, pendingIndex == nil else { return }
+        if snapCaretOutOfMention() { return }
         if !textView.hasMarkedText() {
             editingIndex = spanIndex(at: textView.selectedRange().location)
             session.updateSelection(selection(for: textView.selectedRange()))
@@ -1023,6 +1132,21 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         applyTypingAttributes()
         if slash != nil { updateSlash() }
         reportSelection()
+    }
+
+    /// Курсор не останавливается внутри упоминания: выходит к краю в сторону движения.
+    private func snapCaretOutOfMention() -> Bool {
+        let range = textView.selectedRange()
+        defer { lastCaret = textView.selectedRange().location }
+        guard range.length == 0, !textView.hasMarkedText() else { return false }
+        let index = spanIndex(at: range.location)
+        guard spans.indices.contains(index), let content = document.block(spans[index].id)?.content else { return false }
+        let local = range.location - spans[index].location
+        guard let hit = Mention.ranges(in: content.runs).first(where: { $0.lowerBound < local && local < $0.upperBound }) else { return false }
+        let forward = range.location >= lastCaret
+        let target = spans[index].location + (forward ? hit.upperBound : hit.lowerBound)
+        textView.setSelectedRange(NSRange(location: target, length: 0))
+        return true
     }
 
     private func reportSelection() {
@@ -1043,6 +1167,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         if location > span.location, block.isEditable, let storage = textView.textStorage, location <= storage.length {
             attrs = storage.attributes(at: location - 1, effectiveRange: nil)
             attrs[.link] = nil
+            if attrs[BlockTextStyle.mentionKey] != nil { attrs = style.attributes(for: block.type, depth: depths[block.id] ?? 0) }
         } else {
             attrs = style.attributes(for: block.type, depth: depths[block.id] ?? 0)
         }

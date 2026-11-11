@@ -714,6 +714,11 @@ final class ShellModel: ObservableObject {
         let style = BlockTextStyle(ink: Tokens.inkNS, muted: Tokens.mutedNS, accent: Tokens.accentNS, line: Tokens.lineNS, soft: Tokens.softNS)
         editor = PageEditorModel(session: editorSession, style: style) { [weak self] in self?.errorMessage = $0 }
         editor?.controller.pageSearch = { [weak self] in self?.linkCandidates($0) ?? [] }
+        editor?.controller.peopleSource = { [weak self] in self?.people ?? [] }
+        editor?.controller.pageTitle = { [weak self] in self?.pages.first { $0.id == id }?.title ?? "" }
+        editor?.controller.scheduleReminder = { [weak self] when, text in
+            MentionReminders.schedule(when, text: text) { self?.errorMessage = $0 }
+        }
         editor?.controller.pickDatabaseView = { [weak self] in self?.pickDatabaseFragment() }
         editor?.controller.embedSummary = { [weak self] in self?.embedSummary($0) }
         embedCache = [:]
@@ -1015,6 +1020,7 @@ final class ShellModel: ObservableObject {
         enqueue {
             try await self.store?.updatePerson(person, now: SystemClock().nowMillis())
             try await self.reloadPeople()
+            self.editor?.controller.relabel(.relabelPerson(self.people.first { $0.id == person.id } ?? person))
         }
     }
 
@@ -1084,7 +1090,9 @@ final class ShellModel: ObservableObject {
 
     func rename(_ id: UUID, to title: String) {
         guard let session else { return }
+        let old = session.pages.first { $0.id == id }?.title
         session.rename(id, title: title)
+        editor?.controller.relabel(.relabelPage(id, old: old, new: title))
         pages = session.pages
     }
 

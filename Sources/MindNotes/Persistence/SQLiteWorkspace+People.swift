@@ -47,6 +47,7 @@ extension SQLiteWorkspace {
             try db.transaction {
                 try db.run("UPDATE people SET name=?, color=?, emoji=? WHERE id=?", [.text(person.name), SQLValue(person.color), SQLValue(person.emoji), SQLValue(person.id)])
                 guard db.changes > 0 else { throw Self.peopleError("Человека нет в справочнике.") }
+                try SearchIndex.relabelPerson(db, person) // Упоминания в тексте показывают новое имя (M12).
                 // Формулы и свёртки могли показывать имя: пересчитываются записи, где человек указан.
                 try Self.recalcRollups(db, touched: try Self.pagesWith(db, person: person.id), properties: try Self.personProperties(db), now: now)
             }

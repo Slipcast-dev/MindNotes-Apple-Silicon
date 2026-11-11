@@ -35,6 +35,45 @@ enum SearchIndex {
         try insert(db, rowid: -rowid, page: page, block: nil, text: title)
     }
 
+    /// Подписи упоминаний и ссылок `[[` на страницу после её переименования (M12): блоки находятся по `page_links`.
+    /// Время изменения блоков не меняется — это не правка пользователя.
+    static func relabelLinks(_ db: SQLiteConnection, page: UUID, old: String?, new: String) throws {
+        guard old != new else { return }
+        let rows = try db.query("""
+        SELECT DISTINCT b.id, b.page_id, b.type, b.content_v, b.content_json, b.plain_text
+        FROM page_links l JOIN blocks b ON b.id = l.block_id WHERE l.to_page=?
+        """, [SQLValue(page)]) { ($0.uuid(0), $0.uuid(1), $0.text(2), $0.int(3), $0.text(4), $0.text(5)) }
+        for (id, owner, type, version, json, text) in rows {
+            guard let id, let owner else { continue }
+            try rewrite(db, id: id, page: owner, type: type, version: version, json: json, text: text) { Mention.relabel($0, page: page, old: old, new: new) }
+        }
+    }
+
+    /// Подписи упоминаний человека после правки справочника.
+    static func relabelPerson(_ db: SQLiteConnection, _ person: Person) throws {
+        let rows = try db.query("SELECT id, page_id, type, content_v, content_json, plain_text FROM blocks WHERE content_json LIKE ?",
+                                [.text("%" + Mention.personPrefix + person.id.uuidString.lowercased() + "%")]) {
+            ($0.uuid(0), $0.uuid(1), $0.text(2), $0.int(3), $0.text(4), $0.text(5))
+        }
+        for (id, owner, type, version, json, text) in rows {
+            guard let id, let owner else { continue }
+            try rewrite(db, id: id, page: owner, type: type, version: version, json: json, text: text) { Mention.relabel($0, person: person) }
+        }
+    }
+
+    private static func rewrite(_ db: SQLiteConnection, id: UUID, page: UUID, type: String, version: Int64, json: String, text: String,
+                                _ change: ([TextRun]) -> [TextRun]?) throws {
+        var block = Block(id: id, pageID: page, parentID: nil, sortKey: "", type: BlockType(rawValue: type), contentVersion: Int(version),
+                          contentJSON: json, plainText: text, createdAt: 0, updatedAt: 0)
+        guard var content = block.content, let runs = change(content.runs) else { return }
+        content.runs = runs
+        block.setContent(content)
+        try db.run("UPDATE blocks SET content_json=?, plain_text=? WHERE id=?", [.text(try content.jsonString()), .text(block.plainText), SQLValue(id)])
+        if try db.scalarInt("SELECT 1 FROM sqlite_master WHERE name='search_index'") != nil {
+            try updateBlock(db, id: id, page: page, text: block.plainText, targets: PageLink.targets(of: block))
+        }
+    }
+
     /// Вызывается до удаления страницы: её блоки уйдут каскадом.
     static func removePage(_ db: SQLiteConnection, page: UUID) throws {
         let blocks = try db.query("SELECT rowid FROM blocks WHERE page_id=?", [SQLValue(page)]) { $0.int(0) }

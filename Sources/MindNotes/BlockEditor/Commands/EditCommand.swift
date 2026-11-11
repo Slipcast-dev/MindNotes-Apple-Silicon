@@ -25,6 +25,9 @@ enum EditCommand: Equatable {
     case indent(UUID)
     case outdent(UUID)
     case setCollapsed(block: UUID, collapsed: Bool)
+    /// Подписи упоминаний и ссылок после переименования страницы или человека (M12): служебная правка открытой страницы.
+    case relabelPage(UUID, old: String?, new: String)
+    case relabelPerson(Person)
     /// Цвет текста или фона блока (M12); nil — по умолчанию.
     case setBlockColor(block: UUID, color: String?)
     /// Несколько правок одним шагом отмены.
@@ -440,6 +443,23 @@ enum BlockEditing {
             var n = c
             n.extra["collapsed"] = collapsed ? .bool(true) : nil
             return result([.upsert(updated(b, n))], selection: nil)
+
+        case .relabelPage, .relabelPerson:
+            var changes: [BlockChange] = []
+            for b in document.blocks {
+                guard let c = b.content else { continue }
+                let runs: [TextRun]?
+                switch command {
+                case let .relabelPage(page, old, new): runs = Mention.relabel(c.runs, page: page, old: old, new: new)
+                case let .relabelPerson(person): runs = Mention.relabel(c.runs, person: person)
+                default: runs = nil
+                }
+                guard let runs else { continue }
+                var n = c
+                n.runs = runs
+                changes.append(.upsert(updated(b, n)))
+            }
+            return result(changes, selection: nil)
 
         case let .setBlockColor(id, color):
             let (b, c) = try editable(id)

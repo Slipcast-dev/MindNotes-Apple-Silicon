@@ -223,12 +223,18 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
 
     func updatePage(_ page: Page) async throws {
         try await writer.run { db in
-            try db.run("""
-            UPDATE pages SET title=?, icon=?, cover_asset_id=?, full_width=?, favorite_key=?, updated_at=? WHERE id=?
-            """, [.text(page.title), SQLValue(page.icon), SQLValue(page.coverAssetID), .int(page.fullWidth ? 1 : 0),
-                  SQLValue(page.favoriteKey), .int(page.updatedAt), SQLValue(page.id)])
-            if db.changes == 0 { throw WorkspaceError.pageNotFound(page.id) }
-            if try Self.indexExists(db) { try SearchIndex.updateTitle(db, page: page.id, title: page.title) }
+            try db.transaction {
+                let old = try db.scalarText("SELECT title FROM pages WHERE id=?", [SQLValue(page.id)])
+                try db.run("""
+                UPDATE pages SET title=?, icon=?, cover_asset_id=?, full_width=?, favorite_key=?, updated_at=? WHERE id=?
+                """, [.text(page.title), SQLValue(page.icon), SQLValue(page.coverAssetID), .int(page.fullWidth ? 1 : 0),
+                      SQLValue(page.favoriteKey), .int(page.updatedAt), SQLValue(page.id)])
+                if db.changes == 0 { throw WorkspaceError.pageNotFound(page.id) }
+                if try Self.indexExists(db) {
+                    try SearchIndex.updateTitle(db, page: page.id, title: page.title)
+                    try SearchIndex.relabelLinks(db, page: page.id, old: old, new: page.title)
+                }
+            }
         }
     }
 
@@ -395,8 +401,12 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
                     if let asset = b.assetID { try db.run("INSERT OR IGNORE INTO block_assets(owner_id, asset_id) SELECT ?, id FROM assets WHERE id=?", [SQLValue(b.id), SQLValue(asset)]) }
                 }
                 for (id, title) in batch.titles {
+                    let old = try db.scalarText("SELECT title FROM pages WHERE id=?", [SQLValue(id)])
                     try db.run("UPDATE pages SET title=?, updated_at=? WHERE id=?", [.text(title), .int(now), SQLValue(id)])
-                    if indexed { try SearchIndex.updateTitle(db, page: id, title: title) }
+                    if indexed {
+                        try SearchIndex.updateTitle(db, page: id, title: title)
+                        try SearchIndex.relabelLinks(db, page: id, old: old, new: title)
+                    }
                 }
                 if !batch.titles.isEmpty, try Self.hasRollups(db) {
                     // Заголовок записи — тоже значение: свёртки «показать значения» по нему пересчитываются.
