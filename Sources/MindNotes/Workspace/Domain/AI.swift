@@ -286,6 +286,12 @@ enum AIFailure: Error, Equatable, LocalizedError {
         }
     }
 
+    /// Ответ сервера о том, что модель не поддерживает вызов инструментов.
+    static func mentionsTools(_ detail: String) -> Bool {
+        let t = detail.lowercased()
+        return (t.contains("tool") || t.contains("function")) && (t.contains("support") || t.contains("not available") || t.contains("unsupported") || t.contains("does not"))
+    }
+
     /// Повторять имеет смысл только временные сбои.
     var isRetryable: Bool {
         switch self {
@@ -806,17 +812,49 @@ struct AIValueRestore: Equatable {
     var value: PropertyValue?
 }
 
+/// Что нужно агенту, чтобы задать людей и связи по именам: справочник людей и записи баз-целей.
+struct AIValueLookups {
+    var people: [Person] = []
+    /// База-цель связи → её записи.
+    var records: [UUID: [LinkedPage]] = [:]
+}
+
 extension AIValues {
+    /// Что агент может задавать: заполняемые типы, люди и связи. Формулы, свёртки и время вычисляются сами,
+    /// файлы добавляются только вручную.
+    static let agentWritable: Set<PropertyType> = fillable.union([.person, .relation])
+
+    /// Люди и связи — по именам через запятую (связь — также по ID записи). nil — не найдено ни одного.
+    static func parse(_ raw: String, property: PropertyDefinition, lookups: AIValueLookups) -> PropertyValue? {
+        let names = raw.split(separator: ",").map { SearchText.normalize($0.trimmingCharacters(in: .whitespaces)) }.filter { !$0.isEmpty }
+        switch property.type {
+        case .person:
+            var seen: Set<UUID> = []
+            let found = names.compactMap { name in lookups.people.first { SearchText.normalize($0.name) == name } }.filter { seen.insert($0.id).inserted }
+            return found.isEmpty ? nil : .people(found)
+        case .relation:
+            guard let target = property.config.target, let records = lookups.records[target] else { return nil }
+            var seen: Set<UUID> = []
+            let found = names.compactMap { name -> LinkedPage? in
+                if let id = UUID(uuidString: name) { return records.first { $0.id == id } }
+                return records.first { SearchText.normalize($0.title) == name }
+            }.filter { seen.insert($0.id).inserted }
+            return found.isEmpty ? nil : .relation(found)
+        default:
+            return parse(raw, property: property)
+        }
+    }
+
     /// Значения агента по именам свойств базы. Неизвестное свойство или неподходящее значение — ошибка с подсказкой.
-    static func resolve(_ inputs: [AIPropertyInput], database: Database) -> Result<[(property: PropertyDefinition, value: PropertyValue)], AITools.ValidationError> {
+    static func resolve(_ inputs: [AIPropertyInput], database: Database, lookups: AIValueLookups = AIValueLookups()) -> Result<[(property: PropertyDefinition, value: PropertyValue)], AITools.ValidationError> {
         var out: [(property: PropertyDefinition, value: PropertyValue)] = []
-        let writable = database.properties.filter { $0.type != .title && fillable.contains($0.type) }
+        let writable = database.properties.filter { $0.type != .title && agentWritable.contains($0.type) }
         for input in inputs {
             let key = SearchText.normalize(input.property.trimmingCharacters(in: .whitespaces))
             guard let property = writable.first(where: { SearchText.normalize($0.name) == key }) else {
                 return .failure(.invalid("нет свойства «\(input.property)»; доступны: " + writable.map(\.name).joined(separator: ", ")))
             }
-            guard let value = parse(input.value, property: property) else {
+            guard let value = parse(input.value, property: property, lookups: lookups) else {
                 return .failure(.invalid("«\(property.name)»: ожидается \(describe(property))"))
             }
             out.append((property, value))
@@ -827,7 +865,7 @@ extension AIValues {
     /// Свойства базы для модели.
     static func schemaText(_ database: Database) -> String {
         database.properties.map { p in
-            p.type == .title ? "- \(p.name): заголовок записи" : "- \(p.name): \(fillable.contains(p.type) ? describe(p) : "только чтение")"
+            p.type == .title ? "- \(p.name): заголовок записи" : "- \(p.name): \(agentWritable.contains(p.type) ? describe(p) : "только чтение")"
         }.joined(separator: "\n")
     }
 }
@@ -1058,6 +1096,8 @@ enum AIValues {
         case .checkbox: return "да или нет (true/false)"
         case .date: return "дата ГГГГ-ММ-ДД"
         case .url: return "адрес https://…"
+        case .person: return "люди из справочника пространства: имена через запятую"
+        case .relation: return "записи связанной базы: заголовки через запятую"
         case .select, .status: return options.isEmpty ? "один вариант" : "один вариант из: " + options.joined(separator: ", ")
         case .multiSelect: return options.isEmpty ? "несколько вариантов" : "несколько вариантов из: " + options.joined(separator: ", ")
         default: return "текст"
@@ -1218,5 +1258,68 @@ struct AIAttachment: Equatable, Identifiable {
             })
             return .object(object)
         }
+    }
+}
+
+// MARK: Снимок заполнения для отмены
+
+extension AIValues {
+    static func lastRunKey(_ property: UUID) -> String { "ai_lastrun_" + property.uuidString.lowercased() }
+
+    /// Значение заполняемого типа в JSON без потерь (дата — день или момент с поясом).
+    static func encodeValue(_ value: PropertyValue?) -> JSONValue {
+        func point(_ p: DatePoint) -> JSONValue {
+            switch p {
+            case .day(let d): return .object(["d": .string(d.iso)])
+            case .moment(let ms, let zone): return .object(["ms": .int(ms), "z": .string(zone)])
+            }
+        }
+        switch value {
+        case .text(let s)?: return .object(["t": .string(s)])
+        case .number(let n)?: return .object(["n": .double(n)])
+        case .checkbox(let b)?: return .object(["c": .bool(b)])
+        case .url(let s)?: return .object(["u": .string(s)])
+        case .options(let ids)?: return .object(["o": .array(ids.map { .string($0.uuidString.lowercased()) })])
+        case .date(let d)?:
+            var o: [String: JSONValue] = ["s": point(d.start)]
+            if let end = d.end { o["e"] = point(end) }
+            return .object(["date": .object(o)])
+        default: return .null
+        }
+    }
+
+    static func decodeValue(_ json: JSONValue?) -> PropertyValue? {
+        func point(_ j: JSONValue?) -> DatePoint? {
+            if let d = j?["d"]?.stringValue.flatMap(LocalDate.init(iso:)) { return .day(d) }
+            if case .int(let ms)? = j?["ms"], let zone = j?["z"]?.stringValue { return .moment(ms: ms, zone: zone) }
+            return nil
+        }
+        guard let json, json != .null else { return nil }
+        if let s = json["t"]?.stringValue { return .text(s) }
+        if let n = json["n"] { if case .double(let v) = n { return .number(v) }; if case .int(let v) = n { return .number(Double(v)) } }
+        if case .bool(let b)? = json["c"] { return .checkbox(b) }
+        if let s = json["u"]?.stringValue { return .url(s) }
+        if let ids = json["o"]?.arrayValue { return .options(ids.compactMap { $0.stringValue.flatMap(UUID.init(uuidString:)) }) }
+        if let date = json["date"], let start = point(date["s"]) { return .date(DateValue(start: start, end: point(date["e"]))) }
+        return nil
+    }
+
+    static func encodeRun(database: UUID, old: [(page: UUID, value: PropertyValue?)], marks: [UUID: String]) -> String {
+        let o: JSONValue = .object([
+            "database": .string(database.uuidString.lowercased()),
+            "old": .array(old.map { .object(["page": .string($0.page.uuidString.lowercased()), "value": encodeValue($0.value)]) }),
+            "marks": .string(encodeMarks(marks)),
+        ])
+        return String(decoding: o.encoded(), as: UTF8.self)
+    }
+
+    static func decodeRun(_ text: String, property: PropertyDefinition) -> (database: UUID, old: [(page: UUID, value: PropertyValue?)], marks: [UUID: String])? {
+        guard let json = JSONValue.parse(text), let database = json["database"]?.stringValue.flatMap(UUID.init(uuidString:)),
+              let list = json["old"]?.arrayValue else { return nil }
+        let old: [(page: UUID, value: PropertyValue?)] = list.compactMap { item in
+            guard let page = item["page"]?.stringValue.flatMap(UUID.init(uuidString:)) else { return nil }
+            return (page, decodeValue(item["value"]))
+        }
+        return (database, old, decodeMarks(json["marks"]?.stringValue))
     }
 }

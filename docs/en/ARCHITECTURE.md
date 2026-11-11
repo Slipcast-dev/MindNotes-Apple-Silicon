@@ -4,7 +4,7 @@
 
 Status: the app's current design after M0–M14 (workspace schema v10). Progress is in `STATUS.md`, decisions are ADRs in `docs/personal-ru/adr/` (both in Russian).
 
-Constraints: one module, built with `swiftc`, no external dependencies, arm64 and macOS 26 only (ADR-0009, `scripts/target.sh`). Network is used only for link previews and updates, inside `Shell/Network/` (ADR-0011, ADR-0014). Target: 10k pages, 100k blocks, one user, one process per workspace.
+Constraints: one module, built with `swiftc`, no external dependencies, arm64 and macOS 26 only (ADR-0009, `scripts/target.sh`). Network is used only for link previews, updates and the optional AI, inside `Shell/Network/` (ADR-0011, ADR-0014). Target: 10k pages, 100k blocks, one user, one process per workspace.
 
 ## 1. Modules and boundaries
 
@@ -20,7 +20,8 @@ Sources/MindNotes/
   Backup/                    # TarArchive, BackupService, RestoreService
   ImportExport/              # Markdown, CSV, folders, Notion export, workspace export
   Shell/                     # RootView, ShellModel, sidebar, Screens/, Database/, extensions, design tokens
-  Shell/Network/             # the only place with network access: link previews and updates
+  Shell/AI/                  # optional AI (ADR-0016, ADR-0018): settings, selection panel, chat and agent with confirmation, AI properties
+  Shell/Network/             # the only place with network access: link previews, updates, the AI client and keys in the keychain
 ```
 
 | Layer | Imports | May use |

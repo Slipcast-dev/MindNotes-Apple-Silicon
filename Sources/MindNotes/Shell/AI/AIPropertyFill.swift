@@ -56,6 +56,15 @@ final class AIPropertyFiller: ObservableObject {
 
     func stop(_ property: UUID) { tasks[property]?.cancel() }
 
+    private var loadingMarks: Set<UUID> = []
+
+    /// Отметки для значков в ячейках: читаются один раз на свойство, сколько бы ячеек ни спросило.
+    func ensureMarks(_ property: UUID, store: SQLiteWorkspace) async {
+        guard marks[property] == nil, loadingMarks.insert(property).inserted else { return }
+        defer { loadingMarks.remove(property) }
+        _ = await loadMarks(property, store: store)
+    }
+
     func loadMarks(_ property: UUID, store: SQLiteWorkspace) async -> [UUID: String] {
         let loaded = AIValues.decodeMarks(try? await store.meta(AIValues.marksKey(property)))
         marks[property] = loaded
@@ -177,7 +186,17 @@ final class AIPropertyFiller: ObservableObject {
         var next = owned
         for item in written { next[item.page] = item.value == nil ? nil : AIValues.fingerprint(item.value) }
         await saveMarks(property, next, store: store)
-        lastRun[property] = Run(database: database, old: old, marks: owned)
+        let run = Run(database: database, old: old, marks: owned)
+        lastRun[property] = run
+        // Снимок для отмены хранится в пространстве: «Отменить заполнение» доступно и после перезапуска.
+        try? await store.setMeta(AIValues.lastRunKey(property), AIValues.encodeRun(database: database, old: old, marks: owned))
+    }
+
+    /// Снимок последнего заполнения из пространства.
+    func loadLastRun(_ property: PropertyDefinition, store: SQLiteWorkspace) async {
+        guard lastRun[property.id] == nil, let text = try? await store.meta(AIValues.lastRunKey(property.id)),
+              let run = AIValues.decodeRun(text, property: property) else { return }
+        lastRun[property.id] = Run(database: run.database, old: run.old, marks: run.marks)
     }
 
     /// «Отменить заполнение»: прежние значения и прежние отметки. Ячейки, исправленные после заполнения, не трогаются.
@@ -186,10 +205,12 @@ final class AIPropertyFiller: ObservableObject {
         lastRun[property.id] = nil
         let store = model.store
         model.perform {
+            try? await store.setMeta(AIValues.lastRunKey(property.id), "")
             guard let database = model.database else { return }
             let current = try await store.queryRecords(database: database, state: DatabaseViewState(), limit: Self.maxRecords, offset: 0)
             let now = Dictionary(uniqueKeysWithValues: current.rows.map { ($0.id, $0.values[property.id]) })
-            let owned = self.marks[property.id] ?? [:]
+            // Отметки читаются заново: после перезапуска их в памяти ещё нет.
+            let owned = await self.loadMarks(property.id, store: store)
             let restore = run.old.filter { item in owned[item.page] == AIValues.fingerprint(now[item.page] ?? nil) }
             if !restore.isEmpty { try await store.setValues(property: property.id, restore, now: SystemClock().nowMillis()) }
             await self.saveMarks(property.id, run.marks, store: store)
@@ -267,8 +288,22 @@ final class AIPropertyFiller: ObservableObject {
         var written: [(page: UUID, value: PropertyValue?)] = []
         var old: [(page: UUID, value: PropertyValue?)] = []
         var failed = 0
-        for (id, turn) in results {
+        // В пакете нет замены модели при отказе: отказанные и неудавшиеся записи повторяются обычным запросом,
+        // у которого сервер сам переключается на подходящую модель (`fallbacks`).
+        var retried: [String: AIAssistantTurn?] = [:]
+        let needRetry = results.filter { _, turn in turn == nil || turn?.stopReason == "refusal" }.map(\.id)
+        if !needRetry.isEmpty, let shell, let config = AIPropertyConfig(json: property.config.extra[AIPropertyConfig.key]) {
+            for id in needRetry.prefix(200) {
+                guard let page = UUID(uuidString: id), let values = try? await store.recordValues(page: page, database: database),
+                      let record = shell.pages.first(where: { $0.id == page }) else { continue }
+                let row = RecordRow(id: page, title: record.title, icon: record.icon, values: values)
+                let body = await params(for: row, config: config, property: property, database: database, shell: shell, stream: true)
+                retried[id] = try? await AIClient.stream(body, onEvent: { _, _ in })
+            }
+        }
+        for (id, batchTurn) in results {
             guard let page = UUID(uuidString: id) else { continue }
+            let turn = retried[id] ?? batchTurn
             guard case .some(let value) = value(from: turn, property: property) else { failed += 1; continue }
             // За время ожидания ячейку могли заполнить вручную: «пустые» и «созданные ИИ» её не трогают,
             // «Перезаписать все» перезаписывает, как и просили.
@@ -357,7 +392,10 @@ struct AIPropertyControls: View {
             }
             if config != nil { actions.padding(.leading, 20) }
         }
-        .task(id: property.id) { _ = await filler.loadMarks(property.id, store: model.store) }
+        .task(id: property.id) {
+            _ = await filler.loadMarks(property.id, store: model.store)
+            await filler.loadLastRun(property, store: model.store)
+        }
     }
 
     @ViewBuilder private var actions: some View {
@@ -396,6 +434,31 @@ struct AIPropertyControls: View {
             if owned > 0 {
                 Text(String(format: L("✦ создано ИИ (на экране): %d"), owned)).font(.system(size: 11)).foregroundColor(AIStyle.tint)
             }
+        }
+    }
+}
+
+/// ✦ у ячейки, заполненной ИИ: значение совпадает с записанным ИИ. Ручная правка убирает значок.
+struct AIMarkBadge: View {
+    let property: UUID
+    let record: UUID
+    let value: PropertyValue?
+    @ObservedObject private var filler = AIPropertyFiller.shared
+    @EnvironmentObject private var shell: ShellModel
+
+    var body: some View {
+        Group {
+            if value != nil, filler.marks[property]?[record] == AIValues.fingerprint(value) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 9))
+                    .foregroundColor(AIStyle.tint)
+                    .help(L("Заполнено ИИ"))
+                    .accessibilityLabel(Text("Заполнено ИИ"))
+            }
+        }
+        .task(id: property) {
+            guard let store = shell.store else { return }
+            await filler.ensureMarks(property, store: store)
         }
     }
 }

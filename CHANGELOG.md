@@ -4,13 +4,13 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.0] - 2026-11-12
 
 ### Added
 - **Drag sidebar sections** by the title, including “Pages”; “Move up” and “Move down” are available for every section. The order is stored in the workspace.
 - **Password for a page, record, database or folder** (ADR-0017): “…” → “Set Password…”. The lock covers everything inside; unlock with the password, Touch ID or your Mac password, and it locks again after the display sleeps, the app restarts or “Lock Now”. Locked text stays out of search, backlinks, inline databases, copies, templates, export and AI. This is an app lock, not encryption.
 - **AI providers** (ADR-0018): besides Anthropic, choose OpenAI, OpenRouter, Google Gemini, DeepSeek, Mistral, xAI, Groq, local Ollama or LM Studio, or any OpenAI-compatible server. Each provider has its own key in the keychain and its own model. The AI item in the sidebar now sits between Search and Home.
-- **Optional AI assistant** (ADR-0016), off by default: “Ask AI” on selected text and ⌘J, AI on an empty line with Space, an AI chat (⇧⌘J) that answers about the open page or the whole workspace, an agent that proposes changes and applies them only when you click Apply, an empty-line hint, page mentions with “@” and saved chat history, an “AI instructions” page, “Don't send to AI” for pages, AI fill for database properties (text, numbers, dates, checkboxes, links and options) with an “AI-filled” mark, undo, auto-update and half-price batch mode, database tools for the agent, and file attachments in the chat. Uses the Claude API with your own key stored in the macOS keychain; nothing is sent until you turn AI on.
+- **Optional AI assistant** (ADR-0016), off by default: “Ask AI” on selected text and ⌘J, AI on an empty line with Space, an AI chat (⇧⌘J) that answers about the open page or the whole workspace, an agent that proposes changes and applies them only when you click Apply, an empty-line hint, page mentions with “@” and saved chat history, an “AI instructions” page, “Don't send to AI” for pages, AI fill for database properties (text, numbers, dates, checkboxes, links and options) with an “AI-filled” mark, undo, auto-update and half-price batch mode, database tools for the agent, and file attachments in the chat. AI-filled cells show ✦, “Undo fill” survives a restart, refused batch items are retried, the agent can set people and relations, and a model without tool support still answers in the chat. Uses the Claude API with your own key stored in the macOS keychain; nothing is sent until you turn AI on.
 
 ## [1.3.0] - 2026-11-11
 

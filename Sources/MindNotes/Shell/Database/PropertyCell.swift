@@ -51,9 +51,23 @@ struct PropertyCell: View {
     @Environment(\.liveCommit) private var live
     let property: PropertyDefinition
     let value: PropertyValue?
+    /// Запись ячейки: для отметки «создано ИИ» (ADR-0016). nil — ячейка вне записи (массовое изменение).
+    var record: UUID? = nil
     let onChange: (PropertyValue?) -> Void
 
     var body: some View {
+        // Значок только у свойств с настройкой ИИ: остальные ячейки ничего не наблюдают.
+        if let record, property.config.extra[AIPropertyConfig.key] != nil {
+            HStack(spacing: 4) {
+                cell
+                AIMarkBadge(property: property.id, record: record, value: value)
+            }
+        } else {
+            cell
+        }
+    }
+
+    @ViewBuilder private var cell: some View {
         if case .unconverted(let raw)? = value {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle").foregroundColor(Tokens.danger).font(.system(size: 11))
@@ -376,7 +390,7 @@ struct RecordPropertiesPanel: View {
             ForEach(database?.properties.filter { $0.type != .title } ?? []) { property in
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(property.name).font(.system(size: 13)).foregroundColor(Tokens.muted).lineLimit(1).frame(width: 140, alignment: .leading)
-                    PropertyCell(property: property, value: values[property.id]) { new in
+                    PropertyCell(property: property, value: values[property.id], record: page) { new in
                         save(property.id, new)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

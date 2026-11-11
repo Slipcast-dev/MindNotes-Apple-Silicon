@@ -308,7 +308,7 @@ struct DatabaseScreen: View {
             ForEach(model.visibleColumns) { property in
                 Group {
                     if property.type == .title { titleCell(row) } else {
-                        PropertyCell(property: property, value: row.values[property.id]) { new in
+                        PropertyCell(property: property, value: row.values[property.id], record: row.id) { new in
                             model.setValue(pages: [row.id], property: property.id, value: new)
                         }
                     }

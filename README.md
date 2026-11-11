@@ -25,17 +25,19 @@ A personal, local knowledge base for Mac: pages, a block editor, search, links a
 - Manual and automatic backups
 - Collapsible sidebar with custom sections, Peek, light/dark and black-and-white themes
 - Automatic or manual updates; extensions for custom themes and app icons
+- Optional AI (off by default): Ask AI on a selection, chat with an agent that proposes changes before applying them, AI-filled database properties; Claude, OpenAI, OpenRouter, Gemini, DeepSeek, Mistral, xAI, Groq or a local model via Ollama or LM Studio
 
 The interface is available in English and Russian.
 
 ## Network
 
-Only when you choose it: link previews (off by default) and checking GitHub for updates (can be set to “Manual”). Workspace data is never sent anywhere.
+Only when you choose it: link previews (off by default), checking GitHub for updates (can be set to “Manual”) and AI (off by default). Workspace data is sent only to the AI provider you chose, and only the text you ask AI about; with Ollama or LM Studio it stays on this Mac. See the [AI guide](docs/en/AI_GUIDE.md).
 
 ## Documentation
 
 - [Build, run and restore](docs/en/BUILD_AND_USE.md)
 - [Extensions: themes and icons](docs/en/EXTENSIONS.md)
+- [AI](docs/en/AI_GUIDE.md)
 - [Architecture](docs/en/ARCHITECTURE.md)
 - [Known limitations](docs/en/KNOWN_LIMITATIONS.md)
 - [Changelog](CHANGELOG.md)

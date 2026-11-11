@@ -1496,3 +1496,5 @@
 "Текст обрабатывает модель на этом Mac" = "Text is processed by a model on this Mac";
 "Текст, к которому вы обращаетесь к ИИ, отправляется в %@" = "Text you ask AI about is sent to %@";
 "У каждого провайдера свой ключ и своя модель" = "Each provider has its own key and model";
+"Заполнено ИИ" = "Filled by AI";
+"Эта модель не поддерживает инструменты: ответ без поиска и правки страниц. Выберите другую модель в настройках ИИ." = "This model doesn't support tools: answering without searching or editing pages. Choose another model in AI settings.";

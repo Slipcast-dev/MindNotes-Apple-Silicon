@@ -90,6 +90,10 @@ Settings → “Updates”: “Automatic” (checks GitHub releases at launch an
 
 Custom themes and app icons are folders with a `manifest.json` in the extensions folder (Settings → “Extensions” → “Open Extensions Folder”). Format and example: [EXTENSIONS.md](EXTENSIONS.md) (ADR-0015).
 
+## AI
+
+Optional and off by default: Settings → “AI” → “Turn on AI”, choose a provider, paste a key (local Ollama and LM Studio need none) and click “Check”. ⌘J or “✦ Ask AI” on a selection, Space on an empty line, ⇧⌘J for the chat. The agent proposes every change first. Details: [AI_GUIDE.md](AI_GUIDE.md).
+
 ## Page password
 
 “…” on a page, record, database or folder → “Set Password…”. The lock covers everything inside. Unlock with the password, Touch ID or your Mac password; it locks again after the display sleeps, the app restarts or “Lock Now”. This is an app lock, not encryption (ADR-0017): backups and the workspace file are not protected by the password.

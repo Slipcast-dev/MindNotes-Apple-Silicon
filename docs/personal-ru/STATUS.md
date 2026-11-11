@@ -1,6 +1,6 @@
 # Статус
 
-Репозиторий: `Slipcast-dev/MindNotes-Apple-Silicon`, ветка `personal-ru`. Выпуск: **MindNotes 1.3.0** (метка `v1.3.0`, страница Releases, 11.11.2026). Предыдущий выпуск 1.2.0 оставлен на странице Releases. Только Apple Silicon, macOS 26 (ADR-0009). Схема пространства: v10. Проверки — `TEST_REPORT.md`, приёмка — `ACCEPTANCE.md`, ограничения — `KNOWN_LIMITATIONS.md`.
+Репозиторий: `Slipcast-dev/MindNotes-Apple-Silicon`, ветка `personal-ru`. Версия в ветке: **1.4.0** (12.11.2026, собрана локально: `build/MindNotes.app`, `build/MindNotes-1.4.0.dmg`; на GitHub не опубликована). Последний выпуск на странице Releases — **MindNotes 1.3.0** (метка `v1.3.0`, 11.11.2026). Только Apple Silicon, macOS 26 (ADR-0009). Схема пространства: v10. Проверки — `TEST_REPORT.md`, приёмка — `ACCEPTANCE.md`, ограничения — `KNOWN_LIMITATIONS.md`.
 
 ## Что умеет приложение
 

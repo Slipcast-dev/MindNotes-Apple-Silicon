@@ -549,4 +549,47 @@ func runAITests() async {
             checkEqual(c, .search(query: "a", limit: 3))
         } else { check(false, "вызов разобран") }
     }
+
+    await test("ИИ: снимок заполнения для отмены переживает перезапуск без потерь") {
+        let a = UUID(), b = UUID(), c = UUID(), opt = UUID()
+        let moment = DateValue(start: .moment(ms: 1_700_000_000_000, zone: "Europe/Moscow"), end: .day(LocalDate(iso: "2026-12-01")!))
+        let old: [(page: UUID, value: PropertyValue?)] = [(a, .text("было")), (b, .options([opt])), (c, nil)]
+        let text = AIValues.encodeRun(database: a, old: old + [(b, .date(moment)), (c, .number(2.5)), (a, .checkbox(true)), (b, .url("https://x.ru"))],
+                                      marks: [a: "f1"])
+        let property = PropertyDefinition(id: UUID(), databaseID: a, name: "П", type: .text, sortKey: "a")
+        guard let run = AIValues.decodeRun(text, property: property) else { return check(false, "снимок прочитан") }
+        checkEqual(run.database, a)
+        checkEqual(run.marks, [a: "f1"])
+        checkEqual(run.old.map(\.value), [.text("было"), .options([opt]), nil, .date(moment), .number(2.5), .checkbox(true), .url("https://x.ru")])
+        check(AIValues.decodeRun("мусор", property: property) == nil)
+    }
+
+    await test("ИИ: агент задаёт людей и связи по именам") {
+        let anna = Person(id: UUID(), name: "Анна"), boris = Person(id: UUID(), name: "Борис")
+        let target = UUID(), linked = LinkedPage(id: UUID(), title: "Проект Альфа")
+        var who = PropertyDefinition(id: UUID(), databaseID: UUID(), name: "Исполнитель", type: .person, sortKey: "a")
+        var link = PropertyDefinition(id: UUID(), databaseID: who.databaseID, name: "Проект", type: .relation, sortKey: "b")
+        link.config = PropertyConfig(target: target)
+        let look = AIValueLookups(people: [anna, boris], records: [target: [linked]])
+        checkEqual(AIValues.parse("анна, Борис, анна", property: who, lookups: look), .people([anna, boris]), "регистр не важен, без повторов")
+        check(AIValues.parse("Вася", property: who, lookups: look) == nil, "нет такого человека")
+        checkEqual(AIValues.parse("проект альфа", property: link, lookups: look), .relation([linked]))
+        checkEqual(AIValues.parse(linked.id.uuidString, property: link, lookups: look), .relation([linked]), "по ID записи")
+        check(AIValues.parse("Бета", property: link, lookups: look) == nil)
+        who.name = "Исполнитель"
+        let database = Database(id: who.databaseID, pageID: UUID(), properties: [who, link], views: [])
+        if case .success(let values) = AIValues.resolve([AIPropertyInput(property: "исполнитель", value: "Анна"), AIPropertyInput(property: "Проект", value: "Проект Альфа")],
+                                                        database: database, lookups: look) {
+            checkEqual(values.map(\.value), [.people([anna]), .relation([linked])])
+        } else { check(false, "люди и связи разобраны") }
+        check(AIValues.schemaText(database).contains("имена через запятую"))
+        check(!AIValues.fillable.contains(.person), "ИИ-заполнение людей не трогает")
+    }
+
+    await test("ИИ: ответ «модель не умеет инструменты» распознаётся") {
+        check(AIFailure.mentionsTools("registry.ollama.ai/library/gemma does not support tools"))
+        check(AIFailure.mentionsTools("Function calling is not supported for this model"))
+        check(!AIFailure.mentionsTools("Invalid API key"))
+        check(!AIFailure.mentionsTools("max_tokens is too large"))
+    }
 }

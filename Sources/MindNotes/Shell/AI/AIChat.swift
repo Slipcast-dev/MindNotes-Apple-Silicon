@@ -210,17 +210,24 @@ final class AIChatModel: ObservableObject {
             }
         }
         var proposal: AIProposal?
+        var withoutTools = false
 
         for round in 0..<AIDefaults.maxToolSteps {
             let replyID = newID()
             items.append(.assistant(id: replyID, text: "", done: false))
-            let body = AIRequest.body(model: settings.model, system: system, messages: messages, tools: AITools.definitions(), effort: settings.chatEffort)
+            let body = AIRequest.body(model: settings.model, system: system, messages: messages, tools: withoutTools ? [] : AITools.definitions(), effort: settings.chatEffort)
             let turn: AIAssistantTurn
             do {
                 turn = try await AIClient.stream(body) { [weak self] _, snapshot in
                     guard let self, let i = self.items.firstIndex(where: { $0.id == replyID }) else { return }
                     self.items[i] = .assistant(id: replyID, text: snapshot.text, done: false)
                 }
+            } catch AIFailure.invalidRequest(let detail) where !withoutTools && settings.provider.api != .anthropic && AIFailure.mentionsTools(detail) {
+                // Модель провайдера не умеет вызывать инструменты: тот же вопрос без них, с понятной пометкой.
+                removeEmpty(replyID)
+                withoutTools = true
+                items.append(.notice(id: newID(), text: L("Эта модель не поддерживает инструменты: ответ без поиска и правки страниц. Выберите другую модель в настройках ИИ."), error: false))
+                continue
             } catch {
                 removeEmpty(replyID)
                 let failure = error as? AIFailure
@@ -389,17 +396,32 @@ final class AIChatModel: ObservableObject {
         return (lines.joined(separator: "\n"), String(format: L("Прочитана база: %@"), title(page, shell: shell)))
     }
 
+    /// Справочник людей и записи баз-целей для связей, упомянутых во входе агента.
+    private func lookups(for database: Database, inputs: [AIPropertyInput], shell: ShellModel) async -> AIValueLookups {
+        var out = AIValueLookups(people: shell.people)
+        let names = Set(inputs.map { SearchText.normalize($0.property) })
+        guard let store = shell.store else { return out }
+        for p in database.properties where p.type == .relation && names.contains(SearchText.normalize(p.name)) {
+            guard let target = p.config.target, out.records[target] == nil, let targetDB = try? await store.database(target),
+                  let page = try? await store.queryRecords(database: targetDB, state: DatabaseViewState(), limit: 5_000, offset: 0) else { continue }
+            out.records[target] = page.rows.filter { !hidden($0.id, shell: shell) }.map { LinkedPage(id: $0.id, title: $0.title, icon: $0.icon) }
+        }
+        return out
+    }
+
     /// Проверка значений агента до предложения: неизвестное свойство или формат — ошибка модели, а не карточка.
     func checkDatabaseCall(_ call: AIToolCall, shell: ShellModel) async -> String? {
         switch call {
         case .createRows(let page, let rows):
             guard let database = try? await shell.aiDatabase(page: page) else { return "База не найдена: нужен ID страницы базы." }
-            for row in rows { if case .failure(let e) = AIValues.resolve(row.values, database: database) { return e.message } }
+            let look = await lookups(for: database, inputs: rows.flatMap(\.values), shell: shell)
+            for row in rows { if case .failure(let e) = AIValues.resolve(row.values, database: database, lookups: look) { return e.message } }
             return nil
         case .updateProperties(let page, let values):
             guard let record = shell.pages.first(where: { $0.id == page }), let databaseID = record.databaseID, let store = shell.store,
                   let database = try? await store.database(databaseID) else { return "Это не запись базы." }
-            if case .failure(let e) = AIValues.resolve(values, database: database) { return e.message }
+            let look = await lookups(for: database, inputs: values, shell: shell)
+            if case .failure(let e) = AIValues.resolve(values, database: database, lookups: look) { return e.message }
             return nil
         default:
             return nil
@@ -539,8 +561,9 @@ final class AIChatModel: ObservableObject {
         case .createRows(let page, let rows):
             guard let database = try await shell.aiDatabase(page: page), let store = shell.store else { throw WorkspaceError.storage(code: 0, detail: L("база не найдена")) }
             var created: [UUID] = []
+            let look = await lookups(for: database, inputs: rows.flatMap(\.values), shell: shell)
             for row in rows {
-                guard case .success(let values) = AIValues.resolve(row.values, database: database) else { continue }
+                guard case .success(let values) = AIValues.resolve(row.values, database: database, lookups: look) else { continue }
                 let id = UUID()
                 try await store.createRecord(database: database.id, title: row.title, id: id, now: SystemClock().nowMillis())
                 created.append(id)
@@ -551,7 +574,8 @@ final class AIChatModel: ObservableObject {
         case .updateProperties(let page, let inputs):
             guard let record = shell.pages.first(where: { $0.id == page }), let databaseID = record.databaseID, let store = shell.store,
                   let database = try await store.database(databaseID) else { throw WorkspaceError.storage(code: 0, detail: L("запись не найдена")) }
-            guard case .success(let values) = AIValues.resolve(inputs, database: database) else { throw WorkspaceError.storage(code: 0, detail: L("значения не подходят к свойствам")) }
+            let look = await lookups(for: database, inputs: inputs, shell: shell)
+            guard case .success(let values) = AIValues.resolve(inputs, database: database, lookups: look) else { throw WorkspaceError.storage(code: 0, detail: L("значения не подходят к свойствам")) }
             let current = try await store.recordValues(page: page, database: database)
             let restore = values.map { AIValueRestore(property: $0.property.id, value: current[$0.property.id]) }
             for item in values { try await store.setValue(pages: [page], property: item.property.id, value: item.value, now: SystemClock().nowMillis()) }
