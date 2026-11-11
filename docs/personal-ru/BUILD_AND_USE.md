@@ -14,7 +14,7 @@
 SWIFT_OPT=-Onone OUT=build/debug ./scripts/build-app.sh
 ```
 
-Установленный Grizzly не заменяется: у этой сборки другое имя, идентификатор и каталог данных (`~/Library/Application Support/MindNotes`).
+Данные приложения (резервные копии, настройки) лежат в `~/Library/Application Support/MindNotes`; само пространство — в выбранной вами папке.
 
 ## Проверочный запуск
 

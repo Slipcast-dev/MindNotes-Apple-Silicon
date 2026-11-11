@@ -2,7 +2,7 @@
 
 Все заметные изменения MindNotes. Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [Semantic Versioning](https://semver.org/lang/ru/).
 
-## [Не выпущено]
+## [1.2.0] - 2026-11-11
 
 ### Добавлено
 - **Цвет блока** (M12): цвет текста или фон на весь блок вместе с вложенными, как в Notion.
