@@ -5,16 +5,18 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var shell: ShellModel
     @EnvironmentObject private var prefs: AppPreferences
+    @EnvironmentObject private var updater: Updater
 
     var body: some View {
         NotesLayout()
-            .id(prefs.theme) // Токены читаются при построении: смена темы перестраивает дерево.
+            .id("\(prefs.theme.rawValue)|\(prefs.customThemeID ?? "")") // Токены читаются при построении: смена темы перестраивает дерево.
             .sheet(isPresented: $shell.showsLookSheet) { WorkspaceLookSheet() }
             .sheet(isPresented: $shell.showsSearch) { SearchSheet() }
             .sheet(item: $shell.pageToMove) { MovePageSheet(page: $0) }
             .sheet(item: $shell.historyPage) { HistorySheet(page: $0) }
             .sheet(item: $shell.csvImport) { CSVImportSheet(request: $0) }
             .sheet(item: $shell.playingVideo) { VideoPlayerSheet(video: $0) }
+            .sheet(isPresented: $updater.showsSheet) { UpdateSheet(updater: updater) }
             .background(WindowChrome(theme: prefs.theme))
             .background(WindowFrameSaver(name: "MindNotesMainWindow"))
             .preferredColorScheme(prefs.isDark ? .dark : .light)

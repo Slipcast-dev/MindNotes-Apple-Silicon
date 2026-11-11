@@ -43,7 +43,8 @@ test('AT-15: сеть только в Shell/Network (ADR-0011), нет ИИ, м�
   for (const file of files) {
     const text = read(file).split('\n').filter((line) => !line.trim().startsWith('//')).join('\n');
     // Сеть для превью ссылок и окна встраивания — только в одном файле оболочки (ADR-0011).
-    const allowed = file === path.join('Sources', 'MindNotes', 'Shell', 'Network', 'LinkPreviewFetcher.swift');
+    // ADR-0011 (превью ссылок) и ADR-0014 (обновления): сеть только в Shell/Network.
+    const allowed = file.startsWith(path.join('Sources', 'MindNotes', 'Shell', 'Network') + path.sep);
     const checked = allowed ? text.replace(/\b(URLSession|URLSessionConfiguration|WKWebView|WKWebViewConfiguration)\b/g, '') : text;
     assert.ok(!forbidden.test(checked), `${file}: ${checked.match(forbidden)?.[0]}`);
     if (!allowed) assert.ok(!network.test(text), `${file}: сеть вне Shell/Network`);
@@ -51,6 +52,11 @@ test('AT-15: сеть только в Shell/Network (ADR-0011), нет ИИ, м�
   const fetcher = read('Sources/MindNotes/Shell/Network/LinkPreviewFetcher.swift');
   assert.ok(/guard isEnabled, url\.scheme\?\.lowercased\(\) == "https"/.test(fetcher), 'запрос только при включённом превью и по https');
   assert.ok(/guard isEnabled else \{\s*NSWorkspace\.shared\.open\(url\)/.test(fetcher), 'окно встраивания только при включённом превью');
+  const updater = read('Sources/MindNotes/Shell/Network/Updater.swift');
+  const hosts = updater.match(/https:\/\/[a-z0-9.-]+/g) || [];
+  assert.deepStrictEqual([...new Set(hosts)], ['https://api.github.com'], 'обновления — только API выпусков GitHub');
+  assert.ok(updater.includes('releases/latest') && updater.includes('Slipcast-dev/MindNotes-Apple-Silicon'), 'только свой репозиторий');
+  assert.ok(/guard actual == expected/.test(updater), 'установка только после сверки SHA-256');
   assert.ok(files.length > 50, 'исходники найдены');
 });
 

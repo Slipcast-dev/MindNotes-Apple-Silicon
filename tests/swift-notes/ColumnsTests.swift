@@ -274,3 +274,55 @@ func runCommentTests() async {
         check(md.report.contains { $0.reason.hasPrefix("Комментарии не выгружаются") }, "комментарии отмечены в отчёте")
     }
 }
+
+/// Обновления и расширения (ADR-0014, ADR-0015): разбор без сети.
+func runUpdateAndExtensionTests() async {
+    await test("Обновления: версии, выпуск GitHub, контрольные суммы") {
+        check(AppVersion("1.2.0")! < AppVersion("v1.3.0")!)
+        check(AppVersion("1.10")! > AppVersion("1.9.9")!)
+        check(AppVersion("1.3")! == AppVersion("1.3.0")!, "недостающие части — нули")
+        checkEqual(AppVersion("2.0.0-beta")?.description, "2.0.0")
+        check(AppVersion("abc") == nil && AppVersion("1..2") == nil && AppVersion("") == nil)
+        func release(_ extra: String = "", tag: String = "v1.3.0", host: String = "github.com") -> Data {
+            Data("""
+            {"tag_name":"\(tag)","name":"MindNotes 1.3.0","body":"Что нового",\(extra)
+             "assets":[{"name":"MindNotes-1.3.0.dmg","browser_download_url":"https://\(host)/x/MindNotes-1.3.0.dmg"},
+                       {"name":"SHA256SUMS.txt","browser_download_url":"https://\(host)/x/SHA256SUMS.txt"}]}
+            """.utf8)
+        }
+        let r = ReleaseInfo.parse(release())
+        checkEqual(r?.version.description, "1.3.0")
+        checkEqual(r?.image.lastPathComponent, "MindNotes-1.3.0.dmg")
+        checkEqual(r?.notes, "Что нового")
+        check(ReleaseInfo.parse(release(#""prerelease":true,"#)) == nil, "предварительный выпуск не предлагается")
+        check(ReleaseInfo.parse(release(#""draft":true,"#)) == nil, "черновик не предлагается")
+        check(ReleaseInfo.parse(release(host: "evil.example")) == nil, "образ только с github.com")
+        check(ReleaseInfo.parse(release(tag: "latest")) == nil, "метка без версии")
+        check(ReleaseInfo.parse(Data("не json".utf8)) == nil)
+        let sums = ReleaseInfo.checksums("""
+        cff2291ea207c90423eaa5e18e1bd30970466cd17eee9ba27dd56b8853b675ec  MindNotes-1.3.0.dmg
+        DA398A372AAC2066170EDAA08404EAB709CC02D875A4E6639918A838C62A16D7 *build/Demo.mindnotesbackup
+        мусор
+        """)
+        checkEqual(sums["MindNotes-1.3.0.dmg"], "cff2291ea207c90423eaa5e18e1bd30970466cd17eee9ba27dd56b8853b675ec")
+        checkEqual(sums["Demo.mindnotesbackup"], "da398a372aac2066170edaa08404eab709cc02d875a4e6639918a838c62a16d7", "путь и «*» отбрасываются, регистр — нижний")
+        checkEqual(sums.count, 2)
+    }
+
+    await test("Расширения: описание, виды, версия, палитра темы") {
+        let m = ExtensionManifest.parse(Data(#"{"id":"my.ocean","name":"Океан","version":"1.1","kind":"theme","minApp":"1.3.0"}"#.utf8))
+        checkEqual(m?.kind, .theme)
+        check(m?.supported(by: AppVersion("1.3.0")) == true)
+        check(m?.supported(by: AppVersion("1.2.0")) == false, "нужна более новая версия приложения")
+        checkEqual(ExtensionManifest.parse(Data(#"{"id":"x","name":"X","kind":"plugin"}"#.utf8))?.kind, .unsupported("plugin"))
+        check(ExtensionManifest.parse(Data(#"{"id":"../evil","name":"X","kind":"theme"}"#.utf8)) == nil, "id без разделителей пути")
+        check(ExtensionManifest.parse(Data(#"{"name":"X","kind":"theme"}"#.utf8)) == nil, "без id")
+        let fields = ThemeColors.fields.map { "\"\($0)\":\"#112233\"" }.joined(separator: ",")
+        let good = ThemeColors.parse(Data("{\"light\":{\(fields)},\"dark\":{\(fields)}}".utf8))
+        checkEqual(good.colors?.light["ink"], 0x112233)
+        check(good.error == nil)
+        let bad = ThemeColors.parse(Data("{\"light\":{\(fields.replacingOccurrences(of: "\"ink\":\"#112233\"", with: "\"ink\":\"red\""))},\"dark\":{\(fields)}}".utf8))
+        check(bad.colors == nil && bad.error?.contains("light.ink") == true, "ошибка называет поле: \(bad.error ?? "")")
+        check(ThemeColors.parse(Data("{\"light\":{\(fields)}}".utf8)).error?.contains("dark") == true, "нужны оба режима")
+    }
+}

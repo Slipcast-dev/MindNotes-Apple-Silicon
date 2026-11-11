@@ -5,6 +5,8 @@ import SwiftUI
 struct SettingsScreen: View {
     /// Сеть только для превью ссылок и встраиваний (ADR-0011), по умолчанию выключена.
     @AppStorage(LinkPreviewFetcher.settingKey) private var linkPreviews = false
+    @EnvironmentObject private var updater: Updater
+    @ObservedObject private var extensions = ExtensionRegistry.shared
     @EnvironmentObject private var shell: ShellModel
     @EnvironmentObject private var prefs: AppPreferences
     @State private var language = AppLanguage.saved
@@ -22,10 +24,32 @@ struct SettingsScreen: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Тема").font(.system(size: 14, weight: .semibold))
                         HStack(spacing: 10) {
-                            ForEach(AppTheme.allCases) { theme in themeTile(theme) }
+                            ForEach(AppTheme.builtIn) { theme in themeTile(theme) }
                         }
                     }
                     .padding(.vertical, 15)
+                    divider
+                    // Свои темы и иконки — из папки расширений (ADR-0015).
+                    row(L("Своя тема"), extensions.themes.isEmpty ? L("Добавьте тему в папку расширений (раздел «Расширения» ниже)") : L("Тема из расширения")) {
+                        Picker("", selection: Binding(get: { prefs.theme == .custom ? prefs.customThemeID : nil }, set: { id in
+                            if let id { prefs.customThemeID = id; prefs.theme = .custom } else if prefs.theme == .custom { prefs.theme = .notion }
+                        })) {
+                            Text("Не выбрана").tag(String?.none)
+                            ForEach(extensions.themes) { Text($0.manifest.name).tag(String?.some($0.id)) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 200)
+                        .disabled(extensions.themes.isEmpty)
+                    }
+                    divider
+                    row(L("Иконка приложения"), L("Стандартная или из расширения")) {
+                        Picker("", selection: $prefs.appIconID) {
+                            Text("Стандартная").tag(String?.none)
+                            ForEach(extensions.icons) { Text($0.manifest.name).tag(String?.some($0.id)) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 200)
+                    }
                     divider
                     row(L("Оформление"), prefs.isDark ? L("Тёмное") : L("Светлое")) {
                         Button("Переключить") { prefs.isDark.toggle() }
@@ -69,8 +93,16 @@ struct SettingsScreen: View {
                         }
                     }
                     divider
-                    row(L("Обновления"), L("Локальная сборка обновляется вручную")) {
-                        Chip(text: L("Автообновления выключены"))
+                    row(L("Обновления"), updater.mode == .automatic
+                        ? L("Проверка выпусков на GitHub при запуске и раз в сутки; скачивание — только с вашего согласия")
+                        : L("Только по кнопке «Проверить сейчас»")) {
+                        Picker("", selection: $updater.mode) {
+                            Text("Автоматически").tag(UpdateMode.automatic)
+                            Text("Вручную").tag(UpdateMode.manual)
+                        }
+                        .labelsHidden()
+                        .frame(width: 150)
+                        Button("Проверить сейчас") { Task { await updater.check(silent: false) } }.buttonStyle(NotesButtonStyle())
                     }
                     divider
                     row(L("Превью ссылок"), L("Закладка загружает заголовок и картинку страницы, встраивание открывается в окне. Запрос — только когда вы вставляете ссылку или открываете встраивание.")) {
@@ -87,6 +119,7 @@ struct SettingsScreen: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Tokens.line))
 
                 if shell.isOpen { PeopleSettings() }
+                ExtensionsSettings()
 
                 Text("Пространства").font(.system(size: 17, weight: .semibold)).padding(.top, 24).padding(.bottom, 10)
                 VStack(spacing: 0) {

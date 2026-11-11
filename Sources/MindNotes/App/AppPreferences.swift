@@ -26,6 +26,25 @@ final class AppPreferences: ObservableObject {
         }
     }
 
+    /// Выбранное расширение-тема и иконка приложения (ADR-0015).
+    @Published var customThemeID: String? {
+        didSet {
+            UserDefaults.standard.set(customThemeID, forKey: "customThemeID")
+            let id = customThemeID
+            MainActor.assumeIsolated { Tokens.customColors = ExtensionRegistry.shared.theme(id) }
+        }
+    }
+    @Published var appIconID: String? {
+        didSet {
+            UserDefaults.standard.set(appIconID, forKey: "appIconID")
+            MainActor.assumeIsolated { applyIcon() }
+        }
+    }
+
+    @MainActor func applyIcon() {
+        NSApp?.applicationIconImage = ExtensionRegistry.shared.icon(appIconID) ?? NSImage(named: NSImage.applicationIconName)
+    }
+
     @Published var isDark: Bool {
         didSet {
             UserDefaults.standard.set(isDark, forKey: "isDark")
@@ -35,6 +54,8 @@ final class AppPreferences: ObservableObject {
 
     init() {
         let saved = AppTheme(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .forest
+        customThemeID = UserDefaults.standard.string(forKey: "customThemeID")
+        appIconID = UserDefaults.standard.string(forKey: "appIconID")
         theme = saved
         Tokens.theme = saved
         let stored = UserDefaults.standard.object(forKey: "isDark") as? Bool

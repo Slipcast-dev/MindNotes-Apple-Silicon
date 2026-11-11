@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let migrated: Void = AppEdition.migrateFromPreviousName()
     let shell = ShellModel()
     let preferences = AppPreferences()
+    let updater = Updater()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -14,9 +15,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TitlebarDoubleClick.install()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // Расширения читаются до оформления: своя тема и иконка нужны с первого кадра (ADR-0015).
+        ExtensionRegistry.shared.reload()
+        Tokens.customColors = ExtensionRegistry.shared.theme(preferences.customThemeID)
+        preferences.applyIcon()
         preferences.apply()
         shell.loadKnownWorkspaces()
         shell.restoreLastWorkspace()
+        updater.start() // Фоновая проверка обновлений в автоматическом режиме (ADR-0014).
         let paths = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
         for path in paths where FileManager.default.fileExists(atPath: path) { shell.previewFile(URL(fileURLWithPath: path)) }
     }
@@ -51,6 +57,7 @@ struct MindNotesApp: App {
             RootView()
                 .environmentObject(delegate.shell)
                 .environmentObject(delegate.preferences)
+                .environmentObject(delegate.updater)
                 .frame(minWidth: 720, minHeight: 460)
         }
         .defaultSize(width: 1240, height: 820)
@@ -71,6 +78,9 @@ struct MindNotesApp: App {
                 Divider()
                 Button("Главная") { delegate.shell.goHome() }
                     .keyboardShortcut("h", modifiers: [.command, .shift])
+            }
+            CommandGroup(after: .appInfo) {
+                Button("Проверить обновления…") { Task { await delegate.updater.check(silent: false) } }
             }
             CommandGroup(replacing: .appSettings) {
                 Button("Настройки…") { delegate.shell.goSettings() }

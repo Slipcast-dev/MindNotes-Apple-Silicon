@@ -1,0 +1,78 @@
+import Foundation
+
+/// Обновления (ADR-0014): сравнение версий, разбор выпуска GitHub и файла контрольных сумм. Без сети.
+struct AppVersion: Comparable, CustomStringConvertible {
+    let parts: [Int]
+
+    /// «1.3.0», «v1.3», «1.3.0-beta» (суффикс отбрасывается); иначе nil.
+    init?(_ text: String) {
+        var clean = text.trimmingCharacters(in: .whitespaces)
+        if clean.hasPrefix("v") || clean.hasPrefix("V") { clean.removeFirst() }
+        clean = String(clean.prefix { $0 != "-" && $0 != "+" })
+        let numbers = clean.split(separator: ".", omittingEmptySubsequences: false).map { Int($0) }
+        guard !numbers.isEmpty, numbers.count <= 4, numbers.allSatisfy({ $0 != nil && $0! >= 0 }) else { return nil }
+        parts = numbers.compactMap { $0 }
+    }
+
+    var description: String { parts.map(String.init).joined(separator: ".") }
+
+    static func < (a: AppVersion, b: AppVersion) -> Bool {
+        for i in 0..<max(a.parts.count, b.parts.count) {
+            let x = i < a.parts.count ? a.parts[i] : 0, y = i < b.parts.count ? b.parts[i] : 0
+            if x != y { return x < y }
+        }
+        return false
+    }
+
+    static func == (a: AppVersion, b: AppVersion) -> Bool { !(a < b) && !(b < a) }
+}
+
+struct ReleaseInfo: Equatable {
+    var version: AppVersion
+    var title: String
+    var notes: String
+    var image: URL
+    var checksums: URL
+
+    static func == (a: ReleaseInfo, b: ReleaseInfo) -> Bool { a.version == b.version && a.image == b.image }
+
+    /// Ответ `releases/latest`: нужны версия, образ `.dmg` и `SHA256SUMS.txt`, оба по https с GitHub.
+    static func parse(_ data: Data) -> ReleaseInfo? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tag = object["tag_name"] as? String, let version = AppVersion(tag),
+              object["draft"] as? Bool != true, object["prerelease"] as? Bool != true,
+              let assets = object["assets"] as? [[String: Any]] else { return nil }
+        func asset(_ match: (String) -> Bool) -> URL? {
+            for a in assets {
+                guard let name = a["name"] as? String, match(name), let raw = a["browser_download_url"] as? String,
+                      let url = URL(string: raw), url.scheme == "https", url.host?.hasSuffix("github.com") == true else { continue }
+                return url
+            }
+            return nil
+        }
+        guard let image = asset({ $0.hasPrefix("MindNotes-") && $0.hasSuffix(".dmg") }), let sums = asset({ $0 == "SHA256SUMS.txt" }) else { return nil }
+        return ReleaseInfo(version: version, title: (object["name"] as? String) ?? "MindNotes \(version)",
+                           notes: String(((object["body"] as? String) ?? "").prefix(4000)), image: image, checksums: sums)
+    }
+
+    /// Строки вида «<64 hex>  имя»; имя может начинаться с «*» (двоичный режим).
+    static func checksums(_ text: String) -> [String: String] {
+        var out: [String: String] = [:]
+        for line in text.split(whereSeparator: \.isNewline) {
+            let parts = line.split(maxSplits: 1, whereSeparator: \.isWhitespace)
+            guard parts.count == 2 else { continue }
+            let hash = parts[0].lowercased()
+            guard hash.count == 64, hash.allSatisfy(\.isHexDigit) else { continue }
+            var name = parts[1].trimmingCharacters(in: .whitespaces)
+            if name.hasPrefix("*") { name.removeFirst() }
+            out[(name as NSString).lastPathComponent] = hash
+        }
+        return out
+    }
+}
+
+/// Режим обновлений в настройках.
+enum UpdateMode: String, CaseIterable {
+    case automatic, manual
+    static let checkInterval: TimeInterval = 24 * 60 * 60
+}

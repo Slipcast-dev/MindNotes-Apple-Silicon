@@ -9,12 +9,16 @@ struct ThemePalette {
 enum AppTheme: String, CaseIterable, Identifiable {
     /// Значение записано в настройках пользователя, поэтому строка прежняя.
     case forest = "grizzly", notion
+    /// Пользовательская тема из расширения (ADR-0015); палитра — `Tokens.customColors`.
+    case custom
+    static let builtIn: [AppTheme] = [.forest, .notion]
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .forest: return L("Лесная")
         case .notion: return L("Чёрно-белая")
+        case .custom: return L("Своя тема")
         }
     }
 
@@ -22,10 +26,19 @@ enum AppTheme: String, CaseIterable, Identifiable {
         switch self {
         case .forest: return L("Зелёная, с заголовками Georgia")
         case .notion: return L("Как в Notion: чёрный на белом, без акцентов")
+        case .custom: return L("Из папки расширений")
         }
     }
 
     func palette(dark: Bool) -> ThemePalette {
+        if self == .custom {
+            // Своя тема; если расширение пропало — «Чёрно-белая», чтобы окно не осталось без цветов.
+            guard let colors = Tokens.customColors else { return AppTheme.notion.palette(dark: dark) }
+            let p = dark ? colors.dark : colors.light
+            func c(_ k: String) -> UInt32 { p[k] ?? 0 }
+            return ThemePalette(paper: c("paper"), side: c("side"), ink: c("ink"), muted: c("muted"), line: c("line"), accent: c("accent"),
+                                soft: c("soft"), card: c("card"), primary: c("primary"), logo: c("logo"), danger: c("danger"))
+        }
         switch (self, dark) {
         case (.forest, false):
             return ThemePalette(paper: 0xFDFCF8, side: 0xF4F4ED, ink: 0x252B22, muted: 0x666D60, line: 0xE3E5D9, accent: 0x395740,
@@ -36,6 +49,8 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case (.notion, false):
             return ThemePalette(paper: 0xFFFFFF, side: 0xF7F7F5, ink: 0x37352F, muted: 0x787774, line: 0xE9E9E7, accent: 0x37352F,
                                 soft: 0xEFEFED, card: 0xFFFFFF, primary: 0x37352F, logo: 0x37352F, danger: 0xD44C47)
+        case (.custom, _):
+            return AppTheme.notion.palette(dark: dark)
         case (.notion, true):
             return ThemePalette(paper: 0x191919, side: 0x202020, ink: 0xE3E2E0, muted: 0x9B9B9B, line: 0x2F2F2F, accent: 0xE3E2E0,
                                 soft: 0x2C2C2C, card: 0x252525, primary: 0x4A4A4A, logo: 0x4A4A4A, danger: 0xE8988F)
@@ -50,6 +65,8 @@ enum AppTheme: String, CaseIterable, Identifiable {
 enum Tokens {
     /// Текущая тема. Меняется только через настройки, после чего дерево интерфейса перестраивается.
     static var theme: AppTheme = .forest
+    /// Палитра выбранной пользовательской темы.
+    static var customColors: ThemeColors?
 
     private static func dynamic(_ value: KeyPath<ThemePalette, UInt32>) -> NSColor {
         NSColor(name: nil) { appearance in
