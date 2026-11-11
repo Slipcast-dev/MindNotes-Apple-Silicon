@@ -41,7 +41,10 @@ enum DatabaseQuerySQL {
 
     /// Правило неизвестного свойства, неподходящей операции или с неполным значением пропускается.
     static func compile(_ rule: FilterRule, properties: [PropertyDefinition], zone: TimeZone = .current) -> Fragment? {
-        guard let def = properties.first(where: { $0.id == rule.property }), FilterOp.available(for: def.type).contains(rule.op) else { return nil }
+        guard var def = properties.first(where: { $0.id == rule.property }) else { return nil }
+        // Свёртка хранится значением своего результата и фильтруется как число, дата или текст.
+        def.type = def.valueType
+        guard FilterOp.available(for: def.type).contains(rule.op) else { return nil }
         let prop = SQLValue(def.id)
         if def.type == .relation {
             let owner = SQLValue(def.linkOwner)
@@ -141,7 +144,8 @@ enum DatabaseQuerySQL {
         var order = Fragment(sql: "", args: [])
         var terms: [String] = []
         for (index, sort) in sorts.enumerated() {
-            guard let def = properties.first(where: { $0.id == sort.property }) else { continue }
+            guard var def = properties.first(where: { $0.id == sort.property }) else { continue }
+            def.type = def.valueType
             let direction = sort.descending ? "DESC" : "ASC"
             let alias = "s\(index)"
             let expression: String
@@ -261,9 +265,9 @@ extension SQLiteWorkspace {
         try await reader.run { try Self.loadValues($0, pages: [page], properties: database.properties)[page] ?? [:] }
     }
 
-    private static func loadValues(_ db: SQLiteConnection, pages: [UUID], properties: [PropertyDefinition]) throws -> [UUID: [UUID: PropertyValue]] {
+    static func loadValues(_ db: SQLiteConnection, pages: [UUID], properties: [PropertyDefinition]) throws -> [UUID: [UUID: PropertyValue]] {
         guard !pages.isEmpty else { return [:] }
-        let types = Dictionary(uniqueKeysWithValues: properties.map { ($0.id, $0.type) })
+        let types = Dictionary(uniqueKeysWithValues: properties.map { ($0.id, $0.valueType) })
         let marks = Array(repeating: "?", count: pages.count).joined(separator: ",")
         let args = pages.map { SQLValue($0) }
         var out: [UUID: [UUID: PropertyValue]] = [:]
@@ -424,6 +428,8 @@ extension SQLiteWorkspace {
                 try db.run("INSERT INTO pages(id, parent_id, database_id, sort_key, title, created_at, updated_at) VALUES(?,?,?,?,?,?,?)",
                            [SQLValue(id), SQLValue(page), SQLValue(database), .text(SortKey.between(last, nil)), .text(title), .int(now), .int(now)])
                 try SearchIndex.updateTitle(db, page: id, title: title)
+                // Новая запись сразу получает свои счётчики (0), а не пустую ячейку.
+                try Self.recalcRollups(db, touched: [id], properties: nil, now: now)
             }
         }
     }
@@ -439,13 +445,15 @@ extension SQLiteWorkspace {
                     ) UPDATE pages SET deleted_at=?, trash_batch_id=? WHERE id IN (SELECT id FROM sub) AND deleted_at IS NULL
                     """, [SQLValue(page), .int(now), SQLValue(ids.next())])
                 }
+                let set = Set(pages)
+                try Self.recalcRollups(db, touched: set.union(try Self.neighbors(db, of: set)), properties: nil, now: now)
             }
         }
     }
 
     // MARK: Значения
 
-    private static func definition(_ db: SQLiteConnection, _ id: UUID) throws -> PropertyDefinition {
+    static func definition(_ db: SQLiteConnection, _ id: UUID) throws -> PropertyDefinition {
         let rows = try db.query("SELECT id, database_id, name, type, sort_key, config_json FROM property_definitions WHERE id=?", [SQLValue(id)]) { r -> PropertyDefinition? in
             guard let pid = r.uuid(0), let dbid = r.uuid(1) else { return nil }
             return PropertyDefinition(id: pid, databaseID: dbid, name: r.text(2), type: PropertyType(rawValue: r.text(3)), sortKey: r.text(4), config: PropertyConfig(json: r.optText(5)))
@@ -554,6 +562,17 @@ extension SQLiteWorkspace {
                 let def = try Self.definition(db, property)
                 guard def.type.isKnown, def.type != .title, !def.type.isComputed else { throw Self.storageError("Это свойство нельзя изменить здесь.") }
                 if let value, !Self.isCompatible(value, with: def) { throw Self.storageError("Значение не подходит типу свойства.") }
+                // Связь: прежние и новые записи другой стороны тоже затронуты, их свёртки пересчитываются.
+                var touched = Set(pages)
+                if def.type == .relation {
+                    let (mine, other) = def.config.isBackSide ? ("to_page", "from_page") : ("from_page", "to_page")
+                    for page in pages {
+                        for id in try db.query("SELECT \(other) FROM relation_links WHERE \(mine)=? AND property_id=?", [SQLValue(page), SQLValue(def.linkOwner)], { $0.uuid(0) }) {
+                            if let id { touched.insert(id) }
+                        }
+                    }
+                    if case .relation(let links)? = value { touched.formUnion(links.map(\.id)) }
+                }
                 for page in pages {
                     guard try db.scalarInt("SELECT 1 FROM pages WHERE id=? AND database_id=?", [SQLValue(page), SQLValue(def.databaseID)]) != nil else {
                         throw Self.storageError("Запись не входит в эту базу.")
@@ -561,6 +580,8 @@ extension SQLiteWorkspace {
                     try Self.writeValue(db, page: page, def: def, value: value, now: now)
                     try db.run("UPDATE pages SET updated_at=? WHERE id=?", [.int(now), SQLValue(page)])
                 }
+                // Свёртка может стоять и на парной стороне связи.
+                try Self.recalcRollups(db, touched: touched, properties: Set([def.id, def.linkOwner] + (def.config.pair.map { [$0] } ?? [])), now: now)
             }
         }
     }
@@ -568,7 +589,7 @@ extension SQLiteWorkspace {
     // MARK: Свойства
 
     func addProperty(database: UUID, name: String, type: PropertyType, id: UUID, now: Int64) async throws {
-        guard PropertyType.creatable.contains(type), type != .relation else { throw Self.storageError("Этот тип свойства нельзя создать.") }
+        guard PropertyType.creatable.contains(type), type != .relation, type != .rollup else { throw Self.storageError("Этот тип свойства нельзя создать.") }
         try await writer.run { db in
             let last = try db.scalarText("SELECT sort_key FROM property_definitions WHERE database_id=? ORDER BY sort_key DESC, id DESC LIMIT 1", [SQLValue(database)])
             try db.run("INSERT INTO property_definitions(id, database_id, name, type, sort_key, created_at) VALUES(?,?,?,?,?,?)",
@@ -628,6 +649,7 @@ extension SQLiteWorkspace {
                     if state.dateProperty == id { state.dateProperty = nil }
                 }
                 try db.run("DELETE FROM property_definitions WHERE id=?", [SQLValue(id)])
+                try Self.clearBrokenRollups(db, now: SystemClock().nowMillis())
             }
         }
     }
@@ -678,7 +700,16 @@ extension SQLiteWorkspace {
     }
 
     func updateOption(_ id: UUID, name: String, color: String?) async throws {
-        try await writer.run { try $0.run("UPDATE property_options SET name=?, color=? WHERE id=?", [.text(name), SQLValue(color), SQLValue(id)]) }
+        try await writer.run { db in
+            try db.transaction {
+                let old = try db.scalarText("SELECT name FROM property_options WHERE id=?", [SQLValue(id)])
+                try db.run("UPDATE property_options SET name=?, color=? WHERE id=?", [.text(name), SQLValue(color), SQLValue(id)])
+                // «Показать значения» и счёт уникальных зависят от названий вариантов, а не от цвета.
+                if old != name, let property = try db.query("SELECT property_id FROM property_options WHERE id=?", [SQLValue(id)], { $0.uuid(0) }).first ?? nil {
+                    try Self.recalcDependents(db, of: property, now: SystemClock().nowMillis())
+                }
+            }
+        }
     }
 
     /// Новый порядок вариантов; от него зависит сортировка по статусу.
@@ -704,6 +735,7 @@ extension SQLiteWorkspace {
                     state.filter = state.filter.removingRules { $0.property == property && $0.value.caseInsensitiveCompare(raw) == .orderedSame }
                 }
                 try db.run("DELETE FROM property_options WHERE id=?", [SQLValue(id)])
+                try Self.recalcDependents(db, of: property, now: SystemClock().nowMillis())
             }
         }
     }
@@ -783,6 +815,7 @@ extension SQLiteWorkspace {
                 try Self.updateViews(db, database: def.databaseID) { state in
                     state.filter = state.filter.removingRules { $0.property == property }
                 }
+                try Self.recalcDependents(db, of: property, now: now)
             }
         }
     }
@@ -937,7 +970,7 @@ extension SQLiteWorkspace {
     /// Часть дублирования страниц: база в поддереве копируется целиком, копия записи остаётся в базе и сохраняет значения.
     static func duplicateDatabaseData(_ db: SQLiteConnection, pageMap: [UUID: UUID], ids: IDGenerator, now: Int64) throws {
         var databaseMap: [UUID: UUID] = [:], propertyMap: [UUID: UUID] = [:], optionMap: [UUID: UUID] = [:]
-        var relationConfigs: [UUID: PropertyConfig] = [:]
+        var relationConfigs: [UUID: PropertyConfig] = [:], rollupConfigs: [UUID: PropertyConfig] = [:]
         for old in pageMap.keys {
             guard let id = try db.query("SELECT id FROM databases WHERE page_id=?", [SQLValue(old)], { $0.uuid(0) }).first ?? nil, let page = pageMap[old] else { continue }
             let copy = ids.next()
@@ -951,6 +984,7 @@ extension SQLiteWorkspace {
                 let np = ids.next()
                 propertyMap[pid] = np
                 if p.type == PropertyType.relation.rawValue { relationConfigs[np] = PropertyConfig(json: p.config) }
+                if p.type == PropertyType.rollup.rawValue { rollupConfigs[np] = PropertyConfig(json: p.config) }
                 try db.run("INSERT INTO property_definitions(id, database_id, name, type, sort_key, created_at, config_json) VALUES(?,?,?,?,?,?,?)",
                            [SQLValue(np), SQLValue(copy), .text(p.name), .text(p.type), .text(p.key), .int(now), SQLValue(p.config)])
                 let options = try db.query("SELECT id, name, color, sort_key FROM property_options WHERE property_id=?", [SQLValue(pid)]) { (id: $0.uuid(0), name: $0.text(1), color: $0.optText(2), key: $0.text(3)) }
@@ -988,6 +1022,13 @@ extension SQLiteWorkspace {
             try db.run("UPDATE property_definitions SET config_json=? WHERE id=?", [.text(try config.jsonString()), SQLValue(copyID)])
         }
         try copyRelationLinks(db, pageMap: pageMap, propertyMap: propertyMap, standalone: standalone)
+        // Свёртка копии смотрит на связь копии; свойство цели — на копию, если цель скопирована.
+        for (copyID, old) in rollupConfigs {
+            var config = old
+            config.rollupRelation = old.rollupRelation.map { propertyMap[$0] ?? $0 }
+            config.rollupProperty = old.rollupProperty.map { propertyMap[$0] ?? $0 }
+            try db.run("UPDATE property_definitions SET config_json=? WHERE id=?", [.text(try config.jsonString()), SQLValue(copyID)])
+        }
 
         // Встроенные представления хранят ID свойств и вариантов: у копии базы они свои.
         let idMap = propertyMap.merging(optionMap, uniquingKeysWith: { a, _ in a })

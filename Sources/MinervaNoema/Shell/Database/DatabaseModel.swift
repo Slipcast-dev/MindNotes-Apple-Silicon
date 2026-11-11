@@ -14,8 +14,33 @@ extension PropertyType {
         case .multiSelect: return L("Множественный выбор")
         case .url: return L("Ссылка")
         case .relation: return L("Связь")
+        case .rollup: return L("Свёртка")
         case .createdTime: return L("Создано")
         case .editedTime: return L("Изменено")
+        default: return rawValue
+        }
+    }
+}
+
+extension RollupAggregate {
+    var title: String {
+        switch self {
+        case .count: return L("Количество записей")
+        case .countValues: return L("Заполнено")
+        case .countUnique: return L("Разных значений")
+        case .countEmpty: return L("Пустых")
+        case .percentEmpty: return L("Процент пустых")
+        case .sum: return L("Сумма")
+        case .average: return L("Среднее")
+        case .median: return L("Медиана")
+        case .min: return L("Минимум")
+        case .max: return L("Максимум")
+        case .range: return L("Размах")
+        case .earliest: return L("Самая ранняя дата")
+        case .latest: return L("Самая поздняя дата")
+        case .dateRange: return L("Диапазон дат, дней")
+        case .percentChecked: return L("Процент отмеченных")
+        case .showOriginal: return L("Показать значения")
         default: return rawValue
         }
     }
@@ -346,7 +371,10 @@ enum PropertyDisplay {
     static func text(_ value: PropertyValue?, property: PropertyDefinition) -> String? {
         switch value {
         case .text(let s)?, .url(let s)?, .unconverted(let s)?: return s.isEmpty ? nil : s
-        case .number(let n)?: return number(n)
+        case .number(let n)?:
+            // Проценты свёртки показываются со знаком: 40 без него читается как количество.
+            let percent = property.config.aggregate == .percentEmpty || property.config.aggregate == .percentChecked
+            return percent ? "\(number(n)) %" : number(n)
         case .date(let d)?: return date(d)
         case .checkbox(let b)?: return b ? "\(property.name): ✓" : nil
         case .options(let ids)?:

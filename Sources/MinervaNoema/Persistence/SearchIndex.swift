@@ -218,6 +218,9 @@ extension SQLiteWorkspace {
                     }
                 }
                 try Self.duplicateDatabaseData(db, pageMap: pageMap, ids: ids, now: now)
+                // Копии и записи, получившие связь с копией, пересчитывают свёртки.
+                let copies = Set(pageMap.values)
+                try Self.recalcRollups(db, touched: copies.union(try Self.neighbors(db, of: copies)), properties: nil, now: now)
                 guard let root = pageMap[id] else { throw WorkspaceError.pageNotFound(id) }
                 return root
     }

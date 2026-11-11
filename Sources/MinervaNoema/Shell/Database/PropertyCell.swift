@@ -104,7 +104,7 @@ struct PropertyCell: View {
         case .multiSelect: multiMenu
         case .date: DateCell(value: dateValue, onChange: onChange)
         case .relation: RelationCell(property: property, value: value, onChange: onChange)
-        case .createdTime, .editedTime:
+        case .createdTime, .editedTime, .rollup:
             // Время берётся из записи и вручную не меняется.
             Text(PropertyDisplay.text(value, property: property) ?? L("Пусто"))
                 .font(.system(size: 13))

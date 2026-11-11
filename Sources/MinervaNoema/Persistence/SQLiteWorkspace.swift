@@ -98,6 +98,8 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
         self.layout = layout
         self.lock = lock
         self.clock = clock
+        // Пересчёт свёрток читает значения связей на пишущем соединении: сравнение заголовков нужно и там.
+        try writerConnection.registerNormalizeFunction()
         writer = DatabaseQueue(label: "write", connection: writerConnection)
         let read = try SQLiteConnection(path: layout.database.path, readOnly: true)
         try read.execute("PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF; PRAGMA query_only=ON")
@@ -294,8 +296,16 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
                     SELECT ? UNION ALL SELECT p.id FROM pages p JOIN sub ON p.parent_id = sub.id WHERE p.deleted_at IS NULL
                 ) UPDATE pages SET deleted_at=?, trash_batch_id=? WHERE id IN (SELECT id FROM sub)
                 """, [SQLValue(id), .int(now), SQLValue(batch)])
+                try Self.recalcAfterTrash(db, batch: batch, now: now)
             }
         }
+    }
+
+    /// Записи, ушедшие в корзину, перестают участвовать в свёртках связанных записей.
+    private static func recalcAfterTrash(_ db: SQLiteConnection, batch: UUID, now: Int64) throws {
+        guard try hasRollups(db) else { return }
+        let pages = Set(try db.query("SELECT id FROM pages WHERE trash_batch_id = ?", [SQLValue(batch)]) { $0.uuid(0) }.compactMap { $0 })
+        try recalcRollups(db, touched: pages.union(try neighbors(db, of: pages)), properties: nil, now: now)
     }
 
     func trashItems() async throws -> [TrashItem] {
@@ -314,7 +324,8 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
     }
 
     func restoreTrash(batch: UUID) async throws -> Bool {
-        try await writer.run { db in
+        let now = clock.nowMillis()
+        return try await writer.run { db in
             try db.transaction {
                 // Родитель в другом пакете корзины недоступен: страница возвращается в корень, а не теряется.
                 try db.run("""
@@ -323,6 +334,7 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
                 )
                 """, [SQLValue(batch), SQLValue(batch)])
                 let moved = db.changes > 0
+                let restored = Set(try db.query("SELECT id FROM pages WHERE trash_batch_id = ?", [SQLValue(batch)]) { $0.uuid(0) }.compactMap { $0 })
                 try db.run("UPDATE pages SET deleted_at = NULL, trash_batch_id = NULL WHERE trash_batch_id = ?", [SQLValue(batch)])
                 // Запись, восстановленная раньше своей базы, ждала в корне: база вернулась, и запись снова в ней.
                 try db.run("""
@@ -331,18 +343,25 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
                     SELECT 1 FROM databases d JOIN pages q ON q.id = d.page_id WHERE d.id = pages.database_id AND q.deleted_at IS NULL
                 )
                 """)
+                try Self.recalcRollups(db, touched: restored.union(try Self.neighbors(db, of: restored)), properties: nil, now: now)
                 return moved
             }
         }
     }
 
     func purgeTrash(batch: UUID) async throws {
+        let now = clock.nowMillis()
         try await writer.run { db in
             try db.transaction {
                 let doomed = try db.query("SELECT id FROM pages WHERE trash_batch_id = ? AND deleted_at IS NOT NULL", [SQLValue(batch)]) { $0.uuid(0) }
                 if try Self.indexExists(db) { for id in doomed.compactMap({ $0 }) { try SearchIndex.removePage(db, page: id) } }
+                // Связи уйдут вместе со страницами: соседей нужно узнать до удаления.
+                let gone = Set(doomed.compactMap { $0 })
+                let neighbors = try Self.neighbors(db, of: gone).subtracting(gone)
                 try Self.deleteTemplates(db, ofPagesInBatch: batch)
                 try db.run("DELETE FROM pages WHERE trash_batch_id = ? AND deleted_at IS NOT NULL", [SQLValue(batch)])
+                try Self.clearBrokenRollups(db, now: now)
+                try Self.recalcRollups(db, touched: neighbors, properties: nil, now: now)
             }
         }
     }
@@ -378,6 +397,15 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
                 for (id, title) in batch.titles {
                     try db.run("UPDATE pages SET title=?, updated_at=? WHERE id=?", [.text(title), .int(now), SQLValue(id)])
                     if indexed { try SearchIndex.updateTitle(db, page: id, title: title) }
+                }
+                if !batch.titles.isEmpty, try Self.hasRollups(db) {
+                    // Заголовок записи — тоже значение: свёртки «показать значения» по нему пересчитываются.
+                    let titled = Set(batch.titles.keys)
+                    let marks = Array(repeating: "?", count: titled.count).joined(separator: ",")
+                    let titleProps = Set(try db.query("""
+                    SELECT d.id FROM property_definitions d JOIN pages p ON p.database_id = d.database_id WHERE d.type = 'title' AND p.id IN (\(marks))
+                    """, titled.map { SQLValue($0) }) { $0.uuid(0) }.compactMap { $0 })
+                    if !titleProps.isEmpty { try Self.recalcRollups(db, touched: titled, properties: titleProps, now: now) }
                 }
                 for id in batch.touchedPages {
                     try db.run("UPDATE pages SET updated_at=?, content_rev=content_rev+1 WHERE id=?", [.int(now), SQLValue(id)])

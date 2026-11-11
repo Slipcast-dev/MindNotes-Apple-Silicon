@@ -19,15 +19,17 @@ struct PropertyType: RawRepresentable, Hashable, Codable {
     /// Время создания и последнего изменения записи: берутся из страницы, вручную не меняются.
     static let createdTime = PropertyType(rawValue: "created_time")
     static let editedTime = PropertyType(rawValue: "edited_time")
+    /// Свёртка: агрегат значений связанных записей. Хранится готовым значением и пересчитывается по зависимостям.
+    static let rollup = PropertyType(rawValue: "rollup")
 
     /// Типы, которые можно выбрать; заголовок у базы один и создаётся вместе с ней.
-    static let creatable: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url, .relation, .createdTime, .editedTime]
+    static let creatable: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url, .relation, .rollup, .createdTime, .editedTime]
     /// Типы с собственными значениями, между которыми возможна смена типа с предпросмотром.
     static let convertible: [PropertyType] = [.text, .number, .date, .checkbox, .status, .select, .multiSelect, .url]
     var isKnown: Bool { self == .title || Self.creatable.contains(self) }
     var usesOptions: Bool { self == .status || self == .select || self == .multiSelect }
     /// Значение вычисляется из страницы: правка вручную невозможна.
-    var isComputed: Bool { self == .createdTime || self == .editedTime }
+    var isComputed: Bool { self == .createdTime || self == .editedTime || self == .rollup }
     var isTimestamp: Bool { self == .createdTime || self == .editedTime }
 }
 
@@ -39,12 +41,27 @@ struct PropertyConfig: Equatable {
     var pair: UUID?
     /// Обратная сторона двусторонней связи: строки хранятся под парным (прямым) свойством.
     var isBackSide = false
+    /// Свёртка: связь этой базы, свойство связанных записей и агрегат.
+    var rollupRelation: UUID?
+    var rollupProperty: UUID?
+    var aggregate: RollupAggregate?
     var extra: [String: JSONValue] = [:]
 
     private struct Known: Codable {
         var target: UUID?
         var pair: UUID?
         var back: Bool?
+        var relation: UUID?
+        var property: UUID?
+        var aggregate: RollupAggregate?
+    }
+
+    static func rollup(relation: UUID, property: UUID, aggregate: RollupAggregate) -> PropertyConfig {
+        var config = PropertyConfig()
+        config.rollupRelation = relation
+        config.rollupProperty = property
+        config.aggregate = aggregate
+        return config
     }
 
     init(target: UUID? = nil, pair: UUID? = nil, isBackSide: Bool = false) {
@@ -60,17 +77,20 @@ struct PropertyConfig: Equatable {
             target = known.target
             pair = known.pair
             isBackSide = known.back ?? false
-            for key in ["target", "pair", "back"] { object[key] = nil }
+            rollupRelation = known.relation
+            rollupProperty = known.property
+            aggregate = known.aggregate
+            for key in ["target", "pair", "back", "relation", "property", "aggregate"] { object[key] = nil }
         }
         extra = object
     }
 
-    var isEmpty: Bool { target == nil && pair == nil && !isBackSide && extra.isEmpty }
+    var isEmpty: Bool { target == nil && pair == nil && !isBackSide && rollupRelation == nil && rollupProperty == nil && aggregate == nil && extra.isEmpty }
 
     func jsonString() throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let known = try encoder.encode(Known(target: target, pair: pair, back: isBackSide ? true : nil))
+        let known = try encoder.encode(Known(target: target, pair: pair, back: isBackSide ? true : nil, relation: rollupRelation, property: rollupProperty, aggregate: aggregate))
         guard case .object(let fields) = try JSONDecoder().decode(JSONValue.self, from: known) else { return "{}" }
         return String(decoding: try encoder.encode(JSONValue.object(extra.merging(fields) { _, new in new })), as: UTF8.self)
     }
@@ -107,6 +127,13 @@ struct PropertyDefinition: Equatable, Identifiable {
 
     /// Свойство, под которым хранятся строки связи: у обратной стороны — парное.
     var linkOwner: UUID { config.isBackSide ? (config.pair ?? id) : id }
+
+    /// Тип хранимого значения: у свёртки — тип её результата, у остальных — сам тип.
+    /// По нему работают фильтры, сортировка и показ.
+    var valueType: PropertyType {
+        guard type == .rollup else { return type }
+        return config.aggregate?.resultType ?? type
+    }
 }
 
 /// Дата без времени. Хранится строкой, поэтому смена часового пояса не сдвигает день.

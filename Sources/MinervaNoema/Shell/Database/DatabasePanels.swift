@@ -97,10 +97,10 @@ struct FilterRuleEditor: View {
         HStack(spacing: 6) {
             Picker("Свойство", selection: Binding(get: { rule.property }, set: { id in
                 // Другой тип — другие операции и формат значения.
-                let type = properties.first { $0.id == id }?.type ?? .text
+                let type = properties.first { $0.id == id }?.valueType ?? .text
                 onChange(FilterRule(property: id, op: FilterOp.available(for: type).first ?? .isEmpty, value: ""))
             })) {
-                ForEach(properties.filter { !FilterOp.available(for: $0.type).isEmpty }) { Text($0.name).tag($0.id) }
+                ForEach(properties.filter { !FilterOp.available(for: $0.valueType).isEmpty }) { Text($0.name).tag($0.id) }
             }
             .labelsHidden()
             .frame(width: 140)
@@ -110,7 +110,7 @@ struct FilterRuleEditor: View {
                     next.op = op
                     onChange(next)
                 })) {
-                    ForEach(FilterOp.available(for: property.type), id: \.self) { Text($0.title(for: property.type)).tag($0) }
+                    ForEach(FilterOp.available(for: property.valueType), id: \.self) { Text($0.title(for: property.valueType)).tag($0) }
                 }
                 .labelsHidden()
                 .frame(width: 170)
@@ -126,7 +126,7 @@ struct FilterRuleEditor: View {
     }
 
     @ViewBuilder private func valueEditor(_ property: PropertyDefinition) -> some View {
-        switch property.type {
+        switch property.valueType {
         case .date, .createdTime, .editedTime:
             DatePicker("Дата", selection: Binding(get: {
                 (LocalDate(iso: rule.value) ?? LocalDate(date: Date(), in: .current)).date(in: .current)
@@ -207,6 +207,40 @@ struct PropertiesSheet: View {
     @State private var newType = PropertyType.text
     @State private var relationTarget: UUID?
     @State private var twoWay = true
+    @State private var rollupRelation: UUID?
+    @State private var rollupProperty: UUID?
+    @State private var rollupAggregate: RollupAggregate?
+    /// Базы, на которые смотрят связи этой базы: для выбора источника свёртки и подписей.
+    @State private var related: [UUID: Database] = [:]
+
+    private var relations: [PropertyDefinition] { model.database?.properties.filter { $0.type == .relation } ?? [] }
+
+    private var rollupSource: PropertyDefinition? {
+        guard let relation = relations.first(where: { $0.id == rollupRelation }), let target = relation.config.target else { return nil }
+        return related[target]?.property(rollupProperty ?? UUID())
+    }
+
+    private func rollupCandidates(_ relation: UUID?) -> [PropertyDefinition] {
+        guard let target = relations.first(where: { $0.id == relation })?.config.target else { return [] }
+        return related[target]?.properties.filter { $0.type != .editedTime && !RollupAggregate.available(for: $0.valueType).isEmpty } ?? []
+    }
+
+    /// Подпись свёртки: связь, свойство и агрегат; пропавший источник виден сразу.
+    private func rollupSummary(_ property: PropertyDefinition) -> String {
+        guard let relation = model.database?.property(property.config.rollupRelation ?? UUID()), let target = relation.config.target,
+              let source = related[target]?.property(property.config.rollupProperty ?? UUID()), let aggregate = property.config.aggregate else {
+            return L("Свёртка: источник удалён")
+        }
+        return L("Свёртка: %@ → %@ · %@", relation.name, source.name, aggregate.title)
+    }
+
+    private func loadRelated() async {
+        var out: [UUID: Database] = [:]
+        for target in Set(relations.compactMap(\.config.target)) {
+            if let base = try? await model.store.database(target) { out[target] = base }
+        }
+        related = out
+    }
     @State private var change: TypeChange?
 
     /// Базы пространства для связи, включая эту: связь базы с самой собой допустима.
@@ -260,7 +294,8 @@ struct PropertiesSheet: View {
                 .frame(width: 180)
                 Button("Добавить", action: addProperty)
                     .buttonStyle(NotesButtonStyle())
-                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || (newType == .relation && relationTarget == nil))
+                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || (newType == .relation && relationTarget == nil)
+                              || (newType == .rollup && (rollupSource == nil || rollupAggregate == nil)))
             }
             if newType == .relation {
                 HStack(spacing: 8) {
@@ -273,6 +308,29 @@ struct PropertiesSheet: View {
                         .help(L("Без обратной связи выбранная база не получит нового свойства."))
                 }
             }
+            if newType == .rollup {
+                if relations.isEmpty {
+                    Text("Сначала добавьте связь: свёртка считает значения связанных записей.").font(.system(size: 12)).foregroundColor(Tokens.muted)
+                } else {
+                    HStack(spacing: 8) {
+                        Picker("Связь", selection: Binding(get: { rollupRelation }, set: { rollupRelation = $0; rollupProperty = nil; rollupAggregate = nil })) {
+                            Text("Выберите").tag(UUID?.none)
+                            ForEach(relations) { Text($0.name).tag(UUID?.some($0.id)) }
+                        }
+                        .frame(width: 190)
+                        Picker("Свойство", selection: Binding(get: { rollupProperty }, set: { rollupProperty = $0; rollupAggregate = nil })) {
+                            Text("Выберите").tag(UUID?.none)
+                            ForEach(rollupCandidates(rollupRelation)) { Text($0.name).tag(UUID?.some($0.id)) }
+                        }
+                        .frame(width: 190)
+                        Picker("Считать", selection: $rollupAggregate) {
+                            Text("Выберите").tag(RollupAggregate?.none)
+                            ForEach(rollupSource.map { RollupAggregate.available(for: $0.valueType) } ?? [], id: \.self) { Text($0.title).tag(RollupAggregate?.some($0)) }
+                        }
+                        .frame(width: 210)
+                    }
+                }
+            }
             HStack {
                 Spacer()
                 Button("Готово") { dismiss() }.buttonStyle(NotesButtonStyle(kind: .primary)).keyboardShortcut(.defaultAction)
@@ -281,6 +339,7 @@ struct PropertiesSheet: View {
         .padding(20)
         .frame(width: 640, height: 520)
         .sheet(item: $change) { TypeChangeSheet(model: model, change: $0) }
+        .task(id: relations.map(\.id)) { await loadRelated() }
     }
 
     private func propertyRow(_ property: PropertyDefinition, column: ColumnState, index: Int) -> some View {
@@ -299,6 +358,8 @@ struct PropertiesSheet: View {
                 }
                 if property.type == .relation {
                     Text(relationSummary(property)).font(.system(size: 12)).foregroundColor(Tokens.muted).lineLimit(1)
+                } else if property.type == .rollup {
+                    Text(rollupSummary(property)).font(.system(size: 12)).foregroundColor(Tokens.muted).lineLimit(1)
                 } else if !PropertyType.convertible.contains(property.type) {
                     Text(property.type.title).font(.system(size: 12)).foregroundColor(Tokens.muted)
                 } else {
@@ -329,6 +390,16 @@ struct PropertiesSheet: View {
         let name = newName.trimmingCharacters(in: .whitespaces)
         let type = newType
         newName = ""
+        if type == .rollup, let relation = rollupRelation, let source = rollupSource, let aggregate = rollupAggregate {
+            rollupRelation = nil
+            rollupProperty = nil
+            rollupAggregate = nil
+            model.perform { [store = model.store, databaseID = model.databaseID] in
+                try await store.addRollup(database: databaseID, name: name, relation: relation, property: source.id, aggregate: aggregate,
+                                          id: UUID(), now: SystemClock().nowMillis())
+            }
+            return
+        }
         if type == .relation, let target = relationTarget {
             // Обратная сторона называется как эта база: так в целевой базе видно, откуда связь.
             let pairName = shell.pages.first { $0.id == model.pageID }.map { $0.title.isEmpty ? L("Без названия") : $0.title } ?? L("Связь")

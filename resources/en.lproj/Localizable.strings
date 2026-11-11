@@ -938,3 +938,28 @@
 "Связь не настроена." = "The relation is not set up.";
 "Связанная запись недоступна." = "The related record is unavailable.";
 "У этого свойства нельзя сменить тип." = "This property's type cannot be changed.";
+
+/* M9.2: свёртки */
+"Свёртка" = "Rollup";
+"Количество записей" = "Count of records";
+"Заполнено" = "Filled";
+"Разных значений" = "Unique values";
+"Пустых" = "Empty";
+"Процент пустых" = "Percent empty";
+"Сумма" = "Sum";
+"Среднее" = "Average";
+"Медиана" = "Median";
+"Минимум" = "Minimum";
+"Максимум" = "Maximum";
+"Размах" = "Range";
+"Самая ранняя дата" = "Earliest date";
+"Самая поздняя дата" = "Latest date";
+"Диапазон дат, дней" = "Date range, days";
+"Процент отмеченных" = "Percent checked";
+"Показать значения" = "Show values";
+"Свёртка: источник удалён" = "Rollup: source deleted";
+"Свёртка: %@ → %@ · %@" = "Rollup: %@ → %@ · %@";
+"Сначала добавьте связь: свёртка считает значения связанных записей." = "Add a relation first: a rollup aggregates values of related records.";
+"Считать" = "Calculate";
+"Свёртку нельзя построить по этим свойствам." = "A rollup cannot be built from these properties.";
+"Слишком длинная цепочка свёрток." = "The chain of rollups is too long.";
