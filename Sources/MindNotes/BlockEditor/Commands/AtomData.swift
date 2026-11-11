@@ -115,6 +115,29 @@ enum AtomData {
                              json: json(["url": .string(url.absoluteString), "provider": .string(provider)]), plain: linkPlain(url: url, title: provider))
     }
 
+    /// Колонки (ADR-0013): от 2 до 5 в ряду, доля ширины каждой не меньше 10%.
+    static let maxColumns = 5
+    static let minColumnRatio = 0.1
+
+    static func columnJSON(ratio: Double) -> String { json(["ratio": .double(ratio)]) }
+
+    static func columnRatio(of block: Block) -> Double? {
+        switch block.atomJSON["ratio"] {
+        case .double(let v)?: return v.isFinite && v > 0 ? v : nil
+        case .int(let v)?: return v > 0 ? Double(v) : nil
+        default: return nil
+        }
+    }
+
+    /// Доли ряда: заданные или поровну, нормированные к сумме 1, каждая не меньше `minColumnRatio`.
+    static func normalizedRatios(_ raw: [Double?]) -> [Double] {
+        guard !raw.isEmpty else { return [] }
+        let even = 1.0 / Double(raw.count)
+        let values = raw.map { max(minColumnRatio, $0 ?? even) }
+        let total = values.reduce(0, +)
+        return values.map { $0 / total }
+    }
+
     /// Копия синхронизированного блока (ADR-0012): только ссылка на оригинал.
     static func syncedRef(source: UUID) -> BlockFragment {
         BlockFragment(type: BlockType.syncedRef.rawValue, contentVersion: 1, json: json(["source": .string(source.uuidString.lowercased())]), plain: "")

@@ -25,6 +25,13 @@ enum EditCommand: Equatable {
     case indent(UUID)
     case outdent(UUID)
     case setCollapsed(block: UUID, collapsed: Bool)
+    /// Колонки (ADR-0013): `dropped` встаёт колонкой слева или справа от `target`. Если `target` уже в колонке —
+    /// ряд получает новую колонку (не больше пяти), иначе на месте `target` появляется ряд из двух колонок.
+    case makeColumns(target: UUID, dropped: UUID, left: Bool)
+    /// Доли ширины колонок ряда по порядку.
+    case setColumnRatios(UUID, [Double])
+    /// Убирает пустые колонки; ряд из одной колонки распускается — её блоки встают на место ряда.
+    case tidyColumns(UUID)
     /// Оборачивает блоки (одного родителя, по порядку) в оригинал синхронизированного блока (ADR-0012).
     case makeSynced([UUID])
     /// Копия становится обычными блоками этой страницы: содержимое копируется, связь с оригиналом рвётся.
@@ -449,6 +456,99 @@ enum BlockEditing {
             var n = c
             n.extra["collapsed"] = collapsed ? .bool(true) : nil
             return result([.upsert(updated(b, n))], selection: nil)
+
+        case let .makeColumns(targetID, droppedID, left):
+            guard targetID != droppedID, let target = document.block(targetID), let dropped = document.block(droppedID),
+                  target.type != .column, target.type != .columnList,
+                  !document.descendants(of: droppedID).contains(where: { $0.id == targetID }) else {
+                return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
+            }
+            var changes: [BlockChange] = []
+            func place(_ block: Block, parent: UUID, key: String) {
+                var b = block
+                b.parentID = parent
+                b.sortKey = key
+                b.updatedAt = now
+                changes.append(.upsert(b))
+            }
+            if let columnID = target.parentID, let column = document.block(columnID), column.type == .column,
+               let rowID = column.parentID, let row = document.block(rowID), row.type == .columnList {
+                // Ряд уже есть: новая колонка рядом с колонкой цели.
+                let columns = document.blocks.filter { $0.parentID == rowID && $0.type == .column }
+                guard columns.count < AtomData.maxColumns, let i = columns.firstIndex(where: { $0.id == columnID }) else {
+                    return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
+                }
+                let before = left ? (i > 0 ? columns[i - 1].sortKey : nil) : column.sortKey
+                let after = left ? column.sortKey : (i + 1 < columns.count ? columns[i + 1].sortKey : nil)
+                let ratio = 1.0 / Double(columns.count + 1)
+                var fresh = Block(atom: .column, id: ids.next(), pageID: document.pageID, parentID: rowID, sortKey: SortKey.between(before, after), createdAt: now)
+                fresh.payload = .opaque(AtomData.columnJSON(ratio: ratio))
+                changes.append(.upsert(fresh))
+                // Остальные колонки делят ширину поровну, как в Notion при добавлении.
+                for c in columns {
+                    var n = c
+                    n.payload = .opaque(AtomData.columnJSON(ratio: ratio))
+                    n.updatedAt = now
+                    changes.append(.upsert(n))
+                }
+                place(dropped, parent: fresh.id, key: SortKey.between(nil, nil))
+            } else {
+                // Ряд из двух колонок на месте цели.
+                let row = Block(atom: .columnList, id: ids.next(), pageID: document.pageID, parentID: target.parentID, sortKey: target.sortKey, createdAt: now)
+                let keys = SortKey.keys(after: nil, before: nil, count: 2)
+                var a = Block(atom: .column, id: ids.next(), pageID: document.pageID, parentID: row.id, sortKey: keys[0], createdAt: now)
+                var b = Block(atom: .column, id: ids.next(), pageID: document.pageID, parentID: row.id, sortKey: keys[1], createdAt: now)
+                a.payload = .opaque(AtomData.columnJSON(ratio: 0.5))
+                b.payload = .opaque(AtomData.columnJSON(ratio: 0.5))
+                changes += [.upsert(row), .upsert(a), .upsert(b)]
+                place(target, parent: left ? b.id : a.id, key: SortKey.between(nil, nil))
+                place(dropped, parent: left ? a.id : b.id, key: SortKey.between(nil, nil))
+            }
+            return result(changes, selection: nil)
+
+        case let .setColumnRatios(rowID, ratios):
+            let columns = document.blocks.filter { $0.parentID == rowID && $0.type == .column }
+            guard columns.count == ratios.count else { return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil) }
+            let clean = AtomData.normalizedRatios(ratios)
+            let changes = zip(columns, clean).map { column, ratio -> BlockChange in
+                var n = column
+                n.payload = .opaque(AtomData.columnJSON(ratio: ratio))
+                n.updatedAt = now
+                return .upsert(n)
+            }
+            return result(changes, selection: nil)
+
+        case let .tidyColumns(rowID):
+            guard let row = document.block(rowID), row.type == .columnList else {
+                return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
+            }
+            let columns = document.blocks.filter { $0.parentID == rowID }
+            var changes: [BlockChange] = columns.filter { c in !document.blocks.contains { $0.parentID == c.id } }.map { .delete($0.id) }
+            let alive = columns.filter { c in document.blocks.contains { $0.parentID == c.id } }
+            if alive.count <= 1 {
+                // Одна колонка — ряд не нужен: её блоки встают на место ряда по порядку.
+                let siblings = document.blocks.filter { $0.parentID == row.parentID }
+                let next = siblings.firstIndex { $0.id == rowID }.flatMap { $0 + 1 < siblings.count ? siblings[$0 + 1].sortKey : nil }
+                let inner = alive.first.map { c in document.blocks.filter { $0.parentID == c.id } } ?? []
+                let keys = SortKey.keys(after: row.sortKey, before: next, count: max(1, inner.count))
+                for (block, key) in zip(inner, keys) {
+                    var b = block
+                    b.parentID = row.parentID
+                    b.sortKey = key
+                    b.updatedAt = now
+                    changes.append(.upsert(b))
+                }
+                changes += alive.map { .delete($0.id) } + [.delete(rowID)]
+            } else if alive.count < columns.count {
+                let ratios = AtomData.normalizedRatios(alive.map(AtomData.columnRatio(of:)))
+                for (c, r) in zip(alive, ratios) {
+                    var n = c
+                    n.payload = .opaque(AtomData.columnJSON(ratio: r))
+                    n.updatedAt = now
+                    changes.append(.upsert(n))
+                }
+            }
+            return result(changes, selection: nil)
 
         case let .makeSynced(list):
             let items = list.compactMap { document.block($0) }

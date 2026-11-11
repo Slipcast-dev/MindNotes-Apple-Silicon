@@ -29,7 +29,9 @@ enum MarkdownExport {
         for block in blocks {
             let level = block.parentID.flatMap { depth[$0].map { $0 + 1 } } ?? 0
             // Дети оригинала синхронизированного блока идут на его уровне: рамки в Markdown нет.
-            depth[block.id] = block.type == .synced ? level - 1 : level
+            // Контейнеры без своего текста: дети оригинала синхронизированного блока и колонок идут на их уровне,
+            // колонки в Markdown — по очереди.
+            depth[block.id] = [.synced, .columnList, .column].contains(block.type) ? level - 1 : level
             let indent = String(repeating: "    ", count: level)
             let text = inline(block, pageTitle: pageTitle, lost: &lost)
             if block.content?.color != nil { lost["Цвет блоков", default: 0] += 1 }
@@ -64,7 +66,7 @@ enum MarkdownExport {
                     lost["Вложения без файла", default: 0] += 1
                 }
             case .table: line = table(AtomData.rows(of: block))
-            case .synced:
+            case .synced, .columnList, .column:
                 line = "" // Подпись оригинала не пишется: его содержимое — обычные блоки ниже.
             case .syncedRef:
                 line = "*\\[Синхронизированный блок\\]*"

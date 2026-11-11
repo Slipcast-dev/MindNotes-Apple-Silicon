@@ -65,12 +65,15 @@ struct BlockType: RawRepresentable, Hashable {
     /// Синхронизированный блок (M12, ADR-0012): оригинал с детьми и копия, показывающая детей оригинала.
     static let synced = BlockType(rawValue: "synced_block")
     static let syncedRef = BlockType(rawValue: "synced_ref")
+    /// Колонки (M13, ADR-0013): ряд `column_list` из 2–5 `column` с долями ширины; в колонках — обычные блоки.
+    static let columnList = BlockType(rawValue: "column_list")
+    static let column = BlockType(rawValue: "column")
 
     /// Текстовые типы этой версии. Всё остальное хранится непрозрачно и показывается одним неделимым символом.
     static let known: Set<BlockType> = [.paragraph, .heading1, .heading2, .heading3, .task, .bullet, .numbered, .quote, .callout, .toggle, .code]
     var isKnown: Bool { Self.known.contains(self) }
     /// Известные неделимые блоки: у них нет текста, данные лежат в JSON.
-    static let atoms: Set<BlockType> = [.divider, .image, .video, .file, .table, .databaseView, .bookmark, .embed, .synced, .syncedRef]
+    static let atoms: Set<BlockType> = [.divider, .image, .video, .file, .table, .databaseView, .bookmark, .embed, .synced, .syncedRef, .columnList, .column]
     var isAtom: Bool { Self.atoms.contains(self) }
     var isHeading: Bool { self == .heading1 || self == .heading2 || self == .heading3 }
 }
