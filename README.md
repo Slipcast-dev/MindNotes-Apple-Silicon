@@ -4,7 +4,7 @@
 
 A personal, local knowledge base for Mac: pages, a block editor, search, links and Notion-style databases. Data stays on this Mac; no network or account is needed.
 
-**Download:** [MindNotes 1.2.0](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/releases/latest) — a `.dmg` for Apple silicon Macs with macOS 26 or later.
+**Download:** [MindNotes — latest release](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/releases/latest) — a `.dmg` for Apple silicon Macs with macOS 26 or later.
 
 > **Apple Silicon only: arm64, macOS 26 or newer.**
 

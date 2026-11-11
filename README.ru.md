@@ -4,7 +4,7 @@
 
 Личная локальная база знаний для Mac: страницы, блочный редактор, поиск, ссылки и базы данных в духе Notion. Данные хранятся на этом Mac, сеть и аккаунт не нужны.
 
-**Скачать:** [MindNotes 1.2.0](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/releases/latest) — образ `.dmg` для Mac на Apple Silicon с macOS 26 или новее.
+**Скачать:** [MindNotes — последний выпуск](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/releases/latest) — образ `.dmg` для Mac на Apple Silicon с macOS 26 или новее.
 
 > **Только Apple Silicon: arm64, macOS 26 или новее.**
 
