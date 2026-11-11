@@ -12,7 +12,7 @@
 Sources/MindNotes/
   App/                       # точка входа, AppDelegate, настройки оформления
   Core/                      # AppEdition (имя, id, каталог данных, перенос со старых имён), локализация
-  Workspace/Domain/          # AI.swift: протокол ИИ, поток, инструменты и правила подтверждения без сети; Page, Block, RichText, базы и формулы, хронология, упоминания, комментарии, разделы, расширения, обновления
+  Workspace/Domain/          # AIProviders.swift: каталог провайдеров ИИ и перевод в формат OpenAI; AI.swift: протокол ИИ, поток, инструменты и правила подтверждения без сети; Page, Block, RichText, базы и формулы, хронология, упоминания, комментарии, разделы, расширения, обновления
   Workspace/Services/        # WorkspaceSession, EditorSession (в т. ч. синхронизированные блоки), SaveCoordinator, перенос данных
   Persistence/               # SQLiteConnection, очереди, блокировка, Migrations/ (v1–v10), SQLiteWorkspace+*, SearchIndex
   BlockEditor/Commands/      # BlockDocument, EditCommand, UndoStack, фрагменты, данные неделимых блоков

@@ -116,7 +116,8 @@ final class AIPropertyFiller: ObservableObject {
                     shell.notice = L("Нечего заполнять: подходящих записей нет.")
                     return
                 }
-                if rows.count > Self.batchThreshold {
+                // Пакеты (вдвое дешевле) есть только у Anthropic; у остальных провайдеров — сразу.
+                if rows.count > Self.batchThreshold, AISettings.shared.provider.batches {
                     let alert = NSAlert()
                     alert.messageText = String(format: L("Заполнить записей: %d?"), rows.count)
                     alert.informativeText = L("Пакетом — вдвое дешевле, результат придёт позже (обычно за минуты, до 24 ч), приложение должно быть открыто. Сразу — по три запроса одновременно.")

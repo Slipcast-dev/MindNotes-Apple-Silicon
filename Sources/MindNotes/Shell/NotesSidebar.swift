@@ -294,10 +294,11 @@ struct NotesSidebar: View {
                     }
                     .buttonStyle(.plain)
                 }
-                SidebarRow(title: L("Главная"), symbol: "house", active: shell.section == .home) { shell.goHome() }
+                // «ИИ» — между «Поиском» и «Главной», как в Notion.
                 if shell.isOpen, ai.enabled {
                     SidebarRow(title: L("ИИ"), symbol: "sparkles", active: chat.isOpen, tint: AIStyle.tint) { chat.toggle() }
                 }
+                SidebarRow(title: L("Главная"), symbol: "house", active: shell.section == .home) { shell.goHome() }
                 SidebarRow(title: L("Импорт"), symbol: "square.and.arrow.down", active: shell.section == .files) { shell.goFiles() }
 
                 if shell.isOpen {

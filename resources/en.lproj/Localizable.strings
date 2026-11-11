@@ -1474,3 +1474,25 @@
 "База защищена паролем: откройте её, чтобы увидеть записи." = "The database is password-protected: open it to see the records.";
 "выгрузить пространство вместе со страницами под паролем" = "export the workspace including password-protected pages";
 "Под паролем" = "Password-protected";
+/* AI providers (ADR-0018) */
+"LM Studio (на этом Mac)" = "LM Studio (on this Mac)";
+"Ollama (на этом Mac)" = "Ollama (on this Mac)";
+"Адрес API" = "API address";
+"Адрес встроенного провайдера не меняется; для своего адреса выберите «Свой (OpenAI-совместимый)»." = "A built-in provider's address can't be changed; for your own address choose “Custom (OpenAI-compatible)”.";
+"Без интернета: сервер должен быть запущен на этом Mac" = "No internet needed: the server must be running on this Mac";
+"Выделенный текст и текст страницы будут отправлены провайдеру ИИ (%@). Продолжить?" = "The selected text and the page text will be sent to the AI provider (%@). Continue?";
+"Другая модель" = "Other model";
+"Ключ можно получить здесь: %@" = "Get a key here: %@";
+"Когда вы обращаетесь к ИИ, выделенный текст, открытая страница или найденные фрагменты отправляются выбранному провайдеру (сейчас — %@) по вашему ключу. Без вашего действия ничего не отправляется. Ключи хранятся в связке ключей macOS. Провайдера можно сменить, а ИИ — выключить здесь же в любой момент." = "When you ask AI, the selected text, the open page or found excerpts are sent to the chosen provider (now %@) with your key. Nothing is sent without your action. Keys are stored in the macOS keychain. You can change the provider or turn AI off here at any time.";
+"Можно ввести название модели вручную" = "You can type a model name manually";
+"Нажмите «Проверить», чтобы загрузить список моделей провайдера" = "Click Check to load the provider's model list";
+"Не нужен для сервера на этом Mac" = "Not needed for a server on this Mac";
+"Необязательный помощник: Claude, OpenAI, Gemini, DeepSeek и другие провайдеры или модель на этом Mac. Пока он выключен, приложение не отправляет никаких запросов." = "An optional assistant: Claude, OpenAI, Gemini, DeepSeek and other providers, or a model on this Mac. While it's off, the app sends no requests.";
+"Нужен адрес https:// или http://localhost" = "Use an https:// or http://localhost address";
+"Подключение работает. Моделей: %d." = "Connection works. Models: %d.";
+"Провайдер" = "Provider";
+"Свой (OpenAI-совместимый)" = "Custom (OpenAI-compatible)";
+"Сегодня: %d токенов, месяц: %d токенов; цена — по тарифу провайдера" = "Today: %d tokens, this month: %d tokens; price per the provider's rates";
+"Текст обрабатывает модель на этом Mac" = "Text is processed by a model on this Mac";
+"Текст, к которому вы обращаетесь к ИИ, отправляется в %@" = "Text you ask AI about is sent to %@";
+"У каждого провайдера свой ключ и своя модель" = "Each provider has its own key and model";

@@ -45,7 +45,7 @@ final class AIAssist: ObservableObject {
         if let shell, AIWorkspace.shared.isExcluded(page, shell: shell), !allowedHidden.contains(page) {
             let alert = NSAlert()
             alert.messageText = L("Эта страница скрыта от ИИ")
-            alert.informativeText = L("Выделенный текст и текст страницы будут отправлены в Anthropic. Продолжить?")
+            alert.informativeText = String(format: L("Выделенный текст и текст страницы будут отправлены провайдеру ИИ (%@). Продолжить?"), AISettings.shared.provider.name)
             alert.addButton(withTitle: L("Отправить"))
             alert.addButton(withTitle: L("Отмена"))
             guard alert.runModal() == .alertFirstButtonReturn else { return }

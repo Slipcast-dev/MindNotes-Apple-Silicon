@@ -47,9 +47,11 @@ test('AT-15: сеть только в Shell/Network (ADR-0011), ИИ тольк�
     const allowed = file.startsWith(path.join('Sources', 'MindNotes', 'Shell', 'Network') + path.sep);
     // ADR-0016: ИИ-ассистент — только в Shell/AI и в своих файлах сети; локальных моделей и других провайдеров нет.
     const aiFile = file.startsWith(path.join('Sources', 'MindNotes', 'Shell', 'AI') + path.sep)
-      || ['AIClient.swift', 'AIKeychain.swift'].some((name) => file === path.join('Sources', 'MindNotes', 'Shell', 'Network', name));
+      || ['AIClient.swift', 'AIKeychain.swift'].some((name) => file === path.join('Sources', 'MindNotes', 'Shell', 'Network', name))
+      || file === path.join('Sources', 'MindNotes', 'Workspace', 'Domain', 'AIProviders.swift');
     let checked = allowed ? text.replace(/\b(URLSession|URLSessionConfiguration|WKWebView|WKWebViewConfiguration)\b/g, '') : text;
-    if (aiFile) checked = checked.replace(/\bAnthropic\b/g, '');
+    // ADR-0018: названия провайдеров — только в файлах ИИ.
+    if (aiFile) checked = checked.replace(/\b(Anthropic|OpenAI)\b/g, '');
     if (!aiFile) assert.ok(!/\bAIClient\b/.test(text), `${file}: запросы ИИ только из Shell/AI`);
     assert.ok(!forbidden.test(checked), `${file}: ${checked.match(forbidden)?.[0]}`);
     if (!allowed) assert.ok(!network.test(text), `${file}: сеть вне Shell/Network`);
@@ -62,11 +64,19 @@ test('AT-15: сеть только в Shell/Network (ADR-0011), ИИ тольк�
   assert.deepStrictEqual([...new Set(hosts)], ['https://api.github.com'], 'обновления — только API выпусков GitHub');
   assert.ok(updater.includes('releases/latest') && updater.includes('Slipcast-dev/MindNotes-Apple-Silicon'), 'только свой репозиторий');
   assert.ok(/guard actual == expected/.test(updater), 'установка только после сверки SHA-256');
-  // ИИ (ADR-0016): один адрес, только при включённом ИИ с согласием и ключом; по умолчанию выключен.
+  // ИИ (ADR-0016, ADR-0018): адреса только из каталога провайдеров, запрос только при включённом ИИ
+  // с согласием, адрес https или http только на этот Mac, ключ из Keychain; по умолчанию выключен.
   const ai = read('Sources/MindNotes/Shell/Network/AIClient.swift');
-  assert.deepStrictEqual([...new Set(ai.match(/https:\/\/[a-z0-9.-]+/g) || [])], ['https://api.anthropic.com'], 'ИИ — только Anthropic API');
+  assert.deepStrictEqual(ai.match(/https?:\/\/[a-z0-9.-]+/g) || [], [], 'в клиенте нет своих адресов: только из каталога');
+  const catalog = read('Sources/MindNotes/Workspace/Domain/AIProviders.swift');
+  const allowedHosts = ['https://api.anthropic.com', 'https://api.openai.com', 'https://openrouter.ai', 'https://api.deepseek.com',
+    'https://generativelanguage.googleapis.com', 'https://api.mistral.ai', 'https://api.x.ai', 'https://api.groq.com',
+    'http://localhost', 'https://example.com'];
+  for (const host of new Set(catalog.match(/https?:\/\/[a-z0-9.-]+/g) || [])) assert.ok(allowedHosts.includes(host), `неизвестный адрес провайдера: ${host}`);
   assert.ok(/guard AISettings\.isEnabled else \{ throw AIFailure\.disabled \}/.test(ai), 'запрос только при включённом ИИ');
-  assert.ok(/guard let key = AIKeychain\.read\(\)/.test(ai), 'ключ только из Keychain');
+  assert.ok(/guard AIProvider\.isAllowedBaseURL\(provider\.baseURL\)/.test(ai), 'адрес провайдера проверяется перед запросом');
+  assert.ok(/AIKeychain\.read\(provider: provider\.id\)/.test(ai), 'ключ только из Keychain');
+  assert.ok(/scheme == "https" \|\| \(scheme == "http" && isLocalHost\(host\)\)/.test(catalog), 'http только на этот Mac');
   const settings = read('Sources/MindNotes/Shell/AI/AISettings.swift');
   assert.ok(/UserDefaults\.standard\.bool\(forKey: enabledKey\) && UserDefaults\.standard\.bool\(forKey: consentKey\)/.test(settings), 'включение требует согласия');
   assert.ok(/enabled = d\.bool\(forKey: Self\.enabledKey\)/.test(settings), 'по умолчанию ИИ выключен');

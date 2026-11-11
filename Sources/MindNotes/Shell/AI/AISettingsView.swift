@@ -10,6 +10,8 @@ struct AISettingsSection: View {
     @State private var checking = false
     @State private var checkResult: String?
     @State private var checkFailed = false
+    @State private var urlDraft = ""
+    @State private var modelDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -18,17 +20,40 @@ struct AISettingsSection: View {
                 Text("ИИ").font(.system(size: 17, weight: .semibold))
             }
             .padding(.top, 24).padding(.bottom, 4)
-            Text("Необязательный помощник на модели Claude. Пока он выключен, приложение не отправляет никаких запросов.")
+            Text("Необязательный помощник: Claude, OpenAI, Gemini, DeepSeek и другие провайдеры или модель на этом Mac. Пока он выключен, приложение не отправляет никаких запросов.")
                 .font(.system(size: 13)).foregroundColor(Tokens.muted).padding(.bottom, 10)
             VStack(spacing: 0) {
-                row(L("Включить ИИ"), settings.enabled ? L("Текст, к которому вы обращаетесь к ИИ, отправляется в Anthropic") : L("Выключено")) {
+                row(L("Включить ИИ"), settings.enabled
+                    ? (settings.provider.isLocal ? L("Текст обрабатывает модель на этом Mac") : String(format: L("Текст, к которому вы обращаетесь к ИИ, отправляется в %@"), settings.provider.name))
+                    : L("Выключено")) {
                     Toggle("", isOn: Binding(get: { settings.enabled }, set: setEnabled)).labelsHidden().toggleStyle(.switch)
                 }
                 if settings.enabled {
                     divider
-                    row(L("Ключ API"), settings.hasKey ? L("Сохранён в связке ключей macOS") : L("Ключ можно получить в консоли Claude: platform.claude.com")) {
-                        if settings.hasKey {
+                    row(L("Провайдер"), settings.provider.isLocal ? L("Без интернета: сервер должен быть запущен на этом Mac") : L("У каждого провайдера свой ключ и своя модель")) {
+                        Picker("", selection: Binding(get: { settings.providerID }, set: { id in changeProvider(to: id) })) {
+                            ForEach(AIProvider.builtIn) { Text(L($0.name)).tag($0.id) }
+                            Text(L("Свой (OpenAI-совместимый)")).tag("custom")
+                        }
+                        .labelsHidden().frame(width: 260)
+                    }
+                    if settings.providerID == "custom" || settings.provider.isLocal {
+                        divider
+                        row(L("Адрес API"), AIProvider.isAllowedBaseURL(settings.provider.baseURL) ? settings.provider.baseURL : L("Нужен адрес https:// или http://localhost")) {
+                            TextField(settings.provider.baseURL.isEmpty ? "https://example.com/v1" : settings.provider.baseURL, text: $urlDraft)
+                                .textFieldStyle(.roundedBorder).frame(width: 260)
+                                .onSubmit(saveURL)
+                            Button(L("Сохранить")) { saveURL() }.buttonStyle(NotesButtonStyle())
+                                .disabled(!AIProvider.isAllowedBaseURL(AIProvider.normalizedBaseURL(urlDraft)))
+                        }
+                    }
+                    divider
+                    row(L("Ключ API"), settings.storedKey ? L("Сохранён в связке ключей macOS")
+                        : (settings.provider.needsKey ? String(format: L("Ключ можно получить здесь: %@"), settings.provider.keyHint) : L("Не нужен для сервера на этом Mac"))) {
+                        if settings.storedKey || !settings.provider.needsKey {
                             Button(L("Проверить")) { check() }.buttonStyle(NotesButtonStyle()).disabled(checking)
+                        }
+                        if settings.storedKey {
                             Button(L("Удалить ключ")) { settings.deleteKey(); checkResult = nil }.buttonStyle(NotesButtonStyle(kind: .plain))
                         } else {
                             SecureField(L("Вставьте ключ"), text: $keyDraft).textFieldStyle(.roundedBorder).frame(width: 220)
@@ -47,11 +72,16 @@ struct AISettingsSection: View {
                             .frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 10)
                     }
                     divider
-                    row(L("Модель"), L("«Авто» — Claude Opus 5.5")) {
+                    row(L("Модель"), settings.availableModels.isEmpty ? L("Нажмите «Проверить», чтобы загрузить список моделей провайдера") : L("Можно ввести название модели вручную")) {
                         Picker("", selection: $settings.model) {
-                            ForEach(models, id: \.self) { Text($0 == AIDefaults.model ? L("Авто") + " (\($0))" : $0).tag($0) }
+                            ForEach(models, id: \.self) { Text($0 == settings.provider.defaultModel ? L("Авто") + " (\($0))" : $0).tag($0) }
                         }
-                        .labelsHidden().frame(width: 260)
+                        .labelsHidden().frame(width: 220)
+                        TextField(L("Другая модель"), text: $modelDraft).textFieldStyle(.roundedBorder).frame(width: 140)
+                            .onSubmit {
+                                let name = modelDraft.trimmingCharacters(in: .whitespaces)
+                                if !name.isEmpty { settings.model = name; modelDraft = "" }
+                            }
                     }
                     divider
                     row(L("Глубина ответов в чате"), L("Тщательнее — дольше и дороже")) {
@@ -94,18 +124,20 @@ struct AISettingsSection: View {
     }
 
     private var models: [String] {
-        var list = settings.availableModels.isEmpty ? AISettings.fallbackModels : settings.availableModels
-        if !list.contains(AIDefaults.model) { list.insert(AIDefaults.model, at: 0) }
-        if !list.contains(settings.model) { list.append(settings.model) }
+        let provider = settings.provider
+        var list = settings.availableModels.isEmpty ? provider.suggestedModels : settings.availableModels
+        if !provider.defaultModel.isEmpty, !list.contains(provider.defaultModel) { list.insert(provider.defaultModel, at: 0) }
+        if !settings.model.isEmpty, !list.contains(settings.model) { list.append(settings.model) }
         return list
     }
 
     private var usageText: String {
         let today = settings.today, month = settings.thisMonth
-        return String(format: L("Сегодня: %d токенов, месяц: %d токенов, около $%.2f"),
-                      today.input + today.output + today.cacheRead + today.cacheWrite,
-                      month.input + month.output + month.cacheRead + month.cacheWrite,
-                      AIPricing.dollars(month, model: settings.model))
+        let t = today.input + today.output + today.cacheRead + today.cacheWrite
+        let m = month.input + month.output + month.cacheRead + month.cacheWrite
+        // Цены известны только для Claude; у остальных — по тарифу провайдера.
+        guard settings.provider.api == .anthropic else { return String(format: L("Сегодня: %d токенов, месяц: %d токенов; цена — по тарифу провайдера"), t, m) }
+        return String(format: L("Сегодня: %d токенов, месяц: %d токенов, около $%.2f"), t, m, AIPricing.dollars(month, model: settings.model))
     }
 
     private func setEnabled(_ on: Bool) {
@@ -118,7 +150,7 @@ struct AISettingsSection: View {
         if !settings.consentGiven {
             let alert = NSAlert()
             alert.messageText = L("Включить ИИ?")
-            alert.informativeText = L("Когда вы обращаетесь к ИИ, выделенный текст, открытая страница или найденные фрагменты отправляются в Anthropic (Claude API) по вашему ключу. Без вашего действия ничего не отправляется. Ключ хранится в связке ключей macOS. Выключить ИИ можно здесь же в любой момент.")
+            alert.informativeText = String(format: L("Когда вы обращаетесь к ИИ, выделенный текст, открытая страница или найденные фрагменты отправляются выбранному провайдеру (сейчас — %@) по вашему ключу. Без вашего действия ничего не отправляется. Ключи хранятся в связке ключей macOS. Провайдера можно сменить, а ИИ — выключить здесь же в любой момент."), settings.provider.name)
             alert.addButton(withTitle: L("Включить"))
             alert.addButton(withTitle: L("Отмена"))
             guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -134,15 +166,36 @@ struct AISettingsSection: View {
         Task { @MainActor in
             defer { checking = false }
             do {
-                let list = try await AIClient.models()
-                settings.availableModels = list.filter { $0.hasPrefix("claude-") }
+                let list = try await AIClient.models(provider: settings.provider)
+                // У Anthropic — только модели Claude; у остальных — весь список провайдера.
+                settings.availableModels = (settings.provider.api == .anthropic ? list.filter { $0.hasPrefix("claude-") } : list).sorted()
                 checkFailed = false
-                checkResult = L("Ключ работает.")
+                checkResult = String(format: L("Подключение работает. Моделей: %d."), settings.availableModels.count)
             } catch {
                 checkFailed = true
                 checkResult = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
+    }
+
+    private func changeProvider(to id: String) {
+        AIChatModel.shared.stop()
+        AIAssist.shared.close()
+        settings.providerID = id
+        urlDraft = ""
+        checkResult = nil
+    }
+
+    private func saveURL() {
+        let url = AIProvider.normalizedBaseURL(urlDraft)
+        guard AIProvider.isAllowedBaseURL(url) else { return }
+        if settings.providerID == "custom" {
+            settings.customBaseURL = url
+        } else {
+            checkFailed = true
+            checkResult = L("Адрес встроенного провайдера не меняется; для своего адреса выберите «Свой (OpenAI-совместимый)».")
+        }
+        urlDraft = ""
     }
 
     private var divider: some View { Rectangle().fill(Tokens.line).frame(height: 1) }

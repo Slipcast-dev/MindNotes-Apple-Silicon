@@ -434,4 +434,119 @@ func runAITests() async {
         checkEqual(turn.usage.input, 50)
         checkEqual(AIValues.value(from: JSONValue.parse(turn.text)?["value"], property: prop(.text)), .some(.text("Отпуск")))
     }
+
+    await test("Провайдеры: каталог и адреса — https или http только на этот Mac") {
+        check(AIProvider.builtIn.count >= 9)
+        check(Set(AIProvider.builtIn.map(\.id)).count == AIProvider.builtIn.count, "ID без повторов")
+        for p in AIProvider.builtIn { check(AIProvider.isAllowedBaseURL(p.baseURL), p.id) }
+        check(AIProvider.find("deepseek", customURL: "").name == "DeepSeek")
+        checkEqual(AIProvider.find("нет такого", customURL: "").id, "anthropic", "неизвестный — Anthropic")
+        checkEqual(AIProvider.find("custom", customURL: "https://llm.example.com/v1").baseURL, "https://llm.example.com/v1")
+        check(AIProvider.isAllowedBaseURL("http://localhost:11434/v1") && AIProvider.isAllowedBaseURL("http://127.0.0.1:8080"))
+        check(!AIProvider.isAllowedBaseURL("http://192.168.1.5:8080/v1"), "http по сети — нет")
+        check(!AIProvider.isAllowedBaseURL("https://user:pass@example.com/v1"), "без логина в адресе")
+        check(!AIProvider.isAllowedBaseURL("ftp://example.com") && !AIProvider.isAllowedBaseURL("example.com"))
+        checkEqual(AIProvider.normalizedBaseURL(" https://x.ai/v1/chat/completions/ "), "https://x.ai/v1")
+        check(AIProvider.anthropic.batches && !AIProvider.openAI.batches)
+        check(AIProvider.ollama.isLocal && !AIProvider.ollama.needsKey && !AIProvider.gemini.isLocal)
+    }
+
+    await test("Провайдеры: запрос в формате OpenAI — система, файлы, инструменты, результаты") {
+        let image = AIAttachment.make(name: "a.png", ext: "png", data: Data([7]))!.block
+        let pdf = AIAttachment.make(name: "d.pdf", ext: "pdf", data: Data([8]))!.block
+        let messages: [JSONValue] = [
+            AIRequest.user([.object(["type": "text", "text": "Контекст"]), image, pdf, .object(["type": "text", "text": "Вопрос"])]),
+            AIRequest.assistant([.object(["type": "thinking", "thinking": "скрыто", "signature": "s"]), .object(["type": "text", "text": "Ищу"]),
+                                 .object(["type": "tool_use", "id": "toolu_1", "name": "search", "input": .object(["query": "отпуск", "limit": .int(5)])])]),
+            AIRequest.user([AIRequest.toolResult(id: "toolu_1", text: "нет", isError: true)]),
+        ]
+        let anthropic = AIRequest.body(model: "gpt-5", system: "Правила", messages: messages, tools: AITools.definitions(), effort: .low, maxTokens: 64_000)
+        let body = AIOpenAI.body(from: anthropic, provider: .openAI)
+        let out = body["messages"]?.arrayValue ?? []
+        checkEqual(out.map { $0["role"]?.stringValue ?? "" }, ["system", "user", "assistant", "tool"])
+        checkEqual(out[0]["content"]?.stringValue, "Правила")
+        let parts = out[1]["content"]?.arrayValue ?? []
+        checkEqual(parts.map { $0["type"]?.stringValue ?? "" }, ["text", "image_url", "file", "text"])
+        check(parts[1]["image_url"]?["url"]?.stringValue?.hasPrefix("data:image/png;base64,") == true)
+        checkEqual(out[2]["content"]?.stringValue, "Ищу", "размышления не передаются")
+        let call = out[2]["tool_calls"]?.arrayValue?.first
+        checkEqual(call?["function"]?["name"]?.stringValue, "search")
+        checkEqual(JSONValue.parse(call?["function"]?["arguments"]?.stringValue ?? "")?["query"]?.stringValue, "отпуск")
+        checkEqual(out[3]["tool_call_id"]?.stringValue, "toolu_1")
+        checkEqual(out[3]["content"]?.stringValue, "Ошибка: нет")
+        checkEqual(body["max_completion_tokens"]?.intValue, AIProvider.openAI.maxOutput, "предел провайдера")
+        check(body["max_tokens"] == nil && body["output_config"] == nil && body["fallbacks"] == nil && body["system"] == nil)
+        checkEqual(body["stream_options"]?["include_usage"], .bool(true))
+        let tools = body["tools"]?.arrayValue ?? []
+        checkEqual(tools.count, 10)
+        checkEqual(tools.first?["type"]?.stringValue, "function")
+        checkEqual(tools.first?["function"]?["strict"], .bool(true), "строгие схемы у OpenAI")
+
+        let deep = AIOpenAI.body(from: anthropic, provider: .deepSeek)
+        let deepParts = deep["messages"]?.arrayValue?[1]["content"]
+        check(deepParts?.stringValue?.contains("не принимает изображения") == true && deepParts?.stringValue?.contains("не принимает PDF") == true,
+              "без поддержки файлов — пометка вместо данных")
+        checkEqual(deep["max_tokens"]?.intValue, 8_000)
+        check(deep["tools"]?.arrayValue?.first?["function"]?["strict"] == nil)
+
+        let gemini = AIOpenAI.body(from: anthropic, provider: .gemini)
+        check(!String(decoding: (gemini["tools"] ?? .null).encoded(), as: UTF8.self).contains("additionalProperties"), "Gemini без additionalProperties")
+    }
+
+    await test("Провайдеры: строгий формат ответа — json_schema или json_object") {
+        var status = PropertyDefinition(id: UUID(), databaseID: UUID(), name: "Статус", type: .status, sortKey: "a")
+        status.options = [PropertyOption(id: UUID(), name: "Готово", color: nil, sortKey: "a")]
+        let anthropic = AIRequest.body(model: "m", system: "S", messages: [AIRequest.userText("x")], effort: .low, stream: false, maxTokens: 100, format: AIValues.format(for: status))
+        let openAI = AIOpenAI.body(from: anthropic, provider: .openAI)
+        checkEqual(openAI["response_format"]?["type"]?.stringValue, "json_schema")
+        checkEqual(openAI["response_format"]?["json_schema"]?["schema"]?["properties"]?["value"]?["enum"], .array(["Готово"]))
+        check(openAI["stream"] == nil)
+        checkEqual(AIOpenAI.body(from: anthropic, provider: .deepSeek)["response_format"]?["type"]?.stringValue, "json_object")
+        checkEqual(AIOpenAI.body(from: anthropic, provider: .ollama)["messages"]?.arrayValue?.last?["content"]?.stringValue, "x", "только текст — строкой")
+    }
+
+    await test("Провайдеры: поток OpenAI собирается в ответ — текст, инструменты, причины, токены") {
+        var acc = AIOpenAIAccumulator()
+        for line in [
+            #"data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"При"}}]}"#,
+            #"data: {"choices":[{"index":0,"delta":{"content":"вет"}}]}"#,
+            #"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read_page","arguments":"{\"page_"}}]}}]}"#,
+            #"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"id\": \"x\"}"}}]}}]}"#,
+            #"data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
+            #"data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":15,"prompt_tokens_details":{"cached_tokens":100}}}"#,
+            ": keep-alive",
+        ] { acc.apply(line: line) }
+        check(acc.apply(line: "data: [DONE]"), "конец потока")
+        checkEqual(acc.turn.text, "Привет")
+        checkEqual(acc.turn.stopReason, "tool_use")
+        check(acc.turn.finished)
+        checkEqual(acc.turn.toolUses.first?.name, "read_page")
+        checkEqual(acc.turn.toolUses.first?.input["page_id"]?.stringValue, "x")
+        checkEqual(acc.turn.toolUses.first?.id, "call_a")
+        checkEqual(acc.turn.usage.input, 120)
+        checkEqual(acc.turn.usage.cacheRead, 100)
+        check(acc.turn.invalidToolInputs.isEmpty)
+
+        var cut = AIOpenAIAccumulator()
+        cut.apply(line: #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c","function":{"name":"create_page","arguments":"{\"title\": \"Обре"}}]},"finish_reason":"length"}]}"#)
+        cut.apply(line: "data: [DONE]")
+        checkEqual(cut.turn.stopReason, "max_tokens")
+        checkEqual(cut.turn.invalidToolInputs, ["c"], "обрезанный ввод не выполняется")
+
+        var filtered = AIOpenAIAccumulator()
+        filtered.apply(line: #"data: {"choices":[{"delta":{},"finish_reason":"content_filter"}]}"#)
+        checkEqual(filtered.turn.stopReason, "refusal")
+
+        var broken = AIOpenAIAccumulator()
+        broken.apply(line: #"data: {"error":{"message":"bad model"}}"#)
+        checkEqual(broken.streamError, "bad model")
+
+        // Сервер написал «stop», хотя вызвал инструмент: считается вызовом.
+        var odd = AIOpenAIAccumulator()
+        odd.apply(response: JSONValue.parse(#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"search","arguments":"{\"query\":\"a\",\"limit\":3}"}}]},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}"#)!)
+        checkEqual(odd.turn.stopReason, "tool_use")
+        if let use = odd.turn.toolUses.first, case .success(let c) = AITools.validate(name: use.name, input: use.input) {
+            checkEqual(c, .search(query: "a", limit: 3))
+        } else { check(false, "вызов разобран") }
+    }
 }
