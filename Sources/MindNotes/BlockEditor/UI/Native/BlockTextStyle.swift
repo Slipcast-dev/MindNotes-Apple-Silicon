@@ -22,6 +22,15 @@ struct BlockTextStyle {
         ("purple", "Фиолетовый", 0x9065B0, 0xEAE4F2), ("pink", "Розовый", 0xC14C8A, 0xF4DFEB), ("red", "Красный", 0xD44C47, 0xFBE4E4),
     ]
 
+    /// Фон палитры по имени цвета: в тёмной теме — приглушённый, чтобы светлый текст читался.
+    static func background(of name: String) -> NSColor? {
+        guard let c = colors.first(where: { $0.name == name }) else { return nil }
+        let light = rgb(c.background), dark = rgb(c.text).withAlphaComponent(0.28)
+        return NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light }
+    }
+
+    static func text(of name: String) -> NSColor? { colors.first { $0.name == name }.map { rgb($0.text) } }
+
     private static func rgb(_ v: UInt32) -> NSColor {
         NSColor(srgbRed: CGFloat((v >> 16) & 0xFF) / 255, green: CGFloat((v >> 8) & 0xFF) / 255, blue: CGFloat(v & 0xFF) / 255, alpha: 1)
     }
@@ -82,7 +91,9 @@ struct BlockTextStyle {
     func render(_ block: Block, depth: Int) -> NSAttributedString {
         guard let content = block.content else { return atom(block, depth: depth) }
         let out = NSMutableAttributedString()
-        let base = attributes(for: block.type, depth: depth)
+        var base = attributes(for: block.type, depth: depth)
+        // Цвет текста блока; собственный цвет отрезка (метка c:) важнее.
+        if let color = content.color, !BlockColor.isBackground(color), let ink = Self.text(of: color) { base[.foregroundColor] = ink }
         for run in content.runs {
             out.append(NSAttributedString(string: BlockTextMapping.toView(run.text), attributes: attributes(base: base, marks: run.marks)))
         }

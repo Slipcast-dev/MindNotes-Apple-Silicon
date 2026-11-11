@@ -1102,3 +1102,8 @@
 "Создать свойство «Зависит от»" = "Create “Depends on” property";
 "Потяните к другой записи: она будет зависеть от этой" = "Drag to another record to make it depend on this one";
 "Добавляет связь базы с самой собой: «Зависит от» и обратную «Блокирует»" = "Adds a relation of the database to itself: “Depends on” and the reverse “Blocks”";
+
+/* M12: block colour */
+"Цвет блока" = "Block colour";
+"Фон: %@" = "Background: %@";
+"Цвет блоков" = "Block colours";

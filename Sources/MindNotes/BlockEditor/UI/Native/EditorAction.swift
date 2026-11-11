@@ -7,6 +7,8 @@ enum EditorAction: Equatable {
     case mark(String)
     case color(String?)
     case highlight(String?)
+    /// Цвет блока целиком: текст `red` или фон `red_background`.
+    case blockColor(String?)
     case link
     case clearFormat
     case indent
@@ -82,6 +84,12 @@ enum EditorAction: Equatable {
 
     static var highlights: [Item] {
         BlockTextStyle.colors.map { Item(title: t($0.title), action: .highlight($0.name)) } + [Item(title: t("Без выделения"), action: .highlight(nil))]
+    }
+
+    static var blockColors: [Item] {
+        [Item(title: t("По умолчанию"), action: .blockColor(nil))]
+            + BlockTextStyle.colors.map { Item(title: t($0.title), action: .blockColor($0.name)) }
+            + BlockTextStyle.colors.map { Item(title: String(format: t("Фон: %@"), t($0.title).lowercased()), action: .blockColor($0.name + BlockColor.backgroundSuffix)) }
     }
 
     static var blockActions: [Item] {

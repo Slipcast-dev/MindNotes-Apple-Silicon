@@ -115,6 +115,30 @@ struct BlockContent: Equatable {
     }
 }
 
+/// Цвет блока (M12), как в Notion: цвет текста `red` или фон `red_background` на весь блок с вложенными.
+enum BlockColor {
+    static let names = ["gray", "brown", "orange", "yellow", "green", "blue", "purple", "pink", "red"]
+    static let backgroundSuffix = "_background"
+
+    /// Допустимое значение или nil: незнакомое имя не записывается.
+    static func valid(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let name = value.hasSuffix(backgroundSuffix) ? String(value.dropLast(backgroundSuffix.count)) : value
+        return names.contains(name) ? value : nil
+    }
+
+    static func isBackground(_ value: String) -> Bool { value.hasSuffix(backgroundSuffix) }
+    static func name(_ value: String) -> String { isBackground(value) ? String(value.dropLast(backgroundSuffix.count)) : value }
+}
+
+extension BlockContent {
+    /// Цвет блока; хранится в неизвестных для старых версий полях, поэтому они его не теряют.
+    var color: String? {
+        get { if case .string(let s)? = extra["color"] { return BlockColor.valid(s) }; return nil }
+        set { extra["color"] = BlockColor.valid(newValue).map { .string($0) } }
+    }
+}
+
 /// Содержимое блока в модели. `opaque` — неизвестный тип или более новая версия: исходная строка не трогается.
 enum BlockPayload: Equatable {
     case content(BlockContent)

@@ -31,6 +31,7 @@ enum MarkdownExport {
             depth[block.id] = level
             let indent = String(repeating: "    ", count: level)
             let text = inline(block, pageTitle: pageTitle, lost: &lost)
+            if block.content?.color != nil { lost["Цвет блоков", default: 0] += 1 }
             let siblingKey = "\(block.parentID?.uuidString ?? "")"
             if block.type != .numbered { number[siblingKey] = nil }
             var line: String

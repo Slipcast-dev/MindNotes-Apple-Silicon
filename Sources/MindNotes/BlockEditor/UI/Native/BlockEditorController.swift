@@ -366,6 +366,13 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             perform(.formatText(sel, .setValue(prefix: "c:", value: name)))
         case .highlight(let name):
             perform(.formatText(sel, .setValue(prefix: "bg:", value: name)))
+        case .blockColor(let color):
+            let ids = selectedBlockIDs().filter { document.block($0)?.isEditable == true }
+            if !ids.isEmpty {
+                perform(.batch(ids.map { .setBlockColor(block: $0, color: color) }))
+                caretKeep(range)
+                textView.needsDisplay = true // фон накрывает и вложенные блоки, их строки не перерисовываются сами
+            }
         case .link:
             guard range.length > 0 else { return }
             requestLink?(currentLink(in: range)) { [weak self] url in
@@ -1281,6 +1288,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
 
     /// Фон выноски и кода, полоска цитаты: рисуются под текстом.
     func drawBackgrounds(in dirty: NSRect) {
+        drawBlockColors(in: dirty)
         guard let (first, last) = visibleSpanRange(in: dirty) else { return }
         for i in first...last {
             guard let block = document.block(spans[i].id), [.callout, .code, .quote].contains(block.type), let rect = blockRect(for: spans[i]) else { continue }
@@ -1295,6 +1303,25 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
                 style.soft.setFill()
                 NSBezierPath(roundedRect: box, xRadius: 9, yRadius: 9).fill()
             }
+        }
+    }
+
+    /// Фон цвета блока (M12): на всю ширину, вместе с вложенными блоками, как в Notion.
+    private func drawBlockColors(in dirty: NSRect) {
+        let colored = document.blocks.filter { $0.content?.color.map(BlockColor.isBackground) == true }
+        guard !colored.isEmpty else { return }
+        let index = Dictionary(spans.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for block in colored {
+            guard let color = block.content?.color, let i = index[block.id], let top = blockRect(for: spans[i]) else { continue }
+            var box = top
+            for child in document.descendants(of: block.id) {
+                if let j = index[child.id], let r = blockRect(for: spans[j]) { box = box.union(r) }
+            }
+            let x = textView.textContainerOrigin.x + CGFloat(depths[block.id] ?? 0) * BlockTextStyle.nestIndent - 4
+            let frame = NSRect(x: x, y: box.minY - 2, width: textView.bounds.width - x - 4, height: box.height + 4)
+            guard frame.intersects(dirty), let fill = BlockTextStyle.background(of: BlockColor.name(color)) else { continue }
+            fill.setFill()
+            NSBezierPath(roundedRect: frame, xRadius: 4, yRadius: 4).fill()
         }
     }
 
@@ -1532,6 +1559,7 @@ final class BlockTextView: NSTextView {
         add(sub(t("Начертание"), EditorAction.marks))
         add(sub(t("Цвет текста"), EditorAction.colors))
         add(sub(t("Цветной маркер"), EditorAction.highlights))
+        add(sub(t("Цвет блока"), EditorAction.blockColors))
         add(sub(t("Вставить блок"), EditorAction.inserts))
         for item in EditorAction.blockActions { add(menuItem(item)) }
         add(.separator())

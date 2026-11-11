@@ -25,6 +25,8 @@ enum EditCommand: Equatable {
     case indent(UUID)
     case outdent(UUID)
     case setCollapsed(block: UUID, collapsed: Bool)
+    /// Цвет текста или фона блока (M12); nil — по умолчанию.
+    case setBlockColor(block: UUID, color: String?)
     /// Несколько правок одним шагом отмены.
     case batch([EditCommand])
 }
@@ -437,6 +439,12 @@ enum BlockEditing {
             let (b, c) = try editable(id)
             var n = c
             n.extra["collapsed"] = collapsed ? .bool(true) : nil
+            return result([.upsert(updated(b, n))], selection: nil)
+
+        case let .setBlockColor(id, color):
+            let (b, c) = try editable(id)
+            var n = c
+            n.color = color
             return result([.upsert(updated(b, n))], selection: nil)
 
         case let .batch(commands):
