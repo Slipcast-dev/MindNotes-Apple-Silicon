@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSWindow.allowsAutomaticWindowTabbing = false
         SheetOutsideClick.install()
+        TitlebarDoubleClick.install()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         preferences.apply()
@@ -121,3 +122,38 @@ enum SheetOutsideClick {
         return nil
     }
 }
+
+/// Двойной щелчок по верхней полосе окна разворачивает его (или сворачивает — по настройке macOS).
+/// Подпись и распорка панели SwiftUI забирают щелчок себе, поэтому системное поведение здесь не срабатывало.
+enum TitlebarDoubleClick {
+    private static var monitor: Any?
+
+    static func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { handle($0) }
+    }
+
+    static func handle(_ event: NSEvent) -> NSEvent? {
+        guard event.clickCount == 2, let window = event.window, window.attachedSheet == nil,
+              window.styleMask.contains(.titled), !window.styleMask.contains(.fullScreen) else { return event }
+        let point = event.locationInWindow
+        guard TitlebarGesture.isTitlebar(x: point.x, y: point.y, windowWidth: window.frame.width, contentTop: window.contentLayoutRect.maxY) else { return event }
+        // Кнопки окна (закрыть, свернуть, развернуть) работают как обычно.
+        if let frame = window.contentView?.superview, var hit = frame.hitTest(frame.convert(point, from: nil)) as NSView? {
+            while true {
+                if hit is NSControl { return event }
+                guard let parent = hit.superview else { break }
+                hit = parent
+            }
+        }
+        let global = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain) ?? [:]
+        switch TitlebarGesture.action(preference: global["AppleActionOnDoubleClick"] as? String,
+                                      legacyMinimize: (global["AppleMiniaturizeOnDoubleClick"] as? Bool) ?? false) {
+        case .zoom: window.zoom(nil)
+        case .minimize: window.miniaturize(nil)
+        case .none: return event
+        }
+        return nil // Щелчок обработан: система не выполнит его второй раз.
+    }
+}
+

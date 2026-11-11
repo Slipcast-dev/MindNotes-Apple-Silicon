@@ -47,3 +47,18 @@ func runBlockColorTests() async {
         }
     }
 }
+
+/// Двойной щелчок по заголовку окна: правило по настройке macOS и полоса заголовка.
+func runTitlebarGestureTests() async {
+    await test("Окно: двойной щелчок по заголовку разворачивает его, как настроено в macOS") {
+        checkEqual(TitlebarGesture.action(preference: nil, legacyMinimize: false), .zoom, "по умолчанию — развернуть")
+        checkEqual(TitlebarGesture.action(preference: "Maximize", legacyMinimize: false), .zoom)
+        checkEqual(TitlebarGesture.action(preference: "Fill", legacyMinimize: false), .zoom)
+        checkEqual(TitlebarGesture.action(preference: "Minimize", legacyMinimize: false), .minimize)
+        checkEqual(TitlebarGesture.action(preference: "None", legacyMinimize: false), .none)
+        checkEqual(TitlebarGesture.action(preference: nil, legacyMinimize: true), .minimize, "старая настройка «свернуть»")
+        check(TitlebarGesture.isTitlebar(x: 400, y: 790, windowWidth: 1200, contentTop: 748), "полоса заголовка")
+        check(!TitlebarGesture.isTitlebar(x: 400, y: 700, windowWidth: 1200, contentTop: 748), "содержимое — нет")
+        check(!TitlebarGesture.isTitlebar(x: 1180, y: 790, windowWidth: 1200, contentTop: 748), "кнопка темы справа — нет")
+    }
+}
