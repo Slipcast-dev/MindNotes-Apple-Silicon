@@ -572,6 +572,12 @@ struct SortRule: Equatable, Codable {
 struct ColumnState: Equatable, Codable {
     var property: UUID
     var visible = true
+    /// Ширина столбца таблицы в точках (M10.4); nil — ширина по типу свойства.
+    var width: Double? = nil
+
+    static let minWidth = 60.0, maxWidth = 800.0
+    /// Ширина в допустимых пределах; нечисло и бесконечность дают nil.
+    static func clamp(_ width: Double) -> Double? { width.isFinite ? min(maxWidth, max(minWidth, width.rounded())) : nil }
 }
 
 /// Состояние представления: хранится отдельно от записей. Неизвестные поля более новой версии не теряются.
@@ -641,6 +647,16 @@ struct DatabaseViewState: Equatable {
     }
 
     /// Столбцы в порядке представления: новые свойства в конце и видимы, удалённые исчезают, заголовок всегда виден.
+    /// Сохранённая ширина столбца свойства или nil.
+    func columnWidth(_ property: UUID) -> Double? { columns.first { $0.property == property }?.width.flatMap(ColumnState.clamp) }
+
+    /// Ширина задаётся и для столбца, которого ещё нет в списке: он добавляется с порядком по умолчанию.
+    mutating func setColumnWidth(_ property: UUID, _ width: Double?, properties: [PropertyDefinition]) {
+        columns = orderedColumns(properties)
+        guard let i = columns.firstIndex(where: { $0.property == property }) else { return }
+        columns[i].width = width.flatMap(ColumnState.clamp)
+    }
+
     func orderedColumns(_ properties: [PropertyDefinition]) -> [ColumnState] {
         let live = Set(properties.map(\.id))
         var out = columns.filter { live.contains($0.property) }

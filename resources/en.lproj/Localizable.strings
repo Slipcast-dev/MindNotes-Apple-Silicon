@@ -1067,3 +1067,7 @@
 "Перетащите, чтобы изменить порядок" = "Drag to change the order";
 "Порядок задан сортировкой" = "The order is set by a sort";
 "Переместить запись" = "Move record";
+
+/* M10.4: ширина столбцов */
+"Перетащите, чтобы изменить ширину; двойной щелчок — ширина по умолчанию" = "Drag to change the width; double-click to reset";
+"Ширина столбца" = "Column width";

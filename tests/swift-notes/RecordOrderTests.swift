@@ -75,3 +75,43 @@ func runRecordOrderTests() async {
         }
     }
 }
+
+/// M10.4: ширина столбцов в состоянии представления.
+func runColumnWidthTests() async {
+    await test("Ширина столбцов: пределы, старое состояние без ширины, сохранение в виде, копия базы") {
+        checkEqual(ColumnState.clamp(10), 60)
+        checkEqual(ColumnState.clamp(5000), 800)
+        checkEqual(ColumnState.clamp(201.6), 202)
+        check(ColumnState.clamp(.nan) == nil && ColumnState.clamp(.infinity) == nil, "нечисло не сохраняется")
+        let p = UUID(), q = UUID()
+        let old = DatabaseViewState(json: #"{"columns":[{"property":"\#(p.uuidString)","visible":false}]}"#)
+        checkEqual(old.columns.first?.visible, false, "старое состояние читается")
+        checkEqual(old.columnWidth(p), nil)
+        let props = [PropertyDefinition(id: p, databaseID: UUID(), name: "A", type: .title, sortKey: "a"),
+                     PropertyDefinition(id: q, databaseID: UUID(), name: "B", type: .text, sortKey: "b")]
+        var state = old
+        state.setColumnWidth(q, 333, properties: props)
+        checkEqual(state.columnWidth(q), 333, "столбец без записи в списке получает ширину")
+        checkEqual(state.columns.map(\.property), [p, q])
+        let back = DatabaseViewState(json: try state.jsonString())
+        checkEqual(back.columnWidth(q), 333, "ширина переживает JSON")
+        state.setColumnWidth(q, nil, properties: props)
+        checkEqual(state.columnWidth(q), nil, "сброс к ширине по типу")
+
+        try await withTempDir { dir in
+            let w = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "T")
+            defer { w.close() }
+            let d = try await w.createDatabase(parent: nil, template: NewDatabase(title: "База", titleProperty: "Название", statusProperty: "Статус",
+                                                                                 statusOptions: ["Новая"], dateProperty: "Срок", viewName: "Таблица"), ids: RandomIDs(), now: 1)
+            var s = d.views[0].state
+            let status = d.properties.first { $0.type == .status }!
+            s.setColumnWidth(status.id, 420, properties: d.properties)
+            try await w.saveViewState(d.views[0].id, s)
+            checkEqual(try await w.database(d.id)!.views[0].state.columnWidth(status.id), 420)
+            let copyPage = try await w.duplicatePage(d.pageID, title: "Копия", ids: RandomIDs(), now: 2)
+            let copy = try await w.database(try await w.databaseIndex()[copyPage]!)!
+            let copyStatus = copy.properties.first { $0.type == .status }!
+            checkEqual(copy.views[0].state.columnWidth(copyStatus.id), 420, "копия базы — та же ширина у своего свойства")
+        }
+    }
+}

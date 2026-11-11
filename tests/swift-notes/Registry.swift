@@ -36,6 +36,7 @@ func runAllNotesTests() async {
     await runPeopleTests()
     await runFilesPropertyTests()
     await runRecordOrderTests()
+    await runColumnWidthTests()
     await runLocalizationTests()
     await runVideoTests()
     await runAcceptanceTests()

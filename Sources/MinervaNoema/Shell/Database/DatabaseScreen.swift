@@ -6,6 +6,9 @@ struct DatabaseScreen: View {
     @EnvironmentObject private var shell: ShellModel
     @ObservedObject var model: DatabaseModel
     @State private var title = ""
+    /// Ширина столбцов во время перетаскивания границы и точка отсчёта жеста.
+    @State private var liveWidths: [UUID: CGFloat] = [:]
+    @State private var dragStart: [UUID: CGFloat] = [:]
     @State private var showsFilter = false
     @State private var showsSort = false
     @State private var showsViewSettings = false
@@ -169,6 +172,39 @@ struct DatabaseScreen: View {
 
     // MARK: Таблица
 
+    /// Ширина столбца: во время перетаскивания — текущая, иначе сохранённая в виде, иначе по типу.
+    private func width(_ property: PropertyDefinition) -> CGFloat {
+        if let live = liveWidths[property.id] { return live }
+        return model.state.columnWidth(property.id).map { CGFloat($0) } ?? Self.width(property.type)
+    }
+
+    /// Ручка на правом краю заголовка: перетаскивание меняет ширину, двойной щелчок возвращает ширину по типу.
+    private func resizeHandle(_ property: PropertyDefinition) -> some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(width: 8, height: 32)
+            .contentShape(Rectangle())
+            .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+            .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { drag in
+                    let start = dragStart[property.id] ?? width(property)
+                    dragStart[property.id] = start
+                    liveWidths[property.id] = CGFloat(ColumnState.clamp(Double(start + drag.translation.width)) ?? Double(start))
+                }
+                .onEnded { _ in
+                    let final = liveWidths[property.id].map(Double.init)
+                    dragStart[property.id] = nil
+                    if let final { model.updateState { [properties = model.database?.properties ?? []] in $0.setColumnWidth(property.id, final, properties: properties) } }
+                    // Живая ширина держится, пока сохранённая не придёт из хранилища.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { liveWidths[property.id] = nil }
+                })
+            .onTapGesture(count: 2) {
+                model.updateState { [properties = model.database?.properties ?? []] in $0.setColumnWidth(property.id, nil, properties: properties) }
+            }
+            .help(L("Перетащите, чтобы изменить ширину; двойной щелчок — ширина по умолчанию"))
+            .accessibilityLabel(Text("Ширина столбца"))
+    }
+
     private static func width(_ type: PropertyType) -> CGFloat {
         switch type {
         case .title: return 280
@@ -216,7 +252,8 @@ struct DatabaseScreen: View {
                     }
                 }
                 .padding(.horizontal, 8)
-                .frame(width: Self.width(property.type), height: 32, alignment: .leading)
+                .frame(width: width(property), height: 32, alignment: .leading)
+                .overlay(alignment: .trailing) { resizeHandle(property) }
             }
         }
         .background(Tokens.paper)
@@ -250,7 +287,7 @@ struct DatabaseScreen: View {
                     }
                 }
                 .padding(.horizontal, 8)
-                .frame(width: Self.width(property.type), height: 36, alignment: .leading)
+                .frame(width: width(property), height: 36, alignment: .leading)
             }
         }
         .overlay(Rectangle().fill(Tokens.line).frame(height: 1), alignment: .bottom)
