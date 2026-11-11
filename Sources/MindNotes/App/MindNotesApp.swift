@@ -66,6 +66,8 @@ struct MindNotesApp: App {
                     .keyboardShortcut("[")
                 Button("Вперёд") { delegate.shell.goForward() }
                     .keyboardShortcut("]")
+                Button("Боковая панель") { delegate.shell.toggleSidebar() }
+                    .keyboardShortcut("\\")
                 Divider()
                 Button("Главная") { delegate.shell.goHome() }
                     .keyboardShortcut("h", modifiers: [.command, .shift])

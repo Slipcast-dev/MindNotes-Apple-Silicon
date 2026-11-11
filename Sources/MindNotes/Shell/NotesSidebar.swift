@@ -316,6 +316,7 @@ struct PageTreeRow: View {
     var dropZone: PageTree.DropZone? = nil
     var isDragged = false
     let toggle: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         let page = row.page
@@ -327,6 +328,40 @@ struct PageTreeRow: View {
             if shell.isOpenPage(page.id), row.hasChildren { toggle() } else { shell.openPage(page.id) }
         }
         .opacity(isDragged ? 0.45 : 1)
+        // Стрелка раскрытия нажимается отдельно от строки, как в Notion.
+        .overlay(alignment: .leading) {
+            if row.hasChildren {
+                Color.clear.frame(width: 22, height: 26).contentShape(Rectangle())
+                    .padding(.leading, inset - 4)
+                    .onTapGesture { toggle() }
+                    .accessibilityLabel(Text(expanded ? "Свернуть" : "Развернуть"))
+                    .accessibilityAddTraits(.isButton)
+            }
+        }
+        // При наведении: «…» — действия со страницей, «+» — новая подстраница.
+        .overlay(alignment: .trailing) {
+            if hovering && !isDragged {
+                HStack(spacing: 2) {
+                    Menu { actions(page, isDatabase: isDatabase) } label: {
+                        Image(systemName: "ellipsis").font(.system(size: 11, weight: .semibold)).frame(width: 20, height: 20)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help(L("Действия со страницей"))
+                    if !isDatabase {
+                        Button { shell.createPage(parent: page.id) } label: {
+                            Image(systemName: "plus").font(.system(size: 11, weight: .semibold)).frame(width: 20, height: 20).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(L("Новая подстраница"))
+                    }
+                }
+                .foregroundColor(Tokens.muted)
+                .padding(.trailing, 6)
+            }
+        }
+        .onHover { hovering = $0 }
         // Куда упадёт страница: линия между строками или рамка «внутрь».
         .overlay(alignment: dropZone == .before ? .top : .bottom) {
             if dropZone == .before || dropZone == .after {
@@ -336,24 +371,30 @@ struct PageTreeRow: View {
         .overlay {
             if dropZone == .into { RoundedRectangle(cornerRadius: 8).stroke(Tokens.accent, lineWidth: 2) }
         }
-        .contextMenu {
-            if !isDatabase {
-                Button("Новая подстраница") { shell.createPage(parent: page.id) }
-                Button("Новая папка") { shell.createFolder(parent: page.id) }
-                Button("Новая база данных") { shell.createDatabase(parent: page.id) }
-            }
-            Button(page.favoriteKey != nil ? "Убрать из избранного" : "Добавить в избранное") { shell.toggleFavorite(page.id) }
-            Button("Дублировать страницу") { shell.duplicatePage(page.id) }
-            if !isDatabase { Button("Сохранить как шаблон…") { shell.saveAsTemplate(page.id) } }
-            Button("Переместить в…") { shell.pageToMove = page }
-            if page.parentID == nil, !shell.sections.isEmpty {
-                Menu("В раздел") {
-                    Button(shell.pagesTitle ?? L("Страницы")) { shell.moveToSection(page.id, nil) }
-                    ForEach(shell.sections) { section in Button(section.name) { shell.moveToSection(page.id, section.id) } }
-                }
-            }
-            Divider()
-            Button("Удалить") { shell.trash(page.id) }
+        .contextMenu { actions(page, isDatabase: isDatabase) }
+    }
+
+    /// Одни и те же действия в меню «…» и по правой кнопке.
+    @ViewBuilder private func actions(_ page: Page, isDatabase: Bool) -> some View {
+        Button("Переименовать…") {
+            if let name = PromptAlert.ask(L("Название страницы"), value: page.title) { shell.rename(page.id, to: name) }
         }
+                if !isDatabase {
+                    Button("Новая подстраница") { shell.createPage(parent: page.id) }
+                    Button("Новая папка") { shell.createFolder(parent: page.id) }
+                    Button("Новая база данных") { shell.createDatabase(parent: page.id) }
+                }
+                Button(page.favoriteKey != nil ? "Убрать из избранного" : "Добавить в избранное") { shell.toggleFavorite(page.id) }
+                Button("Дублировать страницу") { shell.duplicatePage(page.id) }
+                if !isDatabase { Button("Сохранить как шаблон…") { shell.saveAsTemplate(page.id) } }
+                Button("Переместить в…") { shell.pageToMove = page }
+                if page.parentID == nil, !shell.sections.isEmpty {
+                    Menu("В раздел") {
+                        Button(shell.pagesTitle ?? L("Страницы")) { shell.moveToSection(page.id, nil) }
+                        ForEach(shell.sections) { section in Button(section.name) { shell.moveToSection(page.id, section.id) } }
+                    }
+                }
+                Divider()
+                Button("Удалить") { shell.trash(page.id) }
     }
 }

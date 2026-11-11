@@ -49,6 +49,26 @@ final class ShellModel: ObservableObject {
     }
     @Published var errorMessage: String?
     @Published private(set) var recentFiles: [URL] = []
+    /// Боковая панель (M14): свёрнута ли и её ширина; запоминаются для этого Mac.
+    @Published var sidebarCollapsed = UserDefaults.standard.bool(forKey: "sidebarCollapsed") {
+        didSet { UserDefaults.standard.set(sidebarCollapsed, forKey: "sidebarCollapsed") }
+    }
+    @Published var sidebarWidth: Double = ShellModel.savedSidebarWidth
+    static let sidebarWidths: ClosedRange<Double> = 200...480
+    private static var savedSidebarWidth: Double {
+        let v = UserDefaults.standard.double(forKey: "sidebarWidth")
+        return v == 0 ? Double(Tokens.sidebarWidth) : min(sidebarWidths.upperBound, max(sidebarWidths.lowerBound, v))
+    }
+
+    func toggleSidebar() {
+        withAnimation(.easeInOut(duration: 0.15)) { sidebarCollapsed.toggle() }
+    }
+
+    func setSidebarWidth(_ width: Double, save: Bool) {
+        sidebarWidth = min(Self.sidebarWidths.upperBound, max(Self.sidebarWidths.lowerBound, width.rounded()))
+        if save { UserDefaults.standard.set(sidebarWidth, forKey: "sidebarWidth") }
+    }
+
     /// Своё название раздела «Страницы» у открытого пространства; nil — стандартное.
     @Published private(set) var pagesTitle: String?
     /// Свои разделы боковой панели и раздел каждой страницы верхнего уровня (схема v9).

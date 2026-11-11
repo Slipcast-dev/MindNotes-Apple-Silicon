@@ -1181,3 +1181,11 @@
 "Свернуть раздел" = "Collapse section";
 
 "Щелчок — свернуть или развернуть; правый щелчок — переименовать" = "Click to collapse or expand; right-click to rename";
+
+/* M14: боковая панель */
+"Показать боковую панель (⌘\\)" = "Show sidebar (⌘\\)";
+"Скрыть боковую панель (⌘\\)" = "Hide sidebar (⌘\\)";
+"Потяните, чтобы изменить ширину; двойной щелчок — обычная ширина" = "Drag to resize; double-click for the default width";
+"Название страницы" = "Page name";
+"Свернуть" = "Collapse";
+"Развернуть" = "Expand";

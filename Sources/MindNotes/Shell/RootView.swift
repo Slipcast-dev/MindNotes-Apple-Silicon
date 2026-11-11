@@ -67,6 +67,9 @@ struct WindowChrome: NSViewRepresentable {
 /// Раскладка пространства по макету: боковая панель 240, хлебные крошки 54, содержимое.
 struct NotesLayout: View {
     @EnvironmentObject private var shell: ShellModel
+    /// Свёрнутая панель показана поверх текста: курсор у левого края.
+    @State private var peeking = false
+    @State private var resizeStart: Double?
 
     var body: some View {
         Group {
@@ -74,21 +77,70 @@ struct NotesLayout: View {
                 WelcomeScreen()
             } else {
                 HStack(spacing: 0) {
-                    NotesSidebar()
-                        .frame(width: Tokens.sidebarWidth)
-                    Rectangle().fill(Tokens.line).frame(width: 1)
+                    if !shell.sidebarCollapsed {
+                        NotesSidebar()
+                            .frame(width: CGFloat(shell.sidebarWidth))
+                            .transition(.move(edge: .leading))
+                        Rectangle().fill(Tokens.line).frame(width: 1)
+                            .overlay { resizeHandle }
+                    }
                     VStack(spacing: 0) {
                         CrumbBar()
                         Rectangle().fill(Tokens.line).frame(height: 1)
                         content
                     }
                 }
+                .overlay(alignment: .leading) {
+                    if shell.sidebarCollapsed { peekSidebar }
+                }
+                .animation(.easeInOut(duration: 0.15), value: shell.sidebarCollapsed)
             }
         }
         .foregroundColor(Tokens.ink)
         .background(Tokens.paper)
         .overlay(Rectangle().fill(Tokens.line).frame(height: 1), alignment: .top)
         .overlay(alignment: .bottomTrailing) { noticeView }
+    }
+
+    /// Граница панели тянется: ширина 200–480, запоминается при отпускании.
+    private var resizeHandle: some View {
+        Color.clear
+            .frame(width: 7)
+            .contentShape(Rectangle())
+            .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { g in
+                        let start = resizeStart ?? shell.sidebarWidth
+                        resizeStart = start
+                        shell.setSidebarWidth(start + Double(g.translation.width), save: false)
+                    }
+                    .onEnded { _ in
+                        resizeStart = nil
+                        shell.setSidebarWidth(shell.sidebarWidth, save: true)
+                    }
+            )
+            .onTapGesture(count: 2) { shell.setSidebarWidth(Double(Tokens.sidebarWidth), save: true) }
+            .help(L("Потяните, чтобы изменить ширину; двойной щелчок — обычная ширина"))
+    }
+
+    /// Свёрнутая панель: полоска у левого края, наведение показывает панель поверх текста.
+    @ViewBuilder private var peekSidebar: some View {
+        ZStack(alignment: .leading) {
+            Color.clear.frame(width: 10).frame(maxHeight: .infinity).contentShape(Rectangle())
+                .onHover { if $0 { withAnimation(.easeOut(duration: 0.15)) { peeking = true } } }
+            if peeking {
+                NotesSidebar()
+                    .frame(width: CGFloat(shell.sidebarWidth))
+                    .frame(maxHeight: .infinity)
+                    .background(Tokens.side)
+                    .overlay(Rectangle().fill(Tokens.line).frame(width: 1), alignment: .trailing)
+                    .shadow(color: .black.opacity(0.15), radius: 12, x: 2)
+                    .onHover { if !$0 { withAnimation(.easeIn(duration: 0.15)) { peeking = false } } }
+                    .transition(.move(edge: .leading))
+            }
+        }
+        .onChange(of: shell.sidebarCollapsed) { _, _ in peeking = false }
     }
 
     @ViewBuilder private var content: some View {
@@ -160,6 +212,7 @@ struct CrumbBar: View {
 
     var body: some View {
         HStack(spacing: 9) {
+            navButton("sidebar.left", shell.sidebarCollapsed ? L("Показать боковую панель (⌘\\)") : L("Скрыть боковую панель (⌘\\)"), enabled: true) { shell.toggleSidebar() }
             navButton("chevron.left", L("Назад"), enabled: !shell.backStack.isEmpty) { shell.goBack() }
             navButton("chevron.right", L("Вперёд"), enabled: !shell.forwardStack.isEmpty) { shell.goForward() }
             Button(shell.isOpen ? shell.workspaceName : AppEdition.displayName) { shell.goHome() }
