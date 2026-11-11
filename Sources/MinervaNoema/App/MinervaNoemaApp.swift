@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSWindow.allowsAutomaticWindowTabbing = false
+        SheetOutsideClick.install()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         preferences.apply()
@@ -56,9 +57,10 @@ struct MinervaNoemaApp: App {
         .commands {
             FormatCommands()
             CommandMenu(L("Переход")) {
-                Button("Поиск…") { delegate.shell.showsSearch = true }
+                // Меню не следит за состоянием оболочки: выключенный при запуске пункт так и оставался бы выключенным,
+                // и ⌘K не работал. Проверка — внутри действия.
+                Button("Поиск…") { if delegate.shell.isOpen { delegate.shell.showsSearch = true } }
                     .keyboardShortcut("k")
-                    .disabled(!delegate.shell.isOpen)
                 Button("Назад") { delegate.shell.goBack() }
                     .keyboardShortcut("[")
                 Button("Вперёд") { delegate.shell.goForward() }
@@ -72,12 +74,10 @@ struct MinervaNoemaApp: App {
                     .keyboardShortcut(",")
             }
             CommandGroup(replacing: .newItem) {
-                Button("Новая страница") { delegate.shell.createPage() }
+                Button("Новая страница") { if delegate.shell.isOpen { delegate.shell.createPage() } }
                     .keyboardShortcut("n")
-                    .disabled(!delegate.shell.isOpen)
-                Button("Новая папка") { delegate.shell.createFolder() }
+                Button("Новая папка") { if delegate.shell.isOpen { delegate.shell.createFolder() } }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
-                    .disabled(!delegate.shell.isOpen)
                 Divider()
                 Button("Открыть файл…") { delegate.shell.presentOpenFile() }
                     .keyboardShortcut("o")
@@ -97,4 +97,27 @@ struct WindowFrameSaver: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSView, context: Context) {}
+}
+
+/// Щелчок по окну, над которым открыт лист (поиск, перемещение, история…), закрывает лист так же, как Esc.
+enum SheetOutsideClick {
+    private static var monitor: Any?
+
+    static func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { handle($0) }
+    }
+
+    /// Отдельно от монитора, чтобы проверить без цикла событий.
+    static func handle(_ event: NSEvent) -> NSEvent? {
+        guard let window = event.window, let sheet = window.attachedSheet, sheet !== window else { return event }
+        // Esc — то же действие, что уже закрывает лист с клавиатуры: правила закрытия у каждого листа свои.
+        if let escape = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: event.timestamp,
+                                         windowNumber: sheet.windowNumber, context: nil, characters: "\u{1b}",
+                                         charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53) {
+            sheet.makeKey()
+            sheet.sendEvent(escape)
+        }
+        return nil
+    }
 }

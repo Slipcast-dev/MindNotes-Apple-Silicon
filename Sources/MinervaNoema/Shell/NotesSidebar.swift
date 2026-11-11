@@ -204,9 +204,7 @@ struct NotesSidebar: View {
                     if shell.isOpen {
                         SidebarRow(title: L("Шаблоны"), symbol: "square.on.square", active: shell.section == .templates) { shell.goTemplates() }
                         SidebarRow(title: L("Импорт"), symbol: "square.and.arrow.down") { shell.presentImport() }
-                        SidebarRow(title: L("Корзина"), symbol: "trash", active: shell.section == .trash) { shell.goTrash() }
                     }
-                    SidebarRow(title: L("Настройки"), symbol: "gearshape", active: shell.section == .settings) { shell.goSettings() }
                 }
                 .coordinateSpace(name: Self.treeSpace)
                 .onPreferenceChange(RowFramesKey.self) { rowFrames = $0 }
@@ -222,17 +220,15 @@ struct NotesSidebar: View {
                 }
             }
 
+            // Внизу — служебное: корзина и настройки (резервные копии открываются из настроек).
             Rectangle().fill(Tokens.line).frame(height: 1).padding(.top, 8)
-            if shell.isOpen {
-                SidebarRow(title: L("Резервные копии"), symbol: "arrow.clockwise", active: shell.section == .backups) { shell.goBackups() }
-                    .padding(.top, 8)
+            VStack(spacing: 0) {
+                if shell.isOpen {
+                    SidebarRow(title: L("Корзина"), symbol: "trash", active: shell.section == .trash) { shell.goTrash() }
+                }
+                SidebarRow(title: L("Настройки"), symbol: "gearshape", active: shell.section == .settings || shell.section == .backups) { shell.goSettings() }
             }
-            HStack(spacing: 6) {
-                Circle().fill(Tokens.muted).frame(width: 8, height: 8)
-                Text("Локальный режим").font(.system(size: 11)).foregroundColor(Tokens.muted)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.top, 8)
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 17)
