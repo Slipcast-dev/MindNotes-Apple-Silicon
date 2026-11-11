@@ -162,6 +162,7 @@ struct NotesSidebar: View {
                     SidebarRow(title: L("Новая страница"), symbol: "plus") { shell.createPage() }
                     SidebarRow(title: L("Новая папка"), symbol: "folder.badge.plus") { shell.createFolder() }
                     SidebarRow(title: L("Новая база данных"), symbol: "tablecells.badge.ellipsis") { shell.createDatabase() }
+                    SidebarRow(title: L("Шаблоны"), symbol: "square.on.square", active: shell.section == .templates) { shell.goTemplates() }
                 }
             }
 
@@ -175,7 +176,15 @@ struct NotesSidebar: View {
                         }
                     }
                     if shell.isOpen {
-                        SidebarGroup(title: L("Страницы"))
+                        // Название раздела задаёт пользователь; оно хранится в пространстве (у другого — своё или «Страницы»).
+                        SidebarGroup(title: shell.pagesTitle ?? L("Страницы"))
+                            .contentShape(Rectangle())
+                            .onTapGesture(count: 2) { shell.renamePagesSection() }
+                            .contextMenu {
+                                Button("Переименовать раздел…") { shell.renamePagesSection() }
+                                if shell.pagesTitle != nil { Button("Вернуть «Страницы»") { shell.setPagesTitle(nil) } }
+                            }
+                            .help(L("Двойной щелчок — переименовать раздел"))
                         ForEach(shell.pageTree.rows(collapsed: collapsed)) { row in
                             PageTreeRow(row: row, expanded: !collapsed.contains(row.id),
                                         dropZone: drag?.target == row.id ? drag?.zone : nil,
@@ -200,10 +209,6 @@ struct NotesSidebar: View {
                         }
                     }
 
-                    SidebarGroup(title: L("Пространство"))
-                    if shell.isOpen {
-                        SidebarRow(title: L("Шаблоны"), symbol: "square.on.square", active: shell.section == .templates) { shell.goTemplates() }
-                    }
                 }
                 .coordinateSpace(name: Self.treeSpace)
                 .onPreferenceChange(RowFramesKey.self) { rowFrames = $0 }

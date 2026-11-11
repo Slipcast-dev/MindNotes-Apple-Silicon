@@ -23,6 +23,7 @@ func runAllNotesTests() async {
     await runAttachmentReviewTests()
     await runBlockColorTests()
     await runTitlebarGestureTests()
+    await runPagesTitleTests()
     await runMentionTests()
     await runLinkCardTests()
     await runSyncedBlockTests()

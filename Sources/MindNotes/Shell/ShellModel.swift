@@ -49,6 +49,9 @@ final class ShellModel: ObservableObject {
     }
     @Published var errorMessage: String?
     @Published private(set) var recentFiles: [URL] = []
+    /// Своё название раздела «Страницы» у открытого пространства; nil — стандартное.
+    @Published private(set) var pagesTitle: String?
+    private static let pagesTitleKey = "ui.pagesSectionTitle"
     @Published private(set) var look = WorkspaceLook()
     @Published var showsLookSheet = false
     @Published private(set) var knownWorkspaces: [KnownWorkspace] = []
@@ -389,6 +392,7 @@ final class ShellModel: ObservableObject {
             _ = try? await store.refreshDailyFormulas()
             let name = try await store.workspaceName()
             let loadedLook = try await store.look()
+            let loadedPagesTitle = try await store.meta(Self.pagesTitleKey).flatMap { $0.isEmpty ? nil : $0 }
             let session = WorkspaceSession(store: store, name: name)
             session.coordinator.onStatusChange = { [weak self] in self?.saveStatus = $0 }
             try await session.refreshPages()
@@ -410,6 +414,7 @@ final class ShellModel: ObservableObject {
             workspaceName = name
             imageCache = [:]
             look = loadedLook
+            pagesTitle = loadedPagesTitle
             tags = loadedTags
             pageTags = loadedPageTags
             databaseIndex = loadedDatabases
@@ -433,9 +438,24 @@ final class ShellModel: ObservableObject {
         }
     }
 
+    func renamePagesSection() {
+        guard let name = PromptAlert.ask(L("Название раздела страниц"), value: pagesTitle ?? L("Страницы")) else { return }
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        setPagesTitle(clean.isEmpty || clean == L("Страницы") ? nil : String(clean.prefix(60)))
+    }
+
+    /// Название пишется в само пространство: переходит с ним в резервную копию и на другой Mac.
+    func setPagesTitle(_ title: String?) {
+        pagesTitle = title
+        enqueue {
+            try await self.store?.setMeta(Self.pagesTitleKey, title ?? "")
+        }
+    }
+
     func closeWorkspace() {
         enqueue {
             try await self.closeSession()
+            self.pagesTitle = nil
             UserDefaults.standard.removeObject(forKey: self.lastWorkspaceKey)
             self.backStack = []
             self.forwardStack = []

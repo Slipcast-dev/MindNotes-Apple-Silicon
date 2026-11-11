@@ -1154,3 +1154,9 @@
 "Недавние файлы" = "Recent files";
 "Посмотреть файл…" = "Preview a file…";
 "Здесь появятся файлы, которые вы открывали для просмотра." = "Files you open for preview appear here.";
+
+/* Раздел страниц */
+"Переименовать раздел…" = "Rename section…";
+"Вернуть «Страницы»" = "Restore “Pages”";
+"Двойной щелчок — переименовать раздел" = "Double-click to rename the section";
+"Название раздела страниц" = "Pages section name";

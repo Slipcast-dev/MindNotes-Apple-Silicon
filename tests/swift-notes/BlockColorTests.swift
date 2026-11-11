@@ -62,3 +62,23 @@ func runTitlebarGestureTests() async {
         check(!TitlebarGesture.isTitlebar(x: 1180, y: 790, windowWidth: 1200, contentTop: 748), "кнопка темы справа — нет")
     }
 }
+
+/// Своё название раздела «Страницы» хранится в пространстве: у другого — своё или стандартное.
+func runPagesTitleTests() async {
+    await test("Раздел страниц: название у каждого пространства своё и переживает переоткрытие") {
+        try await withTempDir { dir in
+            let key = "ui.pagesSectionTitle"
+            let a = try SQLiteWorkspace.create(at: dir.appendingPathComponent("a"), name: "A")
+            let b = try SQLiteWorkspace.create(at: dir.appendingPathComponent("b"), name: "B")
+            try await a.setMeta(key, "Мои заметки")
+            checkEqual(try await b.meta(key), nil, "у другого пространства — стандартное")
+            a.close()
+            let again = try SQLiteWorkspace.open(at: dir.appendingPathComponent("a"))
+            checkEqual(try await again.meta(key), "Мои заметки", "после переоткрытия — своё")
+            try await again.setMeta(key, "")
+            checkEqual(try await again.meta(key), "", "пустое значение — вернуть «Страницы»")
+            again.close()
+            b.close()
+        }
+    }
+}
