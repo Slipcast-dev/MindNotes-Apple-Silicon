@@ -485,7 +485,8 @@ final class ShellModel: ObservableObject {
             let template = NewDatabase(title: L("Новая база"), titleProperty: L("Название"), statusProperty: L("Статус"),
                                        statusOptions: [L("Запланировано"), L("В работе"), L("Готово")], dateProperty: L("Срок"), viewName: L("Таблица"),
                                        extraViews: [(L("Доска"), DatabaseView.boardKind), (L("Список"), DatabaseView.listKind),
-                                                    (L("Календарь"), DatabaseView.calendarKind), (L("Галерея"), DatabaseView.galleryKind)])
+                                                    (L("Календарь"), DatabaseView.calendarKind), (L("Галерея"), DatabaseView.galleryKind),
+                                                    (L("Хронология"), DatabaseView.timelineKind)])
             let database = try await store.createDatabase(parent: parent, template: template, ids: RandomIDs(), now: SystemClock().nowMillis())
             self.databaseIndex[database.pageID] = database.id
             try await session.refreshPages()

@@ -9,6 +9,7 @@ enum ViewKindTitle {
         case DatabaseView.listKind: return L("Список")
         case DatabaseView.calendarKind: return L("Календарь")
         case DatabaseView.galleryKind: return L("Галерея")
+        case DatabaseView.timelineKind: return L("Хронология")
         default: return kind
         }
     }
@@ -412,13 +413,14 @@ struct ViewSettingsPopover: View {
                     ForEach(DatabaseView.knownKinds, id: \.self) { Text(ViewKindTitle.title($0)).tag($0) }
                 }
             }
-            if kind == DatabaseView.calendarKind {
+            if DatabaseView.usesDate(kind) {
                 Picker("Свойство даты", selection: Binding(get: { model.state.calendarProperty(properties)?.id }, set: { id in
                     model.updateState { $0.dateProperty = id }
                 })) {
                     ForEach(properties.filter { $0.type == .date }) { Text($0.name).tag(UUID?.some($0.id)) }
                 }
-            } else {
+            }
+            if kind != DatabaseView.calendarKind {
                 Picker("Группировка", selection: Binding(get: { model.state.groupProperty(properties, kind: kind)?.id }, set: { id in
                     model.updateState { $0.groupBy = id }
                 })) {

@@ -1076,3 +1076,16 @@
 "Изменение значения" = "Change Value";
 "Изменение записей" = "Change Records";
 "Перенос записи" = "Move Record";
+
+/* M11: timeline */
+"Хронология" = "Timeline";
+"Дни" = "Days";
+"Недели" = "Weeks";
+"Месяцы" = "Months";
+"Для хронологии нужно свойство с датой. Добавьте его в «Свойствах»." = "A timeline needs a date property. Add one in Properties.";
+"Масштаб" = "Scale";
+"Раньше" = "Earlier";
+"В этом промежутке записей нет" = "No records in this period";
+"Шкала времени" = "Time scale";
+"На день раньше" = "One day earlier";
+"На день позже" = "One day later";

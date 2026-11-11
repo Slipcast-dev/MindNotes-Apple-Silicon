@@ -591,6 +591,8 @@ struct DatabaseViewState: Equatable {
     var dateProperty: UUID?
     /// Показывать обложку страницы на карточке галереи.
     var showCover = true
+    /// Масштаб Timeline (M11).
+    var timelineScale: TimelineScale = .week
     var extra: [String: JSONValue] = [:]
 
     private struct Known: Codable {
@@ -600,6 +602,8 @@ struct DatabaseViewState: Equatable {
         var groupBy: UUID?
         var dateProperty: UUID?
         var showCover: Bool?
+        /// Строкой: незнакомый масштаб более новой версии не должен ломать чтение всего состояния.
+        var timelineScale: String?
     }
 
     init() {}
@@ -615,6 +619,11 @@ struct DatabaseViewState: Equatable {
             dateProperty = known.dateProperty
             showCover = known.showCover ?? true
             for key in ["filter", "sorts", "columns", "groupBy", "dateProperty", "showCover"] { object[key] = nil }
+            // Незнакомый масштаб остаётся в `extra` и записывается обратно как был.
+            if let raw = known.timelineScale, let scale = TimelineScale(rawValue: raw) {
+                timelineScale = scale
+                object["timelineScale"] = nil
+            }
         }
         extra = object
     }
@@ -622,7 +631,8 @@ struct DatabaseViewState: Equatable {
     func jsonString() throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let known = try encoder.encode(Known(filter: filter, sorts: sorts, columns: columns, groupBy: groupBy, dateProperty: dateProperty, showCover: showCover))
+        let known = try encoder.encode(Known(filter: filter, sorts: sorts, columns: columns, groupBy: groupBy, dateProperty: dateProperty, showCover: showCover,
+                                                 timelineScale: timelineScale == .week ? nil : timelineScale.rawValue))
         guard case .object(let fields) = try JSONDecoder().decode(JSONValue.self, from: known) else { return "{}" }
         let merged = extra.merging(fields) { _, new in new }
         return String(decoding: try encoder.encode(JSONValue.object(merged)), as: UTF8.self)
@@ -675,7 +685,10 @@ struct DatabaseView: Equatable, Identifiable {
     static let listKind = "list"
     static let calendarKind = "calendar"
     static let galleryKind = "gallery"
-    static let knownKinds = [tableKind, boardKind, listKind, calendarKind, galleryKind]
+    static let timelineKind = "timeline"
+    static let knownKinds = [tableKind, boardKind, listKind, calendarKind, galleryKind, timelineKind]
+    /// Виды, которым нужно свойство даты.
+    static func usesDate(_ kind: String) -> Bool { kind == calendarKind || kind == timelineKind }
 
     var id: UUID
     var databaseID: UUID

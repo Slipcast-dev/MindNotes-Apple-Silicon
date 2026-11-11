@@ -92,6 +92,8 @@ final class DatabaseModel: ObservableObject {
     @Published private(set) var calendarTotal = 0
     @Published private(set) var undated: RecordPage = RecordPage(rows: [], total: 0)
     @Published var month = LocalDate(date: Date(), in: .current).firstOfMonth
+    /// Timeline: опорный день окна; не сохраняется, как и месяц календаря.
+    @Published private(set) var timelineAnchor = LocalDate(date: Date(), in: .current)
     @Published private(set) var templates: [PageTemplate] = []
     /// Справочник людей пространства: варианты ячеек «Человек» и группы доски.
     @Published private(set) var people: [Person] = []
@@ -177,6 +179,9 @@ final class DatabaseModel: ObservableObject {
             try await loadCalendar(fresh, current)
             rows = calendarRows + undated.rows
             sections = []
+        } else if kind == DatabaseView.timelineKind {
+            try await loadTimeline(fresh, current)
+            rows = sections.flatMap(\.rows) + undated.rows
         } else {
             var loaded: [RecordSection] = []
             if let property = current.groupProperty(fresh.properties, kind: kind) {
@@ -211,6 +216,69 @@ final class DatabaseModel: ObservableObject {
         calendarTotal = page.total
         undated = try await store.queryRecords(database: fresh, state: current.narrowed(by: [FilterRule(property: date.id, op: .isEmpty, value: "")]),
                                                limit: limits["undated"] ?? Self.pageSize, offset: 0)
+    }
+
+    var timelineWindow: TimelineWindow { TimelineWindow(scale: state.timelineScale, anchor: timelineAnchor) }
+
+    /// Записи, задевающие окно, по группам вида; на все группы вместе не больше `calendarLimit`, как у календаря.
+    private func loadTimeline(_ fresh: Database, _ current: DatabaseViewState) async throws {
+        guard let date = current.calendarProperty(fresh.properties) else {
+            sections = []
+            calendarTotal = 0
+            undated = RecordPage(rows: [], total: 0)
+            return
+        }
+        let window = TimelineWindow(scale: current.timelineScale, anchor: timelineAnchor)
+        let inWindow = current.narrowed(by: [FilterRule(property: date.id, op: .greaterOrEqual, value: window.start.iso),
+                                             FilterRule(property: date.id, op: .lessOrEqual, value: window.end.iso)])
+        let groups: [RecordGroup?] = current.groupProperty(fresh.properties, kind: DatabaseView.timelineKind).map { RecordGroup.groups(for: $0, people: people) } ?? [nil]
+        var loaded: [RecordSection] = [], budget = Self.calendarLimit, total = 0
+        for group in groups {
+            let state = group.map { inWindow.narrowed(by: [$0.rule]) } ?? inWindow
+            let page = try await store.queryRecords(database: fresh, state: state, limit: budget, offset: 0)
+            budget -= page.rows.count
+            total += page.total
+            loaded.append(RecordSection(id: group?.id ?? "all", group: group, rows: page.rows, total: page.total))
+        }
+        sections = loaded
+        calendarTotal = total
+        undated = try await store.queryRecords(database: fresh, state: current.narrowed(by: [FilterRule(property: date.id, op: .isEmpty, value: "")]),
+                                               limit: limits["undated"] ?? Self.pageSize, offset: 0)
+    }
+
+    func showTimeline(around day: LocalDate) {
+        timelineAnchor = day
+        reload()
+    }
+
+    func setTimelineScale(_ scale: TimelineScale) {
+        updateState {
+            $0.timelineScale = scale
+            $0.extra["timelineScale"] = nil // выбор заменяет и незнакомый масштаб более новой версии
+        }
+    }
+
+    /// Перенос полосы целиком на `days` дней; запись без даты получает день, на который её бросили.
+    func shiftDate(record id: UUID, byDays days: Int) {
+        changeDate(record: id) { $0.moved(byDays: days) }
+    }
+
+    /// Растягивание полосы за левый (`start`) или правый край.
+    func resizeDate(record id: UUID, start: Bool, byDays days: Int) {
+        changeDate(record: id) { start ? $0.resized(startBy: days) : $0.resized(endBy: days) }
+    }
+
+    func setDay(record id: UUID, _ day: LocalDate) {
+        guard let database, let property = state.calendarProperty(database.properties) else { return }
+        setValue(pages: [id], property: property.id, value: .date(DateValue(start: .day(day))))
+    }
+
+    private func changeDate(record id: UUID, _ change: (DateValue) -> DateValue) {
+        guard let database, let property = state.calendarProperty(database.properties),
+              case .date(let value)? = rows.first(where: { $0.id == id })?.values[property.id] else { return }
+        let next = change(value)
+        guard next != value, next.isValid else { return }
+        setValue(pages: [id], property: property.id, value: .date(next))
     }
 
     func showMore(_ section: String = "all") {

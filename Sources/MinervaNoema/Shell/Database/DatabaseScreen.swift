@@ -64,6 +64,7 @@ struct DatabaseScreen: View {
         case DatabaseView.listKind: ListKindView(model: model)
         case DatabaseView.calendarKind: CalendarKindView(model: model)
         case DatabaseView.galleryKind: GalleryView(model: model)
+        case DatabaseView.timelineKind: TimelineKindView(model: model)
         default: table
         }
     }
