@@ -229,6 +229,33 @@ func runFormulaStoreTests() async {
         }
     }
 
+    await test("Формулы в базе: экспорт CSV выгружает связи, свёртки и формулы значениями") {
+        try await withSpace { w in
+            let projects = try await base(w, "Проекты"), tasks = try await base(w, "Задачи")
+            let fwd = UUID(), back = UUID(), hours = UUID(), sum = UUID(), label = UUID(), broken = UUID(), temp = UUID()
+            try await w.addRelation(database: tasks.id, name: "Проект", target: projects.id, twoWay: true, pairName: "Задачи", id: fwd, pairID: back, now: 1)
+            try await w.addProperty(database: tasks.id, name: "Часы", type: .number, id: hours, now: 1)
+            try await w.addProperty(database: projects.id, name: "Временное", type: .number, id: temp, now: 1)
+            let p = try await add(w, projects, "Сайт")
+            let t1 = try await add(w, tasks, "Вёрстка"), t2 = try await add(w, tasks, "Тексты")
+            for (t, h) in [(t1, 3.0), (t2, 4.5)] {
+                try await w.setValue(pages: [t], property: hours, value: .number(h), now: 2)
+                try await w.setValue(pages: [t], property: fwd, value: .relation([LinkedPage(id: p, title: "")]), now: 2)
+            }
+            try await w.addRollup(database: projects.id, name: "Часов", relation: back, property: hours, aggregate: .sum, id: sum, now: 3)
+            try await w.addFormula(database: projects.id, name: "Итог", source: "prop(\"Название\") + \": \" + format(prop(\"Часов\"))", id: label, now: 3)
+            try await w.addFormula(database: projects.id, name: "Сломанная", source: "prop(\"Временное\") * 2", id: broken, now: 3)
+            try await w.deleteProperty(temp)
+            let rows = try await WorkspaceExport.databaseRows(source: w, database: try await fresh(w, projects))
+            guard rows.count == 2 else { return check(false, "строк: \(rows.count)") }
+            let row = Dictionary(uniqueKeysWithValues: zip(rows[0], rows[1]))
+            checkEqual(row["Задачи"], "Вёрстка, Тексты", "связь — заголовками")
+            checkEqual(row["Часов"], "7.5", "свёртка — числом")
+            checkEqual(row["Итог"], "Сайт: 7.5", "формула — значением")
+            checkEqual(row["Сломанная"], "", "ошибка — пустой ячейкой")
+        }
+    }
+
     await test("Формулы в базе: свёртка по формуле и формула по свёртке") {
         try await withSpace { w in
             let projects = try await base(w, "Проекты"), tasks = try await base(w, "Задачи")
