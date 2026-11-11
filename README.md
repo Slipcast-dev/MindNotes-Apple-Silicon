@@ -2,6 +2,8 @@
 
 # MindNotes
 
+[![CI](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/actions/workflows/ci.yml/badge.svg?branch=personal-ru)](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/actions/workflows/ci.yml)
+
 A personal, local knowledge base for Mac: pages, a block editor, search, links and Notion-style databases. Data stays on this Mac; no network or account is needed.
 
 **Download:** [MindNotes — latest release](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/releases/latest) — a `.dmg` for Apple silicon Macs with macOS 26 or later.

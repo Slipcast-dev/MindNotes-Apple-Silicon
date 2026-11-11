@@ -2,6 +2,8 @@
 
 # MindNotes
 
+[![CI](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/actions/workflows/ci.yml/badge.svg?branch=personal-ru)](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/actions/workflows/ci.yml)
+
 Личная локальная база знаний для Mac: страницы, блочный редактор, поиск, ссылки и базы данных в духе Notion. Данные хранятся на этом Mac, сеть и аккаунт не нужны.
 
 **Скачать:** [MindNotes — последний выпуск](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/releases/latest) — образ `.dmg` для Mac на Apple Silicon с macOS 26 или новее.

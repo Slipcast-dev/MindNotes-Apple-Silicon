@@ -283,7 +283,8 @@ func runRelationTests() async {
             try await w.addProperty(database: d.id, name: "Создано", type: .createdTime, id: created, now: 1)
             try await w.addProperty(database: d.id, name: "Изменено", type: .editedTime, id: edited, now: 1)
             d = try await fresh(w, d)
-            let zone = TimeZone(identifier: "Europe/Moscow")!
+            // Пояс хранилища — системный: тест считает границы дня в нём же, поэтому проходит в любом поясе (CI работает в UTC).
+            let zone = TimeZone.current
             var cal = Calendar(identifier: .gregorian); cal.timeZone = zone
             func ms(_ y: Int, _ m: Int, _ day: Int, _ h: Int) -> Int64 { Int64(cal.date(from: DateComponents(year: y, month: m, day: day, hour: h))!.timeIntervalSince1970 * 1000) }
             let old = try await add(w, d, "Старая", now: ms(2026, 3, 1, 23))
@@ -301,9 +302,6 @@ func runRelationTests() async {
             let (start, end) = DatabaseQuerySQL.dayBounds(LocalDate(year: 2026, month: 3, day: 1)!, zone: zone)
             checkEqual(start, ms(2026, 3, 1, 0))
             checkEqual(end, ms(2026, 3, 2, 0))
-            let saved = NSTimeZone.default
-            NSTimeZone.default = zone
-            defer { NSTimeZone.default = saved }
             checkEqual(try await query(w, d, FilterRule(property: created, op: .equals, value: "2026-03-01")), ["Старая"])
             checkEqual(try await query(w, d, FilterRule(property: created, op: .greaterOrEqual, value: "2026-03-02")), ["Новая"])
             checkEqual(try await query(w, d, FilterRule(property: created, op: .lessOrEqual, value: "2026-03-01")), ["Старая"])
