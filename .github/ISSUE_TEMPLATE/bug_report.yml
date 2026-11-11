@@ -1,26 +1,26 @@
-name: Ошибка
-description: Что-то работает не так
+name: Bug · Ошибка
+description: Something does not work · Что-то работает не так
 labels: [bug]
 body:
   - type: textarea
     id: what
     attributes:
-      label: Что случилось?
-      description: Что делали, чего ожидали, что произошло.
+      label: What happened? · Что случилось?
+      description: What you did, what you expected, what happened. · Что делали, чего ожидали, что произошло.
     validations: { required: true }
   - type: input
     id: os
     attributes:
-      label: Mac и версия macOS
+      label: Mac and macOS version · Mac и версия macOS
       placeholder: M1, macOS 27
     validations: { required: true }
   - type: input
     id: version
     attributes:
-      label: Версия MindNotes
+      label: MindNotes version · Версия MindNotes
     validations: { required: true }
   - type: textarea
     id: steps
     attributes:
-      label: Как воспроизвести
-      description: Не прикладывайте файлы с личными данными.
+      label: Steps to reproduce · Как воспроизвести
+      description: Do not attach files with personal data. · Не прикладывайте файлы с личными данными.

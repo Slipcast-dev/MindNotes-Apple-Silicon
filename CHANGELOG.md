@@ -1,80 +1,78 @@
 # Changelog
 
-Все заметные изменения MindNotes. Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [Semantic Versioning](https://semver.org/lang/ru/).
+**English** · [Русский](CHANGELOG.ru.md)
+
+All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
 ## [1.3.0] - 2026-11-11
 
-> Схема пространства v10 (разделы, комментарии): версия 1.2.0 обновлённое пространство не откроет. Перед обновлением сохраняется снимок.
+> Workspace schema v10 (sections, comments): version 1.2.0 cannot open an upgraded workspace. A snapshot is saved before the upgrade.
 
-### Добавлено
-- **`@`-упоминания** (M12): страницы, люди и даты с локальным напоминанием. Упоминание неделимо, подпись следует за переименованием страницы или человека; упоминания страниц видны в обратных ссылках.
-- **Закладки и встраивания** (M12): вставленная ссылка становится текстом, закладкой с заголовком, описанием и картинкой страницы или встраиванием (YouTube, Vimeo, Figma, Google Maps) с окном просмотра. Сеть — только по вашему действию и при включённом «Превью ссылок» в настройках (по умолчанию выключено).
+### Added
+- **`@`-mentions** (M12): pages, people and dates with a local reminder. A mention is a single unit and its label follows when the page or person is renamed; page mentions appear in backlinks.
+- **Bookmarks and embeds** (M12): a pasted link becomes text, a bookmark with the page's title, description and image, or an embed (YouTube, Vimeo, Figma, Google Maps) with a viewer window. Network access happens only on your action and only with “Link previews” turned on in Settings (off by default).
+- **Synced block** (M12): an original and copies on other pages; editing any of them changes all. “Unsync copy”, jump to the original from its label. Copying an original pastes a copy.
+- **Columns** (M13): drop a block by its handle onto the left or right edge of another block to place it in a column beside it (up to five per row); drag the gap to resize; on a narrow window columns stack. Blocks move between columns and the main text; a mouse selection across columns selects whole blocks for copy, cut and delete.
+- **Live inline databases** (M13): a database right inside the page — table, board and other views with in-place editing, filters and sorts; drag the bottom edge to change the height.
+- **Comments** (M14): on selected text (“Comment…” in the context menu) and on the whole page; threads with replies, “Resolved”, author from the people directory, a panel with all comments of the page. Stored in the workspace and in backups; not exported to Markdown.
+- **Updates:** checks GitHub releases automatically (at launch and once a day) or manually; the “Version X is available” window offers “Download and install” or “Later”; the image is verified by SHA-256, then the app installs the update and relaunches.
+- **Extensions:** custom themes and app icons from the extensions folder (Settings → Extensions); a foundation for future extension kinds. Extensions never run code.
 
-- **Синхронизированный блок** (M12): оригинал и копии на других страницах, правка в любом месте меняет все; «Отвязать копию», переход к оригиналу по подписи. Копирование оригинала вставляет копию.
+### Changed
+- **Black-and-white theme matched to Notion:** 16 pt text, 30/24/20 semibold headings, tighter block spacing, 708 text width, 14 pt sidebar rows, section titles in normal case.
+- **Peek:** a database record opens at the side (about 45% of the width) or in the centre without leaving the current page; choose in View → Open records. ⌥-click on a link opens the page at the side. “Open as page”; Esc closes.
+- **Collapsible sidebar** (⌘\\ or the button in the path bar), shown over the text when the pointer reaches the left edge; drag its border to resize (200–480), the width is remembered.
+- **Page tree rows:** on hover, “+” (new subpage) and “…” (actions, including “Rename…”); the disclosure arrow is a separate target.
+- Removed the “Local on this Mac” caption under the workspace name.
+- **“Templates”** moved next to “New page”, “New folder”, “New database”; the empty “Workspace” group is gone.
+- **Custom sidebar sections**, like “Pages”: “New section”, rename, “Move up/down”, “New page in section”; drag a page onto a section title or between its pages, or use the page menu (“Move to section”); all sections, including “Pages”, collapse with the arrow by the title. Deleting a section keeps its pages — they return to “Pages”.
+- **“Delete all…” in the trash:** one confirmation with the page count, then everything is deleted permanently.
+- **The “Pages” section can be renamed** (right-click its title; a normal click collapses it). The name is stored in the workspace: another workspace has its own or “Pages”.
+- **“Files” and “Import” merged** into one sidebar item “Import”: sources at the top (Markdown or text, CSV table, folder, Notion export), recent files with preview and import below.
 
-- **Колонки** (M13): блок, брошенный за ручку на левый или правый край другого блока, встаёт колонкой рядом (до пяти в ряду); ширина тянется за промежуток, на узком окне колонки идут друг под другом. Блоки перетаскиваются между колонками и основным текстом; выделение мышью через колонки выделяет целые блоки для копирования, вырезания и удаления.
-- **Живые встроенные представления** (M13): база прямо в тексте страницы — таблица, доска и другие виды с правкой на месте, фильтрами и сортировкой; высота тянется за нижний край.
-
-- **Комментарии** (M14): к выделенному тексту («Комментировать…» в меню правой кнопки) и ко всей странице; ветки с ответами, «Решено», автор из справочника людей, панель всех комментариев страницы. Хранятся в пространстве и в резервной копии, в Markdown не выгружаются.
-
-- **Обновления:** проверка выпусков на GitHub автоматически (при запуске и раз в сутки) или вручную; окно «Доступна версия X» — «Скачать и установить» или «Позже»; образ сверяется по SHA-256, приложение устанавливает обновление и перезапускается.
-- **Расширения:** свои темы и иконки приложения из папки расширений («Настройки» → «Расширения»); основа для будущих видов расширений. Код из расширений не исполняется.
-
-### Изменено
-- **Тема «Чёрно-белая» сверена с Notion:** текст 16 пт, заголовки 30/24/20 полужирным, плотнее между блоками, ширина текста 708, строки боковой панели 14 пт, заголовки разделов обычными буквами.
-- **Peek:** запись базы открывается сбоку (около 45% ширины) или по центру, не уходя с текущей страницы; режим выбирается в «Вид» → «Открывать записи». ⌥-щелчок по ссылке открывает страницу сбоку. «Открыть как страницу», Esc закрывает.
-- **Боковая панель сворачивается** (⌘\\ или кнопка в строке пути) и показывается поверх текста при наведении на левый край; ширина тянется за границу (200–480) и запоминается.
-- **Строки дерева страниц:** при наведении «+» (новая подстраница) и «…» (действия, в том числе «Переименовать…»); стрелка раскрытия нажимается отдельно.
-- Под названием пространства в боковой панели убрана надпись «Локально на этом Mac».
-- **«Шаблоны»** перенесены к «Новая страница», «Новая папка», «Новая база данных»; пустая группа «Пространство» убрана.
-- **Свои разделы в боковой панели**, как «Страницы»: «Новый раздел», переименование, порядок «Выше/Ниже», «Новая страница в разделе»; страницу можно перетащить мышью на заголовок раздела или между страницами раздела либо перенести из её меню («В раздел»); разделы, включая «Страницы», сворачиваются стрелкой у заголовка. Удаление раздела не удаляет страницы — они возвращаются в «Страницы».
-- **«Удалить все…» в корзине**: одно подтверждение с числом страниц, затем всё удаляется навсегда.
-- **Раздел «Страницы» можно переименовать** (правый щелчок по заголовку раздела; обычный щелчок сворачивает раздел). Название хранится в пространстве: у другого пространства — своё или «Страницы».
-- **«Файлы» и «Импорт» объединены** в один пункт боковой панели «Импорт»: сверху — откуда импортировать (Markdown или текст, таблица CSV, папка, экспорт Notion), ниже — недавние файлы с просмотром и импортом.
-
-### Исправлено
-- Выбор обложки, логотипа и картинок: файл из iCloud сначала докачивается, чтение идёт как в Finder; при отказе сообщение называет причину (нет доступа к папке, файл не скачан, формат не распознан) вместо общего «Не удалось прочитать изображение».
-- Двойной щелчок по верхней полосе окна снова разворачивает его (или сворачивает в Dock — как настроено в macOS): элементы панели перехватывали щелчок.
-- Ссылка `[[` теперь показывает новое название после переименования страницы, если её текст не меняли вручную.
+### Fixed
+- Choosing a cover, logo or image: a file from iCloud is downloaded first and read the way Finder does; on failure the message names the reason (no folder access, file not downloaded, format not recognised) instead of a generic “Could not read the image”.
+- Double-clicking the window's title bar zooms it again (or minimises it — as set in macOS): toolbar items were swallowing the click.
+- A `[[` link shows the new title after the page is renamed, unless its text was edited by hand.
 
 ## [1.2.0] - 2026-11-11
 
-### Добавлено
-- **Цвет блока** (M12): цвет текста или фон на весь блок вместе с вложенными, как в Notion.
+### Added
+- **Block colour** (M12): text colour or background for the whole block with its children, as in Notion.
 
 ## [1.1.0] - 2026-11-11
 
-> **Обновление пространства.** При первом открытии 1.1.0 обновляет схему пространства до v8, перед этим сохраняется проверенный снимок. Версия 1.0.0 обновлённое пространство не откроет: чтобы вернуться на 1.0.0, восстановите снимок. Настройки и резервные копии версии 1.0.0 переносятся автоматически, её архивы открываются; новые копии получают расширение `.mindnotesbackup`. macOS может заново спросить доступ к папкам.
+> **Workspace upgrade.** On first open, 1.1.0 upgrades the workspace schema to v8 after saving a verified snapshot. Version 1.0.0 cannot open an upgraded workspace: to go back to 1.0.0, restore the snapshot. Settings and backups of 1.0.0 are carried over automatically and its archives still open; new backups use the `.mindnotesbackup` extension. macOS may ask for folder access again.
 
-### Добавлено
-- **Связи между базами.** По умолчанию двусторонние: обратное свойство появляется во второй базе. Флажок «без обратной связи» создаёт одностороннюю связь. Связь базы с самой собой тоже возможна. Связанные записи выбираются поиском. Фильтр и сортировка работают по связи. Связи с записями из корзины не видны и возвращаются вместе с восстановленной записью.
-- **Свёртки.** Значение свойства связанных записей: 16 агрегатов (количество, сумма, среднее, минимум, максимум, процент отмеченных, самая ранняя и самая поздняя дата и другие). Пересчёт идёт сразу при правке.
-- **Формулы.** Свой язык с английскими именами функций (38 функций, справка на русском), ссылками `prop("Имя")` и функцией `today()`. Проверка показывает место ошибки, тип результата и пример на первых записях. Переименование свойства не ломает формулу. Циклы между формулами и свёртками отклоняются. Ошибка в отдельной записи видна в её ячейке.
-- **Свойства «Создано» и «Изменено».** «Изменено» учитывает и правку текста, и правку свойств.
-- **Свойство «Человек»** и справочник людей в «Настройках» → «Люди» (имя, цвет, эмодзи). Фильтры «содержит» и «пусто», сортировка по имени, группировка на доске.
-- **Свойство «Файлы и медиа»**: список вложений, превью в галерее, файлы выгружаются вместе с Markdown-экспортом.
-- **Вид «Хронология»**: полосы по дате на шкале часов, дней, недель или месяцев, которая продолжается при прокрутке и запоминает положение; перенос и растягивание за края с учётом времени суток; ручной порядок строк; стрелки зависимостей по связи «Зависит от»; записи без даты отдельным списком; группировка.
-- **Ручной порядок записей**: перетаскивание строк таблицы, строк списка, карточек галереи и доски. У каждого вида свой порядок, при сортировке он не действует.
-- **Ширина столбцов** таблицы перетаскиванием границы заголовка, сохраняется в виде.
-- **⌘Z и ⇧⌘Z** для правок значений, массовых изменений и переноса записей в базе.
-- **Перенос данных.** В CSV-экспорте связи выгружаются заголовками, а свёртки и формулы — значениями. Markdown-экспорт записи начинается с карточки свойств, где связи записаны ссылками `[[Заголовок]]`. Импорт экспорта Notion восстанавливает связи: две колонки двусторонней связи становятся одной парой. Строки свойств Notion в начале записи больше не попадают в её текст.
+### Added
+- **Relations between databases.** Two-way by default: the reverse property appears in the other database. “No reverse relation” creates a one-way relation. A database can relate to itself. Related records are chosen by search. Filters and sorts work on relations. Relations to records in the trash are hidden and come back with the restored record.
+- **Rollups.** A value from related records: 16 aggregates (count, sum, average, min, max, percent checked, earliest and latest date, and more), recalculated on every edit.
+- **Formulas.** A formula language with English function names (38 functions, built-in help), `prop("Name")` references and `today()`. Validation shows the error position, result type and a preview on the first records. Renaming a property does not break a formula. Cycles between formulas and rollups are rejected. An error in a single record shows in its cell.
+- **“Created” and “Edited” properties.** “Edited” counts both text and property edits.
+- **“Person” property** and a people directory in Settings → People (name, colour, emoji). Filters “contains” and “empty”, sort by name, board grouping.
+- **“Files & media” property:** a list of attachments, previews in the gallery; files are exported along with Markdown.
+- **Timeline view:** bars by date on an hour, day, week or month scale that extends while scrolling and remembers its position; move and resize by the edges, time of day respected; manual row order; dependency arrows from a “Depends on” relation; undated records in a separate list; grouping.
+- **Manual record order:** drag table rows, list rows, gallery and board cards. Each view has its own order; it does not apply while sorted.
+- **Column width** in tables by dragging the header border, saved in the view.
+- **⌘Z and ⇧⌘Z** for value edits, bulk changes and record moves in a database.
+- **Data transfer.** CSV export writes relations as titles and rollups and formulas as values. A record's Markdown export starts with a property card where relations are `[[Title]]` links. Notion export import restores relations: the two columns of a two-way relation become one pair. Notion property lines at the start of a record no longer end up in its text.
 
-### Изменено
-- **Название — MindNotes**, новый идентификатор и каталог данных (ADR-0010).
-- **Боковая панель.** «Корзина» и «Настройки» теперь внизу. «Резервные копии» открываются из «Настроек». Надпись «Локальный режим» убрана.
-- **Окна поиска и другие подобные окна** закрываются щелчком вне окна, так же как клавишей Esc.
+### Changed
+- **Renamed to MindNotes**, with a new identifier and data folder (ADR-0010).
+- **Sidebar.** “Trash” and “Settings” are now at the bottom. “Backups” open from Settings. The “Local mode” caption is removed.
+- **Search and similar windows** close on a click outside, just like with Esc.
 
-### Исправлено
-- ⌘K, ⌘N и ⌘⇧N не работали, если пространство открывалось после запуска программы.
+### Fixed
+- ⌘K, ⌘N and ⌘⇧N did not work if the workspace was opened after the app launched.
 
 ## [1.0.0] - 2026-11-10
 
-Первый выпуск: личная база знаний для Mac на Apple Silicon (macOS 26 и новее), основанная на Grizzly 1.4.2.
+First release: a personal knowledge base for Apple silicon Macs (macOS 26 and later), based on Grizzly 1.4.2.
 
-### Добавлено
-- Рабочее пространство в SQLite: страницы и подстраницы, блочный редактор, корзина, история версий с восстановлением.
-- Поиск ⌘K, ссылки `[[`, обратные ссылки, избранное, теги, шаблоны.
-- Базы данных: таблица, доска, список, календарь, галерея, встроенные представления.
-- Вложения: картинки, файлы, видео с проигрывателем.
-- Импорт Markdown, CSV, папок и экспорта Notion; экспорт в Markdown и CSV.
-- Резервные копии вручную и автоматически, восстановление в новую папку.
+### Added
+- SQLite workspace: pages and subpages, block editor, trash, version history with restore.
+- ⌘K search, `[[` links, backlinks, favourites, tags, templates.
+- Databases: table, board, list, calendar, gallery, inline views.
+- Attachments: images, files, video with a player.
+- Import of Markdown, CSV, folders and Notion exports; export to Markdown and CSV.
+- Manual and automatic backups, restore into a new folder.

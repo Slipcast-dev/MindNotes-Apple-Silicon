@@ -1,5 +1,7 @@
 # Сборка, запуск и восстановление
 
+[English](../en/BUILD_AND_USE.md) · **Русский**
+
 Нужны Mac на Apple Silicon, macOS 26 или новее и Command Line Tools (`xcode-select --install`). Для JS-тестов нужен Node.js. Сборка для Intel не поддерживается (ADR-0009).
 
 ## Сборка

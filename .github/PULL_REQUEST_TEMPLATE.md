@@ -1,10 +1,10 @@
-## Что и зачем
+## What and why · Что и зачем
 
-<!-- Что меняется и какую задачу решает. Issue: Fixes #123 -->
+<!-- What changes and which problem it solves. Что меняется и какую задачу решает. Fixes #123 -->
 
-## Проверки
+## Checks · Проверки
 
-- [ ] `./scripts/test.sh` проходит
-- [ ] Обновлены `docs/personal-ru/STATUS.md` и `TEST_REPORT.md`
-- [ ] Нет секретов, личных путей и результатов сборки
-- [ ] Нет новых сетевых обращений и зависимостей
+- [ ] `./scripts/test.sh` passes · проходит
+- [ ] `docs/personal-ru/STATUS.md` and `TEST_REPORT.md` updated · обновлены
+- [ ] No secrets, personal paths or build output · нет секретов, личных путей и результатов сборки
+- [ ] No new network access or dependencies · нет новых сетевых обращений и зависимостей

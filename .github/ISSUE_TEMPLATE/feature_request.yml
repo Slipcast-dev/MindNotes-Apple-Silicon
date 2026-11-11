@@ -1,14 +1,14 @@
-name: Предложение
-description: Идея или новая возможность
+name: Feature request · Предложение
+description: An idea or a new feature · Идея или новая возможность
 labels: [enhancement]
 body:
   - type: textarea
     id: problem
     attributes:
-      label: Задача
-      description: Что сейчас трудно сделать?
+      label: Problem · Задача
+      description: What is hard to do now? · Что сейчас трудно сделать?
     validations: { required: true }
   - type: textarea
     id: idea
     attributes:
-      label: Предлагаемое решение
+      label: Proposed solution · Предлагаемое решение
