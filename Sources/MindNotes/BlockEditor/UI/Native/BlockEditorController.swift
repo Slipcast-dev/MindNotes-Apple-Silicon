@@ -27,7 +27,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         var selected: Int
     }
 
-    static let pasteboardType = NSPasteboard.PasteboardType("local.personal.MinervaNoema.blocks")
+    static let pasteboardType = NSPasteboard.PasteboardType("local.personal.MindNotes.blocks")
     /// Левое поле вида: ручка блока находится вне колонки текста.
     static let gutter: CGFloat = 26
 

@@ -1,16 +1,16 @@
 #!/bin/zsh
-# Builds a release binary and wraps it in Minerva Noema.app (ad-hoc signed, for local use).
+# Builds a release binary and wraps it in MindNotes.app (ad-hoc signed, for local use).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 source scripts/target.sh
 # swiftc напрямую: для сборки хватает Command Line Tools. OUT меняет каталог результата (по умолчанию build/).
-APP="${OUT:-build}/Minerva Noema.app"
+APP="${OUT:-build}/MindNotes.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Модуль один, поэтому оптимизация всего модуля разом. SWIFT_OPT=-Onone: быстрая отладочная сборка.
 swiftc ${=SWIFT_OPT:--O -wmo} -parse-as-library -target "$TARGET" \
-    -o "$APP/Contents/MacOS/MinervaNoema" $(find Sources -name '*.swift')
+    -o "$APP/Contents/MacOS/MindNotes" $(find Sources -name '*.swift')
 
 # Icon and translations (resources/en.lproj, resources/ru.lproj).
 cp resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
@@ -26,14 +26,14 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Minerva Noema</string>
-  <key>CFBundleDisplayName</key><string>Minerva Noema</string>
-  <key>CFBundleIdentifier</key><string>local.personal.MinervaNoema</string>
+  <key>CFBundleName</key><string>MindNotes</string>
+  <key>CFBundleDisplayName</key><string>MindNotes</string>
+  <key>CFBundleIdentifier</key><string>local.personal.MindNotes</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>LSMultipleInstancesProhibited</key><true/>
   <key>CFBundleLocalizations</key><array><string>ru</string><string>en</string></array>
-  <key>CFBundleExecutable</key><string>MinervaNoema</string>
+  <key>CFBundleExecutable</key><string>MindNotes</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$(tr -d "[:space:]" < VERSION)</string>
   <key>CFBundleVersion</key><string>1</string>

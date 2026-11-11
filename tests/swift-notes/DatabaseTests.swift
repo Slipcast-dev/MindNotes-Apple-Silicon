@@ -276,7 +276,7 @@ func runDatabaseTests() async {
             await checkThrows("базу нельзя сделать шаблоном") { try await w.saveTemplate(from: d.pageID, name: "x", ids: RandomIDs(), now: 5) }
 
             // Смена типа свойства затрагивает и шаблон: значение не устаревает молча.
-            let archive = dir.appendingPathComponent("a.minervabackup")
+            let archive = dir.appendingPathComponent("a.mindnotesbackup")
             _ = try BackupService.create(workspaceRoot: root, snapshotter: w, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 6)
 
             let batch = UUID()
@@ -357,16 +357,36 @@ func runDatabaseTests() async {
     }
 
     await test("Изоляция: проверочная копия не получает каталог настоящей сборки") {
-        let id = "local.personal.MinervaNoema", name = "MinervaNoema"
+        let id = "local.personal.MindNotes", name = "MindNotes"
         let dir = { (bundle: String?) in AppDataScope.supportDirectoryName(bundleID: bundle, officialID: id, officialName: name) }
         check(AppDataScope.isOfficial(bundleID: id, officialID: id))
         check(!AppDataScope.isOfficial(bundleID: id + ".test", officialID: id))
         check(!AppDataScope.isOfficial(bundleID: nil, officialID: id), "бинарник вне пакета")
         checkEqual(dir(id), name, "настоящая сборка сохраняет прежний каталог")
-        checkEqual(dir(id + ".test"), "MinervaNoema-Test-local.personal.MinervaNoema.test")
-        checkEqual(dir(nil), "MinervaNoema-Test-no-bundle")
+        checkEqual(dir(id + ".test"), "MindNotes-Test-local.personal.MindNotes.test")
+        checkEqual(dir(nil), "MindNotes-Test-no-bundle")
         check(dir("a.test") != dir("b.test"), "у разных копий разные каталоги")
-        checkEqual(dir("../../Evil/имя"), "MinervaNoema-Test-.._.._Evil____", "разделители пути не проходят")
+        checkEqual(dir("../../Evil/имя"), "MindNotes-Test-.._.._Evil____", "разделители пути не проходят")
+    }
+
+    await test("Переименование в MindNotes: настройки Minerva Noema переносятся, отметки прежних переносов — нет") {
+        try await withTempDir { dir in
+            let fm = FileManager.default
+            let oldName = "test.minerva.\(UUID().uuidString)", newName = "test.mindnotes.\(UUID().uuidString)"
+            let old = UserDefaults(suiteName: oldName)!, defaults = UserDefaults(suiteName: newName)!
+            defer { old.removePersistentDomain(forName: oldName); defaults.removePersistentDomain(forName: newName) }
+            old.setPersistentDomain(["lastWorkspacePath": "/Users/x/Пространство", "migratedFromGrizzlyNotes": true], forName: oldName)
+            let oldDir = dir.appendingPathComponent("MinervaNoema"), newDir = dir.appendingPathComponent("MindNotes")
+            try fm.createDirectory(at: oldDir.appendingPathComponent("Backups"), withIntermediateDirectories: true)
+            try Data("архив".utf8).write(to: oldDir.appendingPathComponent("Backups/a.minervabackup"))
+            // Отметка — та же, что у первой записи `AppEdition.previousNames` (проверяет tests/edition.test.cjs).
+            check(LegacyDataMigration.run(defaults: defaults, oldDomain: oldName, newDomain: newName, oldSupport: oldDir, newSupport: newDir, marker: "migratedFromMinervaNoema"))
+            checkEqual(defaults.string(forKey: "lastWorkspacePath"), "/Users/x/Пространство", "путь к пространству перенесён")
+            check(defaults.persistentDomain(forName: newName)?["migratedFromGrizzlyNotes"] == nil, "чужая отметка не скопирована")
+            check(defaults.bool(forKey: "migratedFromMinervaNoema"), "своя отметка поставлена")
+            check(fm.fileExists(atPath: newDir.appendingPathComponent("Backups/a.minervabackup").path), "резервные копии скопированы")
+            check(fm.fileExists(atPath: oldDir.appendingPathComponent("Backups/a.minervabackup").path), "оригинал на месте")
+        }
     }
 
     await test("Дерево страниц: порядок, свёрнутые ветви, скрытые записи, перемещение") {
@@ -827,7 +847,7 @@ func runDatabaseTests() async {
             let status = prop(d, .status)
             let value = PropertyValue.options([status.options[2].id])
             try await w.setValue(pages: [r], property: status.id, value: value, now: 2)
-            let archive = dir.appendingPathComponent("a.minervabackup")
+            let archive = dir.appendingPathComponent("a.mindnotesbackup")
             _ = try BackupService.create(workspaceRoot: root, snapshotter: w, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 3)
             w.close()
             let target = dir.appendingPathComponent("r")

@@ -37,7 +37,7 @@ enum WorkspaceError: Error, Equatable, LocalizedError {
         case .alreadyOpen: return t("Это пространство уже открыто в другом окне или приложении.")
         case .lockUnsupported: return t("Файловая система этой папки не поддерживает блокировку. Выберите папку на локальном диске.")
         case .directoryNotEmpty(let p): return String(format: t("Папка не пуста. Для нового пространства выберите пустую папку: %@"), p)
-        case .notAWorkspace(let p): return String(format: t("В этой папке нет пространства Minerva Noema: %@"), p)
+        case .notAWorkspace(let p): return String(format: t("В этой папке нет пространства MindNotes: %@"), p)
         case .schemaTooNew(let found, let supported):
             return String(format: t("Пространство создано более новой версией (формат %d, поддерживается %d). Откройте его в новой сборке; данные не изменены."), found, supported)
         case .corrupted(let raw): let d = Self.translateDetail(raw); return String(format: t("База пространства повреждена: %@. Восстановите её из резервной копии."), d)

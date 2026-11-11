@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/target.sh
-S=Sources/MinervaNoema
+S=Sources/MindNotes
 OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
 FILES=("${(@f)$(for d in $S/Workspace $S/Persistence $S/BlockEditor/Commands $S/BlockEditor/UI/Native $S/Backup $S/ImportExport tests/swift-notes; do [[ -d $d ]] && find $d -name '*.swift'; done)}")

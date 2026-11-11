@@ -141,9 +141,9 @@ final class SQLiteConnection: @unchecked Sendable {
 
     var changes: Int { Int(sqlite3_changes(handle)) }
 
-    /// `minerva_norm(текст)`: сравнение без учёта регистра и ё/е, как в поиске. В схеме не используется.
+    /// `mindnotes_norm(текст)`: сравнение без учёта регистра и ё/е, как в поиске. В схеме не используется.
     func registerNormalizeFunction() throws {
-        let rc = sqlite3_create_function_v2(handle, "minerva_norm", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, nil, { context, _, argv in
+        let rc = sqlite3_create_function_v2(handle, "mindnotes_norm", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, nil, { context, _, argv in
             guard let argv, let raw = sqlite3_value_text(argv[0]) else { return sqlite3_result_null(context) }
             let size = Int(sqlite3_value_bytes(argv[0]))
             let text = String(decoding: UnsafeBufferPointer(start: raw, count: size), as: UTF8.self)

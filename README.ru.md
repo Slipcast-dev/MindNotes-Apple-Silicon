@@ -1,8 +1,10 @@
-<p align="center"><img src="docs/assets/logo.png" alt="Значок Minerva Noema" width="128"></p>
+<p align="center"><img src="docs/assets/logo.png" alt="Значок MindNotes" width="128"></p>
 
-# Minerva Noema (Apple Silicon)
+# MindNotes (Apple Silicon)
 
-**Скачать:** [Minerva Noema 1.0.0](https://github.com/Slipcast-dev/Minerva-Noema-Apple-Silicon/releases/latest) — образ `.dmg` для Mac на Apple Silicon с macOS 26 или новее.
+Раньше называлось Minerva Noema. При первом запуске настройки и резервные копии копируются с прежнего имени, архивы `.minervabackup` по-прежнему открываются.
+
+**Скачать:** [Minerva Noema 1.0.0 — последний выпуск под прежним именем](https://github.com/Slipcast-dev/Minerva-Noema-Apple-Silicon/releases/latest) — образ `.dmg` для Mac на Apple Silicon с macOS 26 или новее.
 
 > **Только Apple Silicon: arm64, macOS 26 или новее.** Последняя версия с поддержкой Intel сохранена меткой `intel-last`.
 

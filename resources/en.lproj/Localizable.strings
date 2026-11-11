@@ -352,13 +352,13 @@
 "Настроить смарт-папку…" = "Smart Folder Settings…";
 "Документ" = "Document";
 
-/* Minerva Noema */
+/* MindNotes */
 "Папка пространства не найдена: %@" = "Workspace folder not found: %@";
 "Нет прав на запись в папку: %@" = "No permission to write to the folder: %@";
 "Это пространство уже открыто в другом окне или приложении." = "This workspace is already open in another window or app.";
 "Файловая система этой папки не поддерживает блокировку. Выберите папку на локальном диске." = "This folder's file system does not support locking. Choose a folder on a local disk.";
 "Папка не пуста. Для нового пространства выберите пустую папку: %@" = "The folder is not empty. Choose an empty folder for a new workspace: %@";
-"В этой папке нет пространства Minerva Noema: %@" = "No Minerva Noema workspace in this folder: %@";
+"В этой папке нет пространства MindNotes: %@" = "No MindNotes workspace in this folder: %@";
 "Пространство создано более новой версией (формат %d, поддерживается %d). Откройте его в новой сборке; данные не изменены." = "This workspace was created by a newer version (format %d, supported %d). Open it in a newer build; the data was not changed.";
 "База пространства повреждена: %@. Восстановите её из резервной копии." = "The workspace database is damaged: %@. Restore it from a backup.";
 "Не удалось обновить формат до версии %d: %@. Изменения отменены, резервная копия сохранена." = "Could not upgrade the format to version %d: %@. The changes were rolled back and the backup was kept.";
@@ -371,7 +371,7 @@
 "Выбрать" = "Choose";
 "Моё пространство" = "My Workspace";
 "Выберите пустую папку на локальном диске. Не используйте папки облачной синхронизации." = "Choose an empty folder on a local disk. Do not use cloud-synced folders.";
-"Выберите папку пространства Minerva Noema." = "Choose a Minerva Noema workspace folder.";
+"Выберите папку пространства MindNotes." = "Choose a MindNotes workspace folder.";
 "Для защиты от отказа диска выберите другой носитель." = "To protect against disk failure, choose another drive.";
 "Подготовка архива…" = "Preparing archive…";
 "Копия создана, проверка пройдена." = "Backup created and verified.";
@@ -494,13 +494,13 @@
 "Режим: текст" = "Mode: Text";
 "Режим: разметка" = "Mode: Markup";
 "Чтобы сменить язык, нужно перезапустить приложение." = "To change the language, the app must restart.";
-"Сделать Minerva Noema приложением по умолчанию для всех" = "Make Minerva Noema the default app for all";
-"Открывается в Minerva Noema" = "Opens in Minerva Noema";
+"Сделать MindNotes приложением по умолчанию для всех" = "Make MindNotes the default app for all";
+"Открывается в MindNotes" = "Opens in MindNotes";
 "Папка появится в библиотеке файлов. На диске ничего не создаётся." = "The folder appears in the file library. Nothing is created on disk.";
 "Папка «%@» уже есть." = "Folder “%@” already exists.";
 "Разметка" = "Markup";
 "Текст: без кода форматирования. Разметка: исходный текст с подсветкой и номерами строк." = "Text: without formatting code. Markup: source text with highlighting and line numbers.";
-"Нажмите на расширение, чтобы открывать такие файлы в Minerva Noema. macOS может запросить подтверждение." = "Click an extension to open such files in Minerva Noema. macOS may ask you to confirm.";
+"Нажмите на расширение, чтобы открывать такие файлы в MindNotes. macOS может запросить подтверждение." = "Click an extension to open such files in MindNotes. macOS may ask you to confirm.";
 "Папка" = "Folder";
 "Текст страницы" = "Page text";
 "Файлы на диске" = "Files on Disk";
@@ -866,7 +866,7 @@
 "Уход со страницы" = "Leaving the page";
 "Перед восстановлением" = "Before restoring";
 "нет workspace_id" = "no workspace_id";
-"это не база Minerva Noema" = "this is not a Minerva Noema database";
+"это не база MindNotes" = "this is not a MindNotes database";
 "нарушены связи между записями" = "links between records are broken";
 "нет идентификатора пространства" = "no workspace identifier";
 "база не создана" = "the database was not created";

@@ -498,7 +498,7 @@ struct SQLiteSnapshotInspector: SnapshotInspector {
         let db = try SQLiteConnection(path: databaseFile.path, readOnly: true)
         defer { db.close() }
         guard try db.scalarInt("PRAGMA application_id") == Migrations.applicationID else {
-            throw WorkspaceError.backupInvalid("это не база Minerva Noema")
+            throw WorkspaceError.backupInvalid("это не база MindNotes")
         }
         let integrity = try db.scalarText("PRAGMA integrity_check(1)") ?? ""
         guard integrity == "ok" else { throw WorkspaceError.backupInvalid("integrity_check: \(integrity)") }

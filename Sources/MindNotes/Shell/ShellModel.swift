@@ -99,8 +99,9 @@ final class ShellModel: ObservableObject {
     var workspaceRoot: URL? { store?.layout.root }
 
     /// Новые копии получают новое расширение; старые архивы читаются и показываются как прежде.
-    private static let backupExtension = "minervabackup"
-    private static let backupExtensions = [backupExtension, "grizzlybackup"]
+    private static let backupExtension = "mindnotesbackup"
+    /// Архивы прежних имён того же формата (ADR-0003) открываются и попадают в список копий.
+    private static let backupExtensions = [backupExtension, "minervabackup", "grizzlybackup"]
 
     struct BackupItem: Identifiable, Equatable {
         var url: URL
@@ -355,7 +356,7 @@ final class ShellModel: ObservableObject {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.prompt = L("Открыть")
-        panel.message = L("Выберите папку пространства Minerva Noema.")
+        panel.message = L("Выберите папку пространства MindNotes.")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         open(at: url)
     }
@@ -1240,7 +1241,12 @@ final class ShellModel: ObservableObject {
     /// Папка автоматических копий пространства: своя для каждого, чтобы ротация не задела чужие копии.
     private func autoBackupDirectory(for id: UUID) -> URL {
         if let folder = autoBackupFolder {
-            return folder.appendingPathComponent("Minerva Noema \(id.lowercasedString.prefix(8))", isDirectory: true)
+            let suffix = id.lowercasedString.prefix(8)
+            // Папка, начатая под прежним именем, остаётся: в ней уже лежат копии, которые чередует ротация.
+            let old = folder.appendingPathComponent("Minerva Noema \(suffix)", isDirectory: true)
+            let new = folder.appendingPathComponent("MindNotes \(suffix)", isDirectory: true)
+            let fm = FileManager.default
+            return !fm.fileExists(atPath: new.path) && fm.fileExists(atPath: old.path) ? old : new
         }
         return backupDirectory(for: id).appendingPathComponent("auto", isDirectory: true)
     }

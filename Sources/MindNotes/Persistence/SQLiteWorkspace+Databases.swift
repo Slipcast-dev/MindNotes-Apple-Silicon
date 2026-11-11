@@ -55,7 +55,7 @@ enum DatabaseQuerySQL {
                 let needle = SearchText.normalize(rule.value.trimmingCharacters(in: .whitespaces))
                 guard !needle.isEmpty else { return nil }
                 let not = rule.op == .notContains ? "NOT " : ""
-                return Fragment(sql: "\(not)EXISTS (\(linked(def, where: "instr(minerva_norm(q.title), ?) > 0")))", args: [owner, .text(needle)])
+                return Fragment(sql: "\(not)EXISTS (\(linked(def, where: "instr(mindnotes_norm(q.title), ?) > 0")))", args: [owner, .text(needle)])
             default: return nil
             }
         }
@@ -112,7 +112,7 @@ enum DatabaseQuerySQL {
         case .title, .text, .url:
             let needle = SearchText.normalize(rule.value.trimmingCharacters(in: .whitespaces))
             guard !needle.isEmpty else { return nil }
-            let column = def.type == .title ? "minerva_norm(p.title)" : "minerva_norm(v.value_text)"
+            let column = def.type == .title ? "mindnotes_norm(p.title)" : "mindnotes_norm(v.value_text)"
             let condition: String, args: [SQLValue], negate: Bool
             switch rule.op {
             case .contains: (condition, args, negate) = ("instr(\(column), ?) > 0", [.text(needle)], false)
@@ -176,7 +176,7 @@ enum DatabaseQuerySQL {
             let expression: String
             switch def.type {
             case .title:
-                expression = "minerva_norm(p.title)"
+                expression = "mindnotes_norm(p.title)"
             case .createdTime:
                 expression = "p.created_at"
             case .editedTime:
@@ -193,7 +193,7 @@ enum DatabaseQuerySQL {
                 order.args.append(SQLValue(def.id))
             case .person:
                 // По имени первого по алфавиту человека, как у Notion; без людей — в конце.
-                expression = "(SELECT MIN(minerva_norm(pe.name)) FROM property_value_people pv JOIN people pe ON pe.id = pv.person_id WHERE pv.page_id = p.id AND pv.property_id = ?)"
+                expression = "(SELECT MIN(mindnotes_norm(pe.name)) FROM property_value_people pv JOIN people pe ON pe.id = pv.person_id WHERE pv.page_id = p.id AND pv.property_id = ?)"
                 order.args.append(SQLValue(def.id))
                 order.args.append(SQLValue(def.id))
             case .status, .select, .multiSelect:
@@ -208,7 +208,7 @@ enum DatabaseQuerySQL {
                 case .number: expression = "\(alias).value_num"
                 case .checkbox: expression = "COALESCE(\(alias).value_num, 0)"
                 case .date: expression = "\(alias).value_date"
-                default: expression = "minerva_norm(\(alias).value_text)"
+                default: expression = "mindnotes_norm(\(alias).value_text)"
                 }
             }
             terms.append("(\(expression)) IS NULL, (\(expression)) \(direction)")
@@ -363,7 +363,7 @@ extension SQLiteWorkspace {
         for def in properties where def.type == .relation {
             let (mine, other) = def.config.isBackSide ? ("to_page", "from_page") : ("from_page", "to_page")
             // Прямая сторона — в порядке связи, обратная — по заголовку: у неё нет собственного порядка.
-            let order = def.config.isBackSide ? "minerva_norm(q.title), q.id" : "l.sort_key, q.id"
+            let order = def.config.isBackSide ? "mindnotes_norm(q.title), q.id" : "l.sort_key, q.id"
             var collected: [UUID: [LinkedPage]] = [:]
             _ = try db.query("""
             SELECT l.\(mine), q.id, q.title, q.icon FROM relation_links l JOIN pages q ON q.id = l.\(other)

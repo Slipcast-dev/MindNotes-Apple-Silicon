@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/target.sh
-S=Sources/MinervaNoema
+S=Sources/MindNotes
 fail=0
 
 swiftfiles() { for d in "$@"; do [[ -d "$d" ]] && find "$d" -name '*.swift'; done; return 0; }

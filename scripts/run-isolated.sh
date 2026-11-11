@@ -6,10 +6,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ID=local.personal.MinervaNoema.test
-ROOT="${${TMPDIR:-/tmp}%/}/minerva-isolated"
-COPY="$ROOT/Minerva Noema Test.app"
-BIN="$COPY/Contents/MacOS/MinervaNoema"
+ID=local.personal.MindNotes.test
+ROOT="${${TMPDIR:-/tmp}%/}/mindnotes-isolated"
+COPY="$ROOT/MindNotes Test.app"
+BIN="$COPY/Contents/MacOS/MindNotes"
 
 stop_copy() { pkill -f "$BIN" 2>/dev/null || true; }
 
@@ -20,14 +20,14 @@ if [[ "${1:-}" == clean ]]; then
     # defaults delete оставляет пустой файл настроек.
     rm -rf "$ROOT" \
         "$HOME/Library/Preferences/$ID.plist" \
-        "$HOME/Library/Application Support/MinervaNoema-Test-$ID" \
+        "$HOME/Library/Application Support/MindNotes-Test-$ID" \
         "$HOME/Library/Saved Application State/$ID.savedState" \
         "$HOME/Library/Caches/$ID"
     echo "Удалено: копия, её настройки и каталог данных"
     exit 0
 fi
 
-SOURCE="${OUT:-build}/Minerva Noema.app"
+SOURCE="${OUT:-build}/MindNotes.app"
 [[ -d "$SOURCE" ]] || { echo "Нет сборки $SOURCE: сначала ./scripts/build-app.sh"; exit 1; }
 
 stop_copy
@@ -36,7 +36,7 @@ rm -rf "$COPY"
 cp -R "$SOURCE" "$COPY"
 PLIST="$COPY/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $ID" "$PLIST"
-/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Minerva Noema Test" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName MindNotes Test" "$PLIST"
 # Копия не должна предлагаться системой для открытия файлов.
 /usr/libexec/PlistBuddy -c "Delete :CFBundleDocumentTypes" "$PLIST"
 codesign --force --sign - "$COPY" >/dev/null

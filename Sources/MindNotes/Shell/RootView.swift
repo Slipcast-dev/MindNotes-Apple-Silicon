@@ -16,7 +16,7 @@ struct RootView: View {
             .sheet(item: $shell.csvImport) { CSVImportSheet(request: $0) }
             .sheet(item: $shell.playingVideo) { VideoPlayerSheet(video: $0) }
             .background(WindowChrome(theme: prefs.theme))
-            .background(WindowFrameSaver(name: "MinervaNoemaMainWindow"))
+            .background(WindowFrameSaver(name: "MindNotesMainWindow"))
             .preferredColorScheme(prefs.isDark ? .dark : .light)
             .toolbar {
                 // Без системных капсул: они обтягивают содержимое почти без отступов, в макете их нет.

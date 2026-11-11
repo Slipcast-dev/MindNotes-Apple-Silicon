@@ -7,12 +7,15 @@ enum LegacyDataMigration {
     /// Настройки нового имени важнее старых, существующий новый каталог не перезаписывается.
     /// После сбоя отметка не ставится, и следующий запуск повторит копирование.
     @discardableResult
+    /// `marker` — своя отметка у каждого прежнего имени: переносы с разных имён не мешают друг другу.
     static func run(defaults: UserDefaults, oldDomain: String, newDomain: String, oldSupport: URL, newSupport: URL,
-                    fileManager fm: FileManager = .default) -> Bool {
+                    marker: String = LegacyDataMigration.marker, fileManager fm: FileManager = .default) -> Bool {
         guard !defaults.bool(forKey: marker) else { return true }
         if let old = defaults.persistentDomain(forName: oldDomain), !old.isEmpty {
             let current = defaults.persistentDomain(forName: newDomain) ?? [:]
-            defaults.setPersistentDomain(old.merging(current) { _, new in new }, forName: newDomain)
+            // Отметки прежних переносов не копируются: у нового имени свои.
+            let carried = old.filter { !$0.key.hasPrefix("migratedFrom") }
+            defaults.setPersistentDomain(carried.merging(current) { _, new in new }, forName: newDomain)
         }
         if fm.fileExists(atPath: oldSupport.path), !fm.fileExists(atPath: newSupport.path) {
             // Сначала рядом и затем переименование: обрывок копии не примется за готовый каталог.

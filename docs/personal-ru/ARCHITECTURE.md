@@ -1,4 +1,4 @@
-# Архитектура Minerva Noema
+# Архитектура MindNotes
 
 Статус: проект для M1–M2 с заделом на M3–M7. Реализованные части отмечаются в `STATUS.md`. Решения, требующие прототипа, оформляются отдельными ADR в `adr/`.
 
@@ -7,7 +7,7 @@
 ## 1. Модули и границы
 
 ```text
-Sources/MinervaNoema/
+Sources/MindNotes/
   Core/AppEdition.swift      # id, каталог данных, updatesEnabled
   Workspace/Domain/          # Page, Block, RichText, Asset, Revision, SortKey, WorkspaceError, порты
   Workspace/Services/        # WorkspaceSession, PageService, SaveCoordinator, AssetService, RevisionPolicy
@@ -80,7 +80,7 @@ UUID — TEXT в нижнем регистре, время — INTEGER (мс UTC
 
 ## 4. Резервная копия
 
-Формат: один файл `.minervabackup`, несжатый ustar (см. `adr/0003-backup-format.md`).
+Формат: один файл `.mindnotesbackup` (архивы `.minervabackup` и `.grizzlybackup` того же формата читаются), несжатый ustar (см. `adr/0003-backup-format.md`).
 
 Создание: `sqlite3_backup` во временный файл → `integrity_check`, `foreign_key_check` на копии → список вложений из копии → потоковая запись в `.partial` с SHA-256 и сверкой с `assets.sha256` → `manifest.json` и `manifest.sha256` последними → `fsync`, `rename`. Нет манифеста — архив обрезан. Отсутствующие файлы попадают в `missing`, и копия не считается полной.
 
@@ -92,7 +92,7 @@ UUID — TEXT в нижнем регистре, время — INTEGER (мс UTC
 
 Единая точка: `Core/AppEdition.swift`. Отдельные идентификатор и каталог данных; `UserDefaults` разделяются автоматически; сборка не заявляет себя обработчиком по умолчанию. `electron/` не входит в личную сборку.
 
-Настоящие данные принадлежат только сборке с официальным идентификатором (`AppDataScope`). Копия с другим идентификатором получает каталог `MinervaNoema-Test-<идентификатор>` и не выполняет перенос со старого имени. Такую копию запускает `scripts/run-isolated.sh`.
+Настоящие данные принадлежат только сборке с официальным идентификатором (`AppDataScope`). Копия с другим идентификатором получает каталог `MindNotes-Test-<идентификатор>` и не выполняет перенос со старого имени. Такую копию запускает `scripts/run-isolated.sh`.
 
 ## 6. Оболочка
 

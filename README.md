@@ -1,8 +1,10 @@
-<p align="center"><img src="docs/assets/logo.png" alt="Minerva Noema icon" width="128"></p>
+<p align="center"><img src="docs/assets/logo.png" alt="MindNotes icon" width="128"></p>
 
-# Minerva Noema (Apple Silicon)
+# MindNotes (Apple Silicon)
 
-**Download:** [Minerva Noema 1.0.0](https://github.com/Slipcast-dev/Minerva-Noema-Apple-Silicon/releases/latest) — a `.dmg` for Apple silicon Macs with macOS 26 or later.
+Formerly Minerva Noema. Settings and backups are copied from the old name on first launch; `.minervabackup` archives still open.
+
+**Download:** [Minerva Noema 1.0.0 — the last release under the old name](https://github.com/Slipcast-dev/Minerva-Noema-Apple-Silicon/releases/latest) — a `.dmg` for Apple silicon Macs with macOS 26 or later.
 
 > **Apple Silicon only: arm64, macOS 26 or newer.** The last version with Intel support is kept as the `intel-last` tag.
 

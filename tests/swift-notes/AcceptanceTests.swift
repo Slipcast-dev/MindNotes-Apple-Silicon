@@ -46,7 +46,7 @@ func runAcceptanceTests() async {
             try await ws.setValue(pages: [record], property: status.id, value: .options([status.options[1].id]), now: 3)
             try await ws.setValue(pages: [record], property: date.id, value: .date(DateValue(start: .day(LocalDate(year: 2026, month: 3, day: 8)!))), now: 3)
 
-            let archive = dir.appendingPathComponent("копия.minervabackup")
+            let archive = dir.appendingPathComponent("копия.mindnotesbackup")
             let result = try BackupService.create(workspaceRoot: source, snapshotter: ws, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 5)
             check(result.isComplete, "копия полная")
             let originalPages = try await ws.allPages()

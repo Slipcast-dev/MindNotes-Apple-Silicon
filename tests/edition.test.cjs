@@ -1,5 +1,5 @@
 'use strict';
-// Minerva Noema не должна пересекаться с установленным Grizzly: идентификатор, данные, обработчик файлов.
+// MindNotes не должна пересекаться с установленным Grizzly: идентификатор, данные, обработчик файлов.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -9,14 +9,14 @@ const root = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 
 test('идентификатор сборки совпадает с AppEdition и отличается от оригинала', () => {
-  const id = /bundleID = "([^"]+)"/.exec(read('Sources/MinervaNoema/Core/AppEdition.swift'))[1];
+  const id = /bundleID = "([^"]+)"/.exec(read('Sources/MindNotes/Core/AppEdition.swift'))[1];
   const build = read('scripts/build-app.sh');
   assert.ok(build.includes(`<key>CFBundleIdentifier</key><string>${id}</string>`));
   assert.ok(!build.includes('app.grizzly.Grizzly'));
 });
 
 test('каталог данных отдельный, сборка не заявляет себя обработчиком по умолчанию', () => {
-  assert.strictEqual(/officialSupportDirectoryName = "([^"]+)"/.exec(read('Sources/MinervaNoema/Core/AppEdition.swift'))[1], 'MinervaNoema');
+  assert.strictEqual(/officialSupportDirectoryName = "([^"]+)"/.exec(read('Sources/MindNotes/Core/AppEdition.swift'))[1], 'MindNotes');
   assert.ok(!read('scripts/build-app.sh').includes('<key>LSHandlerRank</key><string>Default</string>'));
 });
 
@@ -44,4 +44,15 @@ test('AT-15: в приложении нет сетевых запросов, И�
     assert.ok(!forbidden.test(text), `${file}: ${text.match(forbidden)?.[0]}`);
   }
   assert.ok(files.length > 50, 'исходники найдены');
+});
+
+test('MindNotes: перенос сначала с Minerva Noema, затем с Grizzly Notes, у каждого своя отметка', () => {
+  const edition = read('Sources/MindNotes/Core/AppEdition.swift');
+  const minerva = edition.indexOf('("local.personal.MinervaNoema", "MinervaNoema", "migratedFromMinervaNoema")');
+  const grizzly = edition.indexOf('("local.personal.GrizzlyNotes", "GrizzlyNotes", LegacyDataMigration.marker)');
+  assert.ok(minerva > 0 && grizzly > minerva);
+  assert.ok(/bundleID = "local\.personal\.MindNotes"/.test(edition));
+  assert.ok(/displayName = "MindNotes"/.test(edition));
+  const shell = read('Sources/MindNotes/Shell/ShellModel.swift');
+  assert.ok(shell.includes('[backupExtension, "minervabackup", "grizzlybackup"]'), 'старые архивы открываются');
 });

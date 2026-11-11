@@ -218,7 +218,7 @@ func runFolderImportTests() async {
             checkEqual(try fm.contentsOfDirectory(atPath: dir.path).count, before, "папка неудачной распаковки удалена")
             // Записи «../x» и «/abs» ditto кладёт внутрь целевой папки: проверено на этой системе и закреплено тестом.
             let slip = dir.appendingPathComponent("slip.zip")
-            let absolute = "/tmp/minerva-abs-\(UUID().uuidString).md"
+            let absolute = "/tmp/mindnotes-abs-\(UUID().uuidString).md"
             try Data(storedZip([("ok.md", "ok"), ("../escaped.md", "e"), (absolute, "a")])).write(to: slip)
             let inside = try ArchiveExtract.extract(slip, into: dir)
             check(!fm.fileExists(atPath: dir.appendingPathComponent("escaped.md").path), "../ не вышел из папки распаковки")
