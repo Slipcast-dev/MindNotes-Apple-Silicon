@@ -25,6 +25,14 @@ extension SQLiteWorkspace {
         try db.scalarInt("SELECT 1 FROM property_definitions WHERE type IN (?, ?) LIMIT 1", [.text(PropertyType.rollup.rawValue), .text(PropertyType.formula.rawValue)]) != nil
     }
 
+    /// Только те свойства, на которые ссылается хоть одна формула: дешёвая проверка по тексту настроек.
+    static func stampsUsedByFormulas(_ db: SQLiteConnection, _ stamps: Set<UUID>) throws -> Set<UUID> {
+        try stamps.filter { id in
+            try db.scalarInt("SELECT 1 FROM property_definitions WHERE type=? AND instr(config_json, ?) > 0 LIMIT 1",
+                             [.text(PropertyType.formula.rawValue), .text(id.uuidString)]) != nil
+        }
+    }
+
     /// Свойства «Изменено» баз этих записей: правка записи меняет их значение.
     static func editedStamps(_ db: SQLiteConnection, pages: Set<UUID>) throws -> Set<UUID> {
         guard !pages.isEmpty, try hasRollups(db) else { return [] }

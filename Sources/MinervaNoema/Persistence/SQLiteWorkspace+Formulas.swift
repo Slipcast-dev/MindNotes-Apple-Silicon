@@ -54,6 +54,9 @@ extension SQLiteWorkspace {
         let stored = def.config.formula ?? ""
         let deps = referencedIDs(stored)
         let result = Result<CompiledFormula, Error> {
+            guard deps.allSatisfy({ id in properties.contains { $0.id == id } }) else {
+                throw FormulaError("Свойство, на которое ссылается формула, удалено. Откройте формулу и исправьте её.", at: 0..<0)
+            }
             let compiled = try CompiledFormula.compile(stored) { arg in
                 guard let id = UUID(uuidString: arg), let p = properties.first(where: { $0.id == id }) else { return nil }
                 return (p.id, FormulaType.of(p))
@@ -243,7 +246,11 @@ extension SQLiteWorkspace {
     /// Текст формулы для редактора: ID заменены текущими именами.
     func formulaDisplayText(_ property: PropertyDefinition, in database: Database) -> String {
         let names = Dictionary(database.properties.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
-        return (try? FormulaReferences.toDisplay(property.config.formula ?? "", names: names)) ?? (property.config.formula ?? "")
+        // Удалённое свойство показывается словами, а не внутренним ID: проверка укажет на него как на неизвестное.
+        let missing = NSLocalizedString("удалённое свойство", comment: "")
+        return (try? FormulaReferences.rewrite(property.config.formula ?? "") { arg in
+            UUID(uuidString: arg).map { names[$0] ?? missing }
+        }) ?? (property.config.formula ?? "")
     }
 
     /// Новая формула: проверяется, сохраняется и сразу считается для всех записей одной транзакцией.

@@ -377,8 +377,13 @@ final class ShellModel: ObservableObject {
 
     /// Сначала готовит новое пространство целиком, и только затем закрывает прежнее:
     /// сбой открытия оставляет пользователя в том пространстве, где он работал.
+    /// Формулы с today() пересчитываются при смене даты, пока пространство открыто.
+    private var dailyFormulas: Timer?
+
     private func adopt(_ store: SQLiteWorkspace) async throws {
         do {
+            // Значения формул с today() должны быть свежими до первого показа.
+            _ = try? await store.refreshDailyFormulas()
             let name = try await store.workspaceName()
             let loadedLook = try await store.look()
             let session = WorkspaceSession(store: store, name: name)
@@ -389,6 +394,13 @@ final class ShellModel: ObservableObject {
             let loadedDatabases = try await store.databaseIndex()
             try await closeSession()
             self.store = store
+            dailyFormulas?.invalidate()
+            dailyFormulas = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self, weak store] _ in
+                Task { @MainActor in
+                    guard let store, self?.store === store, (try? await store.refreshDailyFormulas()) == true else { return }
+                    self?.databaseModel?.reload()
+                }
+            }
             backStack = [] // История относится к прежнему пространству.
             forwardStack = []
             self.session = session

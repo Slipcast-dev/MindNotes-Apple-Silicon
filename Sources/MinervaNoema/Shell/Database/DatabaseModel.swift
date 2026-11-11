@@ -15,6 +15,7 @@ extension PropertyType {
         case .url: return L("Ссылка")
         case .relation: return L("Связь")
         case .rollup: return L("Свёртка")
+        case .formula: return L("Формула")
         case .createdTime: return L("Создано")
         case .editedTime: return L("Изменено")
         default: return rawValue

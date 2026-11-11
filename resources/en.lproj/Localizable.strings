@@ -1015,3 +1015,20 @@
 "Циклическая зависимость: %@. Формула не сохранена." = "Circular dependency: %@. The formula was not saved.";
 "Ошибка формулы" = "Formula error";
 "Формула" = "Formula";
+
+/* M9.4: редактор формул */
+"Ошибка формулы: %@" = "Formula error: %@";
+"Да" = "Yes";
+"Нет" = "No";
+"Считается по формуле" = "Calculated by the formula";
+"Формула «%@»" = "Formula “%@”";
+"Текст формулы" = "Formula text";
+"Функции" = "Functions";
+"Место: «%@»" = "At: “%@”";
+"Результат: %@" = "Result: %@";
+"Например: prop(\"Цена\") * prop(\"Количество\")" = "For example: prop(\"Price\") * prop(\"Quantity\")";
+"Вставить в формулу" = "Insert into the formula";
+"Формула · %@" = "Formula · %@";
+"Изменить…" = "Edit…";
+"Свойство, на которое ссылается формула, удалено. Откройте формулу и исправьте её." = "A property used by the formula was deleted. Open the formula and fix it.";
+"удалённое свойство" = "deleted property";

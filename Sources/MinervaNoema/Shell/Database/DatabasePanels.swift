@@ -210,6 +210,7 @@ struct PropertiesSheet: View {
     @State private var rollupRelation: UUID?
     @State private var rollupProperty: UUID?
     @State private var rollupAggregate: RollupAggregate?
+    @State private var formulaEdit: FormulaEditTarget?
     /// Базы, на которые смотрят связи этой базы: для выбора источника свёртки и подписей.
     @State private var related: [UUID: Database] = [:]
 
@@ -340,6 +341,7 @@ struct PropertiesSheet: View {
         .frame(width: 640, height: 520)
         .sheet(item: $change) { TypeChangeSheet(model: model, change: $0) }
         .task(id: relations.map(\.id)) { await loadRelated() }
+        .sheet(item: $formulaEdit) { FormulaEditorSheet(model: model, target: $0).environmentObject(shell) }
     }
 
     private func propertyRow(_ property: PropertyDefinition, column: ColumnState, index: Int) -> some View {
@@ -360,6 +362,10 @@ struct PropertiesSheet: View {
                     Text(relationSummary(property)).font(.system(size: 12)).foregroundColor(Tokens.muted).lineLimit(1)
                 } else if property.type == .rollup {
                     Text(rollupSummary(property)).font(.system(size: 12)).foregroundColor(Tokens.muted).lineLimit(1)
+                } else if property.type == .formula {
+                    Text(L("Формула · %@", property.config.formulaType?.title ?? "?")).font(.system(size: 12)).foregroundColor(Tokens.muted).lineLimit(1)
+                    Button("Изменить…") { formulaEdit = FormulaEditTarget(name: property.name, property: property) }
+                        .buttonStyle(NotesButtonStyle(kind: .plain))
                 } else if !PropertyType.convertible.contains(property.type) {
                     Text(property.type.title).font(.system(size: 12)).foregroundColor(Tokens.muted)
                 } else {
@@ -390,6 +396,11 @@ struct PropertiesSheet: View {
         let name = newName.trimmingCharacters(in: .whitespaces)
         let type = newType
         newName = ""
+        if type == .formula {
+            // Текст формулы вводится в своём окне: там проверка и пример.
+            formulaEdit = FormulaEditTarget(name: name)
+            return
+        }
         if type == .rollup, let relation = rollupRelation, let source = rollupSource, let aggregate = rollupAggregate {
             rollupRelation = nil
             rollupProperty = nil

@@ -151,7 +151,9 @@ func runFormulaStoreTests() async {
             try await w.deleteProperty(x)
             d = try await fresh(w, d)
             guard case .error(let message)? = try await value(w, d, r, f1) else { return check(false, "ожидалась ошибка в ячейке") }
-            check(message.contains("Нет свойства"), message)
+            check(message.contains("удалено"), message)
+            check(!message.contains(x.uuidString), "без внутреннего ID")
+            check(w.formulaDisplayText(d.property(f1)!, in: d).contains("удалённое свойство"), "редактор показывает словами")
             if case .error? = try await value(w, d, r, f2) { check(false, "пустой вход — пусто, а не ошибка") }
             checkEqual(try await w.allPages().filter { $0.databaseID == d.id }.map(\.title), ["Запись"])
             // Удалённая связь под свёрткой: свёртка очищена, формула от неё — пусто, а не падение.
@@ -188,6 +190,18 @@ func runFormulaStoreTests() async {
             let status = d.properties.first { $0.type == .status }!
             try await w.setValue(pages: [r], property: status.id, value: .options([status.options[0].id]), now: clock.ms)
             checkEqual(try await value(w, d, r, stale), .number(0))
+            // Правка текста: формула видит новое «Изменено» сразу, а не со следующей правки.
+            clock.ms = ms(2026, 3, 9)
+            let refreshed = try await w.refreshDailyFormulas()
+            check(refreshed, "новый день")
+            checkEqual(try await value(w, d, r, stale), .number(5))
+            var batch = SaveBatch()
+            let block = UUID()
+            batch.upserts[block] = Block(id: block, pageID: r, sortKey: "a0", content: BlockContent(text: "Черновик"), createdAt: 1)
+            batch.touchedPages = [r]
+            try await w.commit(batch)
+            checkEqual(try await value(w, d, r, stale), .number(0), "правка текста")
+            clock.ms = ms(2026, 3, 4)
 
             // Смена типа источника: формула получает ошибку «тип результата изменился» или «ожидалось число».
             let n = UUID(), twice = UUID()

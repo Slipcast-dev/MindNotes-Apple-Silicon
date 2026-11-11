@@ -407,15 +407,17 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
                     """, titled.map { SQLValue($0) }) { $0.uuid(0) }.compactMap { $0 })
                     if !titleProps.isEmpty { try Self.recalcRollups(db, touched: titled, properties: titleProps, now: now) }
                 }
-                // Правка текста меняет «Изменено»: формулы с ним пересчитываются. Служебная правка его не меняет.
-                let stamps = try Self.editedStamps(db, pages: batch.touchedPages.union(batch.titles.keys))
-                if !stamps.isEmpty { try Self.recalcRollups(db, touched: batch.touchedPages.union(batch.titles.keys), properties: stamps, now: now) }
                 for id in batch.touchedPages {
                     try db.run("UPDATE pages SET updated_at=?, content_rev=content_rev+1 WHERE id=?", [.int(now), SQLValue(id)])
                 }
                 for id in batch.quietPages.subtracting(batch.touchedPages) {
                     try db.run("UPDATE pages SET content_rev=content_rev+1 WHERE id=?", [SQLValue(id)])
                 }
+                // Правка текста меняет «Изменено»: формулы с ним пересчитываются после записи нового времени.
+                // Служебная правка время не меняет. Если на «Изменено» не ссылается ни одна формула, пересчёта нет.
+                let edited = batch.touchedPages.union(batch.titles.keys)
+                let stamps = try Self.stampsUsedByFormulas(db, try Self.editedStamps(db, pages: edited))
+                if !stamps.isEmpty { try Self.recalcRollups(db, touched: edited, properties: stamps, now: now) }
                 try self?.faultHook?("before-commit")
             }
             try self?.faultHook?("after-commit")
