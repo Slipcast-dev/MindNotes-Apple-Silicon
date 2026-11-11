@@ -25,6 +25,8 @@ forbid '^\s*import\s+SwiftUI' 'SwiftUI в нативном редакторе' $
 forbid '^\s*import\s+(SwiftUI|AppKit|Combine)' 'UI-фреймворк в слое без UI' "${PURE[@]}"
 forbid 'sqlite3_|import\s+SQLite3' 'SQLite вне Persistence' $S/Workspace $S/BlockEditor $S/Backup $S/Shell
 forbid '^\s*import\s+CryptoKit' 'CryptoKit вне Backup' $S/Workspace $S/BlockEditor
+# Формулы: только собственный интерпретатор, никакого исполнения кода по строке (FR-13).
+forbid 'NSExpression|JSContext|JavaScriptCore|NSSelectorFromString|perform\(|dlopen|dlsym|Process\(|FileManager|URLSession|Data\(contentsOf' 'исполнение кода или доступ к файлам и сети в формулах' $S/Workspace/Domain/Formula
 
 # subset <имя> <каталоги...>: подмножество обязано компилироваться само по себе.
 subset() {
