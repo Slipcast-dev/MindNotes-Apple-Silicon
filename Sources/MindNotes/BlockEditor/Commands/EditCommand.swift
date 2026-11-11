@@ -25,6 +25,10 @@ enum EditCommand: Equatable {
     case indent(UUID)
     case outdent(UUID)
     case setCollapsed(block: UUID, collapsed: Bool)
+    /// Оборачивает блоки (одного родителя, по порядку) в оригинал синхронизированного блока (ADR-0012).
+    case makeSynced([UUID])
+    /// Копия становится обычными блоками этой страницы: содержимое копируется, связь с оригиналом рвётся.
+    case unsync(UUID)
     /// Подписи упоминаний и ссылок после переименования страницы или человека (M12): служебная правка открытой страницы.
     case relabelPage(UUID, old: String?, new: String)
     case relabelPerson(Person)
@@ -397,7 +401,9 @@ enum BlockEditing {
             guard let b = document.block(id) else { throw EditError.blockNotFound(id) }
             let siblings = document.blocks.filter { $0.parentID == b.parentID }
             // В неделимый блок вложить нельзя.
-            guard let i = siblings.firstIndex(where: { $0.id == id }), i > 0, siblings[i - 1].content != nil else {
+            // В неделимый блок вложить нельзя; в синхронизированный — можно, это контейнер.
+            guard let i = siblings.firstIndex(where: { $0.id == id }), i > 0,
+                  siblings[i - 1].content != nil || siblings[i - 1].type == .synced || siblings[i - 1].type == .syncedRef else {
                 return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
             }
             var newParent = siblings[i - 1]
@@ -443,6 +449,52 @@ enum BlockEditing {
             var n = c
             n.extra["collapsed"] = collapsed ? .bool(true) : nil
             return result([.upsert(updated(b, n))], selection: nil)
+
+        case let .makeSynced(list):
+            let items = list.compactMap { document.block($0) }
+            guard let first = items.first, items.allSatisfy({ $0.parentID == first.parentID && $0.type != .synced && $0.type != .syncedRef }) else {
+                return EditResult(document: document, changes: [], inverse: [], selection: nil, coalesceKey: nil)
+            }
+            let siblings = document.blocks.filter { $0.parentID == first.parentID }
+            let previous = siblings.firstIndex { $0.id == first.id }.flatMap { $0 > 0 ? siblings[$0 - 1].sortKey : nil }
+            let container = Block(atom: .synced, id: ids.next(), pageID: document.pageID, parentID: first.parentID,
+                                  sortKey: SortKey.between(previous, first.sortKey), createdAt: now)
+            let keys = SortKey.keys(after: nil, before: nil, count: items.count)
+            var changes: [BlockChange] = [.upsert(container)]
+            for (item, key) in zip(items, keys) {
+                var moved = item
+                moved.parentID = container.id
+                moved.sortKey = key
+                moved.updatedAt = now
+                changes.append(.upsert(moved))
+            }
+            return result(changes, selection: nil)
+
+        case let .unsync(id):
+            guard let ref = document.block(id), ref.type == .syncedRef else { throw EditError.notEditable(id) }
+            let children = document.blocks.filter { $0.parentID == id }
+            let siblings = document.blocks.filter { $0.parentID == ref.parentID }
+            let next = siblings.firstIndex { $0.id == id }.flatMap { $0 + 1 < siblings.count ? siblings[$0 + 1].sortKey : nil }
+            let keys = SortKey.keys(after: ref.sortKey, before: next, count: max(1, children.count))
+            var mapping: [UUID: UUID] = [:]
+            var changes: [BlockChange] = []
+            // Новые блоки получают новые ID: оригинал и его копии на других страницах не меняются.
+            for (child, key) in zip(children, keys) {
+                for block in [child] + document.descendants(of: child.id) {
+                    let newID = ids.next()
+                    mapping[block.id] = newID
+                    var copy = block
+                    copy.id = newID
+                    copy.pageID = document.pageID
+                    copy.parentID = block.id == child.id ? ref.parentID : block.parentID.flatMap { mapping[$0] }
+                    if block.id == child.id { copy.sortKey = key }
+                    copy.createdAt = now
+                    copy.updatedAt = now
+                    changes.append(.upsert(copy))
+                }
+            }
+            changes += document.descendants(of: id).reversed().map { BlockChange.delete($0.id) } + [.delete(id)]
+            return result(changes, selection: nil)
 
         case .relabelPage, .relabelPerson:
             var changes: [BlockChange] = []

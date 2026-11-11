@@ -62,12 +62,15 @@ struct BlockType: RawRepresentable, Hashable {
     /// Закладка и встраивание (M12): адрес, подпись и превью.
     static let bookmark = BlockType(rawValue: "bookmark")
     static let embed = BlockType(rawValue: "embed")
+    /// Синхронизированный блок (M12, ADR-0012): оригинал с детьми и копия, показывающая детей оригинала.
+    static let synced = BlockType(rawValue: "synced_block")
+    static let syncedRef = BlockType(rawValue: "synced_ref")
 
     /// Текстовые типы этой версии. Всё остальное хранится непрозрачно и показывается одним неделимым символом.
     static let known: Set<BlockType> = [.paragraph, .heading1, .heading2, .heading3, .task, .bullet, .numbered, .quote, .callout, .toggle, .code]
     var isKnown: Bool { Self.known.contains(self) }
     /// Известные неделимые блоки: у них нет текста, данные лежат в JSON.
-    static let atoms: Set<BlockType> = [.divider, .image, .video, .file, .table, .databaseView, .bookmark, .embed]
+    static let atoms: Set<BlockType> = [.divider, .image, .video, .file, .table, .databaseView, .bookmark, .embed, .synced, .syncedRef]
     var isAtom: Bool { Self.atoms.contains(self) }
     var isHeading: Bool { self == .heading1 || self == .heading2 || self == .heading3 }
 }

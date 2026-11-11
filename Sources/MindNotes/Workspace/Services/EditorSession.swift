@@ -25,11 +25,84 @@ final class EditorSession {
     var canUndo: Bool { undo.canUndo }
     var canRedo: Bool { undo.canRedo }
 
+    /// Копия синхронизированного блока на этой странице (ADR-0012).
+    struct SyncedRef: Equatable {
+        var source: UUID
+        var page: UUID
+        var title: String
+        /// Содержимое оригинала показано в копии; иначе — подпись о причине.
+        var shown: Bool
+        var reason: Reason
+        enum Reason { case shown, unavailable, samePage, repeated }
+    }
+
+    /// Копии на странице: ID копии → оригинал.
+    private(set) var syncedRefs: [UUID: SyncedRef] = [:]
+    /// Блок чужой страницы, показанный в копии → копия, в которой он показан.
+    private var foreignRef: [UUID: UUID] = [:]
+    /// Последняя записанная страница каждого блока: перенос между рамкой и страницей меняет её.
+    private var savedPage: [UUID: UUID] = [:]
+
     static func open(pageID: UUID, store: WorkspaceStore, coordinator: SaveCoordinator, clock: WallClock, ids: IDGenerator) async throws -> EditorSession {
         let blocks = try await store.blocks(ofPage: pageID)
         let session = EditorSession(document: BlockDocument(pageID: pageID, blocks: blocks), store: store, coordinator: coordinator, clock: clock, ids: ids)
+        for b in blocks { session.savedPage[b.id] = b.pageID }
+        try await session.loadSyncedSources()
         session.lastSnapshotAt = try await store.revisions(ofPage: pageID).first?.createdAt
         return session
+    }
+
+    /// Подгружает содержимое оригиналов для копий, у которых его ещё нет: дети оригинала становятся детьми копии в памяти.
+    func loadSyncedSources() async throws {
+        let shownSources = Set(syncedRefs.values.filter(\.shown).map(\.source))
+        var used = shownSources
+        var added: [BlockChange] = []
+        for ref in document.blocks where ref.type == .syncedRef && syncedRefs[ref.id] == nil {
+            guard let source = AtomData.syncedSource(of: ref) else { continue }
+            let found = try await store.syncedSource(source)
+            var info = SyncedRef(source: source, page: found?.block.pageID ?? pageID, title: found?.pageTitle ?? "", shown: false, reason: .unavailable)
+            if let found, !found.trashed {
+                if found.block.pageID == pageID || document.block(source) != nil {
+                    info.reason = .samePage
+                } else if used.contains(source) {
+                    info.reason = .repeated
+                } else {
+                    used.insert(source)
+                    info.shown = true
+                    info.reason = .shown
+                    for var b in found.descendants {
+                        savedPage[b.id] = b.pageID
+                        if b.parentID == source { b.parentID = ref.id }
+                        foreignRef[b.id] = ref.id
+                        added.append(.upsert(b))
+                    }
+                }
+            }
+            syncedRefs[ref.id] = info
+        }
+        if !added.isEmpty { document.apply(added) }
+    }
+
+    /// Страница, которой принадлежит блок: внутри показанной копии — страница оригинала.
+    func ownerPage(of id: UUID) -> UUID {
+        var current = document.block(id)?.parentID
+        var guardSteps = 0
+        while let parent = current, guardSteps < 10_000 {
+            if let ref = syncedRefs[parent], ref.shown { return ref.page }
+            current = document.block(parent)?.parentID
+            guardSteps += 1
+        }
+        return pageID
+    }
+
+    /// Копия, внутри которой показан блок, или nil.
+    private func containingRef(of id: UUID) -> UUID? {
+        var current = document.block(id)?.parentID
+        while let parent = current {
+            if let ref = syncedRefs[parent], ref.shown { return parent }
+            current = document.block(parent)?.parentID
+        }
+        return nil
     }
 
     private init(document: BlockDocument, store: WorkspaceStore, coordinator: SaveCoordinator, clock: WallClock, ids: IDGenerator) {
@@ -75,17 +148,48 @@ final class EditorSession {
         onChange?()
     }
 
+    /// Слой перевода (ADR-0012): родитель-копия становится оригиналом, страница блока — по цепочке родителей,
+    /// удаление копии не трогает блоки оригинала.
+    private func stored(_ block: Block) -> Block {
+        var b = block
+        b.pageID = ownerPage(of: block.id)
+        if let parent = b.parentID, let ref = syncedRefs[parent], ref.shown { b.parentID = ref.source }
+        return b
+    }
+
     private func submit(_ changes: [BlockChange], quiet: Bool = false) {
         var batch = SaveBatch()
+        var pages: Set<UUID> = [document.pageID]
         for change in changes {
             var one = SaveBatch()
             switch change {
-            case .upsert(let b): one.upserts[b.id] = b
-            case .delete(let id): one.deletes = [id]
+            case .upsert(let b):
+                guard document.block(b.id) != nil else { continue }
+                let s = stored(b)
+                one.upserts[s.id] = s
+                savedPage[s.id] = s.pageID
+                pages.insert(s.pageID)
+                if let ref = containingRef(of: s.id) { foreignRef[s.id] = ref } else { foreignRef[s.id] = nil }
+            case .delete(let id):
+                // Блок оригинала исчезает из вида вместе с копией, но в хранилище остаётся.
+                if let ref = foreignRef[id], document.block(ref) == nil { continue }
+                one.deletes = [id]
+                savedPage[id] = nil
+                foreignRef[id] = nil
             }
             batch.merge(one)
         }
-        if quiet { batch.quietPages = [document.pageID] } else { batch.touchedPages = [document.pageID] }
+        // Перенос через границу рамки: потомки переезжают на страницу родителя.
+        for b in document.blocks where batch.upserts[b.id] == nil {
+            let owner = ownerPage(of: b.id)
+            if let saved = savedPage[b.id], saved != owner {
+                let s = stored(b)
+                batch.upserts[s.id] = s
+                savedPage[s.id] = owner
+                pages.insert(owner)
+            }
+        }
+        if quiet { batch.quietPages = pages } else { batch.touchedPages = pages }
         coordinator.submit(batch)
         dirtySinceSnapshot = true
     }
@@ -103,7 +207,9 @@ final class EditorSession {
         // Флаг снимается до записи: правка во время снимка снова его поднимет.
         dirtySinceSnapshot = false
         do {
-            _ = try await store.saveRevision(pageID: document.pageID, reason: reason, blocks: document.blocks, id: ids.next(), now: now)
+            // Снимок — только собственные блоки страницы: содержимое оригинала принадлежит его странице.
+            let own = document.blocks.filter { ownerPage(of: $0.id) == document.pageID }
+            _ = try await store.saveRevision(pageID: document.pageID, reason: reason, blocks: own, id: ids.next(), now: now)
         } catch {
             dirtySinceSnapshot = true
             throw error
@@ -124,7 +230,7 @@ final class EditorSession {
         let target = Set(revisionBlocks.map(\.id))
         var forward: [BlockChange] = []
         var inverse: [BlockChange] = []
-        for block in document.blocks where !target.contains(block.id) {
+        for block in document.blocks where !target.contains(block.id) && ownerPage(of: block.id) == document.pageID {
             forward.append(.delete(block.id))
             inverse.append(.upsert(block))
         }

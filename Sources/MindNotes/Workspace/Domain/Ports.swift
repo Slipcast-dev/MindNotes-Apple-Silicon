@@ -86,7 +86,22 @@ protocol WorkspaceStore: BlockSink {
     func revisionBlocks(_ revisionID: UUID) async throws -> [Block]
     /// Удаляет снимки страницы, кроме перечисленных.
     func pruneRevisions(pageID: UUID, keeping: Set<UUID>) async throws
+    /// Оригинал синхронизированного блока и все его потомки (ADR-0012); nil — блока нет.
+    func syncedSource(_ id: UUID) async throws -> SyncedSource?
     func close()
+}
+
+/// Содержимое оригинала для копии: страница, её заголовок и потомки по порядку обхода.
+struct SyncedSource: Equatable {
+    var block: Block
+    var pageTitle: String
+    /// Страница оригинала в корзине: копия показывает «Оригинал недоступен».
+    var trashed: Bool
+    var descendants: [Block]
+}
+
+extension WorkspaceStore {
+    func syncedSource(_ id: UUID) async throws -> SyncedSource? { nil }
 }
 
 /// Запись импортированной базы: заголовок и значения по ID свойств.

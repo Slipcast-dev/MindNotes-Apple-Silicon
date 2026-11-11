@@ -94,6 +94,16 @@ enum AtomData {
                              json: json(["url": .string(url.absoluteString), "provider": .string(provider)]), plain: linkPlain(url: url, title: provider))
     }
 
+    /// Копия синхронизированного блока (ADR-0012): только ссылка на оригинал.
+    static func syncedRef(source: UUID) -> BlockFragment {
+        BlockFragment(type: BlockType.syncedRef.rawValue, contentVersion: 1, json: json(["source": .string(source.uuidString.lowercased())]), plain: "")
+    }
+
+    static func syncedSource(of block: Block) -> UUID? {
+        guard block.type == .syncedRef, case .string(let s)? = block.atomJSON["source"] else { return nil }
+        return UUID(uuidString: s)
+    }
+
     /// Текст для поиска: заголовок и адрес.
     static func linkPlain(url: URL, title: String?) -> String { [title, url.absoluteString].compactMap { $0 }.joined(separator: " ") }
 

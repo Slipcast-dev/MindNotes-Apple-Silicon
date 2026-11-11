@@ -28,7 +28,8 @@ enum MarkdownExport {
 
         for block in blocks {
             let level = block.parentID.flatMap { depth[$0].map { $0 + 1 } } ?? 0
-            depth[block.id] = level
+            // Дети оригинала синхронизированного блока идут на его уровне: рамки в Markdown нет.
+            depth[block.id] = block.type == .synced ? level - 1 : level
             let indent = String(repeating: "    ", count: level)
             let text = inline(block, pageTitle: pageTitle, lost: &lost)
             if block.content?.color != nil { lost["Цвет блоков", default: 0] += 1 }
@@ -63,6 +64,11 @@ enum MarkdownExport {
                     lost["Вложения без файла", default: 0] += 1
                 }
             case .table: line = table(AtomData.rows(of: block))
+            case .synced:
+                line = "" // Подпись оригинала не пишется: его содержимое — обычные блоки ниже.
+            case .syncedRef:
+                line = "*\\[Синхронизированный блок\\]*"
+                lost["Копии синхронизированных блоков (содержимое — у оригинала)", default: 0] += 1
             case .bookmark, .embed:
                 if let url = AtomData.url(of: block) {
                     let label = AtomData.string("title", of: block) ?? url.absoluteString

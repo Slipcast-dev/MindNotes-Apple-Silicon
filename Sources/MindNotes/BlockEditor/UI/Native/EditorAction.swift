@@ -28,6 +28,9 @@ enum EditorAction: Equatable {
     case insertBookmark
     case insertEmbed
     case refreshLinkPreview
+    /// Синхронизированный блок (ADR-0012).
+    case makeSynced
+    case unsyncCopy
     /// Запрашивает изображение или файл у пользователя.
     case attach(BlockType)
     case insertTable
@@ -110,6 +113,7 @@ enum EditorAction: Equatable {
          Item(title: t("Переместить вниз"), action: .moveBlockDown),
          Item(title: t("Дублировать блок"), action: .duplicateBlock, key: "d"),
          Item(title: t("Копировать ссылку на блок"), action: .copyBlockLink),
+         Item(title: t("Сделать синхронизированным"), action: .makeSynced, aliases: ["synced", "синхрон"]),
          Item(title: t("Удалить блок"), action: .deleteBlock)]
     }
 

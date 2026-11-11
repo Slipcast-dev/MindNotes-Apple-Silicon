@@ -570,3 +570,25 @@ final class EmbedBlockCell: NSTextAttachmentCell {
                                    attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: muted])
     }
 }
+
+/// Подпись синхронизированного блока (ADR-0012): у оригинала — «Синхронизированный блок», у копии — откуда содержимое.
+final class SyncedCaptionCell: NSTextAttachmentCell {
+    private let text: String
+    private let color: NSColor
+
+    init(text: String, color: NSColor) {
+        self.text = text
+        self.color = color
+        super.init(textCell: "")
+    }
+
+    required init(coder: NSCoder) { fatalError("не используется") }
+
+    override func cellSize() -> NSSize { NSSize(width: 360, height: 18) }
+    override func cellBaselineOffset() -> NSPoint { NSPoint(x: 0, y: -4) }
+
+    override func draw(withFrame frame: NSRect, in view: NSView?) {
+        ("⟳ " + text as NSString).draw(with: frame.insetBy(dx: 2, dy: 1), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                                       attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: color])
+    }
+}

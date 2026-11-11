@@ -1128,3 +1128,14 @@
 "Встраивание: %@" = "Embed: %@";
 "Превью ссылки не загрузилось: страница недоступна или слишком большая." = "The link preview did not load: the page is unavailable or too large.";
 "Встраивания стали ссылками" = "Embeds became links";
+
+/* M12: синхронизированный блок */
+"Синхронизированный блок" = "Synced block";
+"Копия синхронизированного блока · %@" = "Synced copy · %@";
+"Копия синхронизированного блока: оригинал на этой странице" = "Synced copy: the original is on this page";
+"Копия синхронизированного блока: содержимое показано выше" = "Synced copy: the content is shown above";
+"Оригинал недоступен: удалён или в корзине" = "Original unavailable: deleted or in the trash";
+"Загрузка синхронизированного блока…" = "Loading synced block…";
+"Сделать синхронизированным" = "Turn into synced block";
+"Отвязать копию" = "Unsync copy";
+"Копии синхронизированных блоков (содержимое — у оригинала)" = "Synced copies (content stays with the original)";

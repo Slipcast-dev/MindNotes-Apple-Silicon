@@ -313,6 +313,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             }
             syncView()
             restoreSelection()
+            loadNewSyncedCopies()
             return true
         } catch {
             onError?((error as? LocalizedError)?.errorDescription ?? "\(error)")
@@ -327,6 +328,17 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         applying = false
         applyTypingAttributes()
         textView.scrollRangeToVisible(r)
+    }
+
+    /// Вставленная копия синхронизированного блока получает содержимое оригинала из хранилища.
+    private func loadNewSyncedCopies() {
+        guard document.blocks.contains(where: { $0.type == .syncedRef && session.syncedRefs[$0.id] == nil }) else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await self.session.loadSyncedSources()
+            self.syncView()
+            self.textView.needsDisplay = true
+        }
     }
 
     /// Документ сессии заменён целиком (восстановление версии): вид перестраивается по нему.
@@ -416,6 +428,13 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
                 guard let self, let text, let url = LinkCard.url(text) else { return }
                 self.insertLinkCard(action == .insertBookmark ? .bookmark : .embed, url: url)
             }
+        case .makeSynced:
+            let ids = topSelectedBlockIDs()
+            perform(.makeSynced(ids))
+            caretKeep(range)
+        case .unsyncCopy:
+            if let block = document.block(id), block.type == .syncedRef { perform(.unsync(block.id)) }
+            else if let ref = document.blocks.first(where: { $0.type == .syncedRef && document.descendants(of: $0.id).contains { $0.id == id } }) { perform(.unsync(ref.id)) }
         case .refreshLinkPreview:
             if let block = document.block(id), block.type == .bookmark, let url = AtomData.url(of: block) { loadPreview(block: block.id, url: url) }
         case .mentionPage(let page, let title):
@@ -453,6 +472,12 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             perform(.insertBlock(after: tail.id, type: .paragraph))
             if let s = session.selection { perform(.replaceRange(s, fragments)) }
         }
+    }
+
+    var isInsideSyncedCopy: Bool {
+        let id = point(at: textView.selectedRange().location).blockID
+        if document.block(id)?.type == .syncedRef { return true }
+        return document.blocks.contains { $0.type == .syncedRef && document.descendants(of: $0.id).contains { $0.id == id } }
     }
 
     var isBookmarkAtCaret: Bool { document.block(point(at: textView.selectedRange().location).blockID)?.type == .bookmark }
@@ -650,6 +675,20 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             return FileBlockCell(name: AtomData.name(of: block), detail: size, ink: style.ink, muted: style.muted, line: style.line)
         case .table:
             return TableBlockCell(rows: AtomData.rows(of: block), ink: style.ink, line: style.line, soft: style.soft)
+        case .synced:
+            return SyncedCaptionCell(text: NSLocalizedString("Синхронизированный блок", comment: ""), color: style.accent)
+        case .syncedRef:
+            let info = session.syncedRefs[block.id]
+            let t: (String) -> String = { NSLocalizedString($0, comment: "") }
+            let text: String
+            switch info?.reason {
+            case .shown?: text = String(format: t("Копия синхронизированного блока · %@"), info?.title.isEmpty == false ? info!.title : t("Без названия"))
+            case .samePage?: text = t("Копия синхронизированного блока: оригинал на этой странице")
+            case .repeated?: text = t("Копия синхронизированного блока: содержимое показано выше")
+            case .unavailable?: text = t("Оригинал недоступен: удалён или в корзине")
+            case nil: text = t("Загрузка синхронизированного блока…")
+            }
+            return SyncedCaptionCell(text: text, color: info?.reason == .unavailable ? style.muted : style.accent)
         case .bookmark:
             let url = AtomData.url(of: block)
             return BookmarkBlockCell(title: AtomData.string("title", of: block) ?? url?.host ?? block.plainText,
@@ -1450,6 +1489,10 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             case .bookmark, .embed:
                 if let url = AtomData.url(of: block) { onOpenURL?(url, block.type) }
                 return true
+            case .syncedRef:
+                // Подпись копии ведёт к оригиналу.
+                if let info = session.syncedRefs[block.id], info.reason != .unavailable { onOpenLink?(info.page, info.source) }
+                return true
             default:
                 return false
             }
@@ -1471,6 +1514,7 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
     /// Фон выноски и кода, полоска цитаты: рисуются под текстом.
     func drawBackgrounds(in dirty: NSRect) {
         drawBlockColors(in: dirty)
+        drawSyncedFrames(in: dirty)
         guard let (first, last) = visibleSpanRange(in: dirty) else { return }
         for i in first...last {
             guard let block = document.block(spans[i].id), [.callout, .code, .quote].contains(block.type), let rect = blockRect(for: spans[i]) else { continue }
@@ -1504,6 +1548,26 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
             guard frame.intersects(dirty), let fill = BlockTextStyle.background(of: BlockColor.name(color)) else { continue }
             fill.setFill()
             NSBezierPath(roundedRect: frame, xRadius: 4, yRadius: 4).fill()
+        }
+    }
+
+    /// Рамка синхронизированного блока и его копии: подпись и всё содержимое (ADR-0012).
+    private func drawSyncedFrames(in dirty: NSRect) {
+        let framed = document.blocks.filter { $0.type == .synced || $0.type == .syncedRef }
+        guard !framed.isEmpty else { return }
+        let index = Dictionary(spans.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for block in framed {
+            guard let i = index[block.id], var box = blockRect(for: spans[i]) else { continue }
+            for child in document.descendants(of: block.id) {
+                if let j = index[child.id], let r = blockRect(for: spans[j]) { box = box.union(r) }
+            }
+            let x = textView.textContainerOrigin.x + CGFloat(depths[block.id] ?? 0) * BlockTextStyle.nestIndent - 8
+            let frame = NSRect(x: x, y: box.minY - 4, width: textView.bounds.width - x - 4, height: box.height + 8)
+            guard frame.intersects(dirty) else { continue }
+            style.accent.withAlphaComponent(0.55).setStroke()
+            let path = NSBezierPath(roundedRect: frame.insetBy(dx: 0.75, dy: 0.75), xRadius: 5, yRadius: 5)
+            path.lineWidth = 1.5
+            path.stroke()
         }
     }
 
@@ -1742,6 +1806,9 @@ final class BlockTextView: NSTextView {
         add(sub(t("Цвет текста"), EditorAction.colors))
         add(sub(t("Цветной маркер"), EditorAction.highlights))
         add(sub(t("Цвет блока"), EditorAction.blockColors))
+        if let controller, controller.isInsideSyncedCopy {
+            add(menuItem(EditorAction.Item(title: t("Отвязать копию"), action: .unsyncCopy)))
+        }
         if let controller, controller.fetchLinkPreview != nil, controller.isBookmarkAtCaret {
             add(menuItem(EditorAction.Item(title: t("Обновить превью"), action: .refreshLinkPreview)))
         }

@@ -83,9 +83,15 @@ extension BlockDocument {
     func fragments(in selection: BlockSelection) -> [BlockFragment] {
         guard let (start, end) = ordered(selection), let si = index(of: start.blockID), let ei = index(of: end.blockID) else { return [] }
         var out: [BlockFragment] = []
-        let hidden = hiddenIDs
+        var hidden = hiddenIDs
         for i in si...ei where !hidden.contains(blocks[i].id) {
             let b = blocks[i]
+            // Оригинал синхронизированного блока копируется копией, как в Notion: содержимое остаётся одно (ADR-0012).
+            if b.type == .synced {
+                out.append(AtomData.syncedRef(source: b.id))
+                hidden.formUnion(descendants(of: b.id).map(\.id))
+                continue
+            }
             guard var c = b.content else {
                 // Непонятный блок копируется, только если выделен целиком.
                 let lower = i == si ? start.offset : 0, upper = i == ei ? end.offset : 1

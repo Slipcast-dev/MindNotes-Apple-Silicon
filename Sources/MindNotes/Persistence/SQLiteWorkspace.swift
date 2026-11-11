@@ -182,6 +182,25 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
         }
     }
 
+    func syncedSource(_ id: UUID) async throws -> SyncedSource? {
+        try await reader.run { db in
+            let columns = "b.id, b.page_id, b.parent_id, b.sort_key, b.type, b.content_v, b.content_json, b.plain_text, b.created_at, b.updated_at"
+            func block(_ r: SQLRow) -> Block? {
+                guard let bid = r.uuid(0), let pid = r.uuid(1) else { return nil }
+                return Block(id: bid, pageID: pid, parentID: r.uuid(2), sortKey: r.text(3), type: BlockType(rawValue: r.text(4)),
+                             contentVersion: Int(r.int(5)), contentJSON: r.text(6), plainText: r.text(7), createdAt: r.int(8), updatedAt: r.int(9))
+            }
+            guard let original = try db.query("SELECT \(columns) FROM blocks b WHERE b.id=? AND b.type=?", [SQLValue(id), .text(BlockType.synced.rawValue)], block).first ?? nil
+            else { return nil }
+            let page = try db.query("SELECT title, deleted_at IS NOT NULL FROM pages WHERE id=?", [SQLValue(original.pageID)]) { ($0.text(0), $0.int(1) != 0) }.first
+            let descendants = try db.query("""
+            WITH RECURSIVE sub(id) AS (SELECT id FROM blocks WHERE parent_id=? UNION ALL SELECT b.id FROM blocks b JOIN sub ON b.parent_id = sub.id)
+            SELECT \(columns) FROM blocks b WHERE b.id IN (SELECT id FROM sub) ORDER BY b.sort_key, b.id
+            """, [SQLValue(id)], block).compactMap { $0 }
+            return SyncedSource(block: original, pageTitle: page?.0 ?? "", trashed: page?.1 ?? true, descendants: descendants)
+        }
+    }
+
     func blocks(ofPage id: UUID) async throws -> [Block] {
         try await reader.run { db in
             try db.query("""
