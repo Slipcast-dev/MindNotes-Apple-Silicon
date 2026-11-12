@@ -33,8 +33,20 @@ async function mnRequest(method, path, body) {
   return data;
 }
 
+// Возможности MindNotes (`features` из /v1/status): расширение подстраивается под них, а не под версию приложения.
+// Старая MindNotes без списка умеет только базовое сохранение.
+let mnFeatureCache = null;
+async function mnFeatures() {
+  if (mnFeatureCache && Date.now() - mnFeatureCache.at < 60000) return mnFeatureCache.list;
+  let list = ['clips', 'targets', 'openPage'];
+  try { const s = await mnRequest('GET', '/v1/status'); if (Array.isArray(s.features)) list = s.features; } catch (e) { /* ответит при сохранении */ }
+  mnFeatureCache = { at: Date.now(), list };
+  return list;
+}
+
 const mnAPI = {
   status: () => mnRequest('GET', '/v1/status'),
+  features: mnFeatures,
   /// silent — фоновая попытка: MindNotes ответит без вопроса, только если открыто окно автоподключения.
   async pair(silent = false) {
     const data = await mnRequest('POST', '/v1/pair', { plugin: MN_PLUGIN, silent });
@@ -54,4 +66,4 @@ const mnAPI = {
   openPage: (id) => mnRequest('POST', `/v1/pages/${encodeURIComponent(id)}/open`, {}),
 };
 
-if (typeof module !== 'undefined') module.exports = { MN_API, MN_PLUGIN, MNError, mnAPI };
+if (typeof module !== 'undefined') module.exports = { MN_API, MN_PLUGIN, MNError, mnAPI, mnFeatures };

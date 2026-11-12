@@ -5,6 +5,15 @@ import SwiftUI
 struct WebClipperInstallerApp: App {
     @NSApplicationDelegateAdaptor(InstallerDelegate.self) private var delegate
 
+    /// `--update` (запускает MindNotes после обновления плагина): без окна обновить расширение для браузеров
+    /// на Chromium и регистрацию расширения Safari, затем выйти. Расширение в Chrome перезапустится само.
+    init() {
+        guard CommandLine.arguments.contains("--update") else { return }
+        LSRegisterURL(Bundle.main.bundleURL as CFURL, true)
+        let ok = MainActor.assumeIsolated { InstallerModel.syncChromeFolder() }
+        exit(ok ? 0 : 1)
+    }
+
     var body: some Scene {
         Window("MindNotes Web Clipper", id: "main") {
             InstallerView().environmentObject(delegate.model)

@@ -2,18 +2,21 @@ import AppKit
 import CryptoKit
 import Foundation
 
-/// Обновления плагинов (ADR-0019): выпуски `<префикс><версия>` в репозитории приложения на GitHub.
-/// Как обновления приложения (ADR-0014): только с согласия, образ сверяется по SHA-256 из того же выпуска,
-/// затем запускается новый установщик плагина — он обновит плагин в MindNotes (с вопросом) и расширения в браузерах.
+/// Обновления плагинов (ADR-0019, пп. 7 и 9): выпуски `<префикс><версия>` в репозитории приложения на GitHub.
+/// Своё расписание, независимое от обновлений приложения: при запуске и раз в сутки. Образ сверяется по SHA-256
+/// из того же выпуска. Если новая версия просит не больше разрешений, чем подтверждено, и у плагина включено
+/// «Обновлять автоматически», обновление ставится само; новые разрешения — только по кнопке и с вопросом.
 @MainActor
 final class PluginUpdater: ObservableObject {
     static let shared = PluginUpdater()
     static let releasesURL = URL(string: "https://api.github.com/repos/Slipcast-dev/MindNotes-Apple-Silicon/releases?per_page=50")!
-    private static let lastCheckKey = "pluginUpdateLastCheck"
+    static let interval: TimeInterval = 24 * 60 * 60
+    private static let lastCheckKey = "pluginUpdateChecks", autoKey = "pluginAutoUpdate"
 
     enum State: Equatable {
         case idle, checking, upToDate
-        case available(PluginRelease)
+        /// `trusted` — те же или меньше разрешений: можно ставить без вопроса.
+        case available(PluginRelease, trusted: Bool)
         /// Новый выпуск есть, но ему нужна более новая MindNotes.
         case needsApp(PluginRelease)
         case downloading, installing
@@ -21,7 +24,15 @@ final class PluginUpdater: ObservableObject {
     }
 
     @Published private(set) var states: [String: State] = [:]
+    @Published private(set) var lastCheck: [String: Date] = [:]
+    @Published private(set) var auto: [String: Bool] = [:]
     private var timer: Timer?
+
+    private init() {
+        let saved = (UserDefaults.standard.dictionary(forKey: Self.lastCheckKey) as? [String: Double]) ?? [:]
+        lastCheck = saved.mapValues { Date(timeIntervalSince1970: $0) }
+        auto = (UserDefaults.standard.dictionary(forKey: Self.autoKey) as? [String: Bool]) ?? [:]
+    }
 
     private static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
@@ -45,15 +56,29 @@ final class PluginUpdater: ObservableObject {
 
     func state(_ id: String) -> State { states[id] ?? .idle }
 
-    /// Запуск: в автоматическом режиме обновлений — проверка раз в сутки, как у приложения.
-    func start(mode: UpdateMode) {
+    /// «Обновлять автоматически» — у каждого плагина своё; по умолчанию включено.
+    func isAuto(_ id: String) -> Bool { auto[id] ?? true }
+
+    func setAuto(_ id: String, _ on: Bool) {
+        auto[id] = on
+        UserDefaults.standard.set(auto, forKey: Self.autoKey)
+        if on, case .available(let release, true) = state(id) { install(release, plugin: id) }
+    }
+
+    /// Расписание плагинов не зависит от режима обновлений приложения: проверка при запуске и раз в сутки.
+    func start() {
         timer?.invalidate()
-        guard canCheck, mode == .automatic else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: UpdateMode.checkInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.check(silent: true) }
+        guard canCheck else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.checkIfDue() }
         }
-        let last = UserDefaults.standard.double(forKey: Self.lastCheckKey)
-        if Date().timeIntervalSince1970 - last > UpdateMode.checkInterval { Task { await check(silent: true) } }
+        Task { await checkIfDue() }
+    }
+
+    private func checkIfDue() async {
+        let ids = PluginHost.shared.plugins.filter { $0.manifest.updates != nil }.map(\.id)
+        let oldest = ids.map { lastCheck[$0] ?? .distantPast }.min() ?? .distantFuture
+        if Date().timeIntervalSince(oldest) >= Self.interval { await check(silent: true) }
     }
 
     /// Один запрос списка выпусков на все плагины, у которых указан источник обновлений.
@@ -65,22 +90,42 @@ final class PluginUpdater: ObservableObject {
             return
         }
         for p in plugins where !isBusy(p.id) { states[p.id] = .checking }
+        let data: Data
         do {
-            let (data, response) = try await Self.session.data(from: Self.releasesURL)
+            let (body, response) = try await Self.session.data(from: Self.releasesURL)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
-            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.lastCheckKey)
-            for p in plugins where !isBusy(p.id) {
-                guard let prefix = p.manifest.updates, let release = PluginRelease.newest(in: data, prefix: prefix),
-                      let installed = AppVersion(p.manifest.version), installed < release.version else {
-                    states[p.id] = .upToDate
-                    continue
-                }
-                if let need = release.minApp, let app = appVersion, app < need { states[p.id] = .needsApp(release) }
-                else { states[p.id] = .available(release) }
-            }
+            data = body
         } catch {
             for p in plugins where !isBusy(p.id) { states[p.id] = silent ? .idle : .failed(L("Не удалось проверить обновления: нет связи с GitHub.")) }
+            return
         }
+        for p in plugins where !isBusy(p.id) {
+            lastCheck[p.id] = Date()
+            guard let prefix = p.manifest.updates, let release = PluginRelease.newest(in: data, prefix: prefix),
+                  let installed = AppVersion(p.manifest.version), installed < release.version else {
+                states[p.id] = .upToDate
+                continue
+            }
+            if let need = release.minApp, let app = appVersion, app < need { states[p.id] = .needsApp(release); continue }
+            let trusted = await isTrusted(release, installed: p.manifest)
+            states[p.id] = .available(release, trusted: trusted)
+            if trusted, isAuto(p.id) { install(release, plugin: p.id) }
+        }
+        UserDefaults.standard.set(lastCheck.mapValues(\.timeIntervalSince1970), forKey: Self.lastCheckKey)
+    }
+
+    /// Разрешения новой версии — из `plugin-manifest.json` выпуска, сверенного по SHA256SUMS. Нет файла или
+    /// сумма не сошлась — обновление не считается доверенным и ставится только с вопросом.
+    private func isTrusted(_ release: PluginRelease, installed: PluginManifest) async -> Bool {
+        guard let url = release.manifest,
+              let manifestFile = try? await fetch(url, limit: 64 << 10) else { return false }
+        defer { try? FileManager.default.removeItem(at: manifestFile) }
+        guard let sumsFile = try? await fetch(release.checksums, limit: 1 << 20) else { return false }
+        defer { try? FileManager.default.removeItem(at: sumsFile) }
+        guard let data = try? Data(contentsOf: manifestFile), let sums = try? Data(contentsOf: sumsFile),
+              ReleaseInfo.checksums(String(decoding: sums, as: UTF8.self))["plugin-manifest.json"] == Self.hex(SHA256.hash(data: data)),
+              case .success(let manifest) = PluginManifest.parse(data) else { return false }
+        return manifest.isTrustedUpdate(of: installed, app: appVersion)
     }
 
     private func isBusy(_ id: String) -> Bool {
@@ -92,8 +137,10 @@ final class PluginUpdater: ObservableObject {
 
     struct UpdateError: Error { let message: String; init(_ m: String) { message = m } }
 
-    /// Скачать образ, сверить сумму, положить установщик на место прежнего и запустить его.
+    /// Скачать образ, сверить сумму, заменить установщик, обновить плагин в MindNotes (без вопроса — только для
+    /// доверенного обновления) и дать установщику обновить расширения в браузерах (`--update`, без окна).
     func install(_ release: PluginRelease, plugin id: String) {
+        guard !isBusy(id) else { return }
         Task {
             do {
                 states[id] = .downloading
@@ -109,10 +156,19 @@ final class PluginUpdater: ObservableObject {
                 guard actual == expected else { throw UpdateError(L("Образ повреждён: контрольная сумма не совпала. Установка отменена.")) }
                 let target = PluginHost.shared.installerURL
                 let installer = try await Task.detached { try Self.stage(image: image, replacing: target) }.value
-                let config = NSWorkspace.OpenConfiguration()
-                config.activates = true
-                _ = try await NSWorkspace.shared.openApplication(at: installer, configuration: config)
+                guard let package = try FileManager.default.contentsOfDirectory(at: installer.appendingPathComponent("Contents/Resources"), includingPropertiesForKeys: nil)
+                    .first(where: { $0.pathExtension == PluginManifest.packageExtension }) else { throw UpdateError(L("В образе нет программы-установщика.")) }
+                // Доверенное — без вопроса; иначе MindNotes покажет новые разрешения и спросит.
+                guard PluginHost.shared.installUpdate(from: package) else {
+                    states[id] = .available(release, trusted: false)
+                    return
+                }
+                if let tool = Bundle(url: installer)?.executableURL?.path {
+                    try await Task.detached { try Self.run(tool, ["--update"], timeout: 60) }.value
+                }
                 states[id] = .upToDate
+                lastCheck[id] = Date()
+                PluginHost.shared.shell?.notice = String(format: L("Плагин обновлён до версии %@."), release.version.description)
             } catch {
                 states[id] = .failed((error as? UpdateError)?.message ?? L("Обновление не установилось: ") + error.localizedDescription)
             }
@@ -129,12 +185,16 @@ final class PluginUpdater: ObservableObject {
         return target
     }
 
+    nonisolated private static func hex<D: Sequence>(_ digest: D) -> String where D.Element == UInt8 {
+        digest.map { String(format: "%02x", $0) }.joined()
+    }
+
     nonisolated private static func sha256(of file: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
         var hasher = SHA256()
         while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        return hex(hasher.finalize())
     }
 
     /// Образ монтируется только для чтения; программа из него заменяет прежний установщик
@@ -162,14 +222,16 @@ final class PluginUpdater: ObservableObject {
     }
 
     @discardableResult
-    nonisolated private static func run(_ tool: String, _ args: [String]) throws -> Int32 {
+    nonisolated private static func run(_ tool: String, _ args: [String], timeout: TimeInterval = 120) throws -> Int32 {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: tool)
         p.arguments = args
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
         try p.run()
-        p.waitUntilExit()
+        let deadline = Date().addingTimeInterval(timeout)
+        while p.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+        if p.isRunning { p.terminate(); throw UpdateError(L("Не удалось подготовить обновление (\((tool as NSString).lastPathComponent)).")) }
         guard p.terminationStatus == 0 else { throw UpdateError(L("Не удалось подготовить обновление (\((tool as NSString).lastPathComponent)).")) }
         return p.terminationStatus
     }

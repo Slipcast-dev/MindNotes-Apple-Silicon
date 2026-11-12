@@ -1604,3 +1604,9 @@
 "Версии %@ нужна MindNotes %@ или новее — сначала обновите приложение." = "Version %@ needs MindNotes %@ or later — update the app first.";
 "Загрузка и проверка обновления…" = "Downloading and verifying the update…";
 "Правки не записались, поэтому обновление отложено. Сохраните работу и нажмите «Скачать и установить» ещё раз." = "Your edits could not be saved, so the update was postponed. Save your work and click “Download and Install” again.";
+"Картинка" = "Image";
+"Плагин обновлён до версии %@." = "The plugin was updated to version %@.";
+"Обновлять автоматически" = "Update automatically";
+"ещё не проверялось" = "not checked yet";
+"последняя проверка: %@" = "last checked: %@";
+"Новой версии нужны новые разрешения — MindNotes покажет их перед установкой." = "The new version needs new permissions — MindNotes will show them before installing.";

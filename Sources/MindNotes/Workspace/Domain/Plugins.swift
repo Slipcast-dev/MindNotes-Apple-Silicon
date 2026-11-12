@@ -81,6 +81,14 @@ struct PluginManifest: Equatable {
         return nil
     }
 
+    /// Обновление без вопроса пользователю (ADR-0019, п. 9): тот же плагин, версия новее, понятен этой MindNotes
+    /// и просит не больше разрешений, чем уже подтверждено. Новые разрешения — только с согласия.
+    func isTrustedUpdate(of installed: PluginManifest, app: AppVersion?) -> Bool {
+        guard id == installed.id, problem(app: app) == nil,
+              let new = AppVersion(version), let old = AppVersion(installed.version), old < new else { return false }
+        return Set(permissions).isSubset(of: Set(installed.permissions))
+    }
+
     /// Префикс тега: строчные латинские буквы, цифры и дефис, оканчивается на `-v` — не совпадёт с тегами приложения `v1.2.3`.
     static func isSafeTagPrefix(_ prefix: String) -> Bool {
         (3...40).contains(prefix.count) && prefix.hasSuffix("-v")
@@ -130,6 +138,8 @@ struct PluginRelease: Equatable {
     var notes: String
     var image: URL
     var checksums: URL
+    /// `plugin-manifest.json` выпуска: по нему MindNotes сравнивает разрешения до скачивания образа.
+    var manifest: URL?
     /// Самая старая MindNotes, с которой работает выпуск: строка `<!-- minApp: X -->` в описании.
     var minApp: AppVersion?
 
@@ -156,7 +166,7 @@ struct PluginRelease: Equatable {
             guard let image = asset({ $0.hasSuffix(".dmg") }), let sums = asset({ $0 == "SHA256SUMS.txt" }) else { continue }
             let body = (object["body"] as? String) ?? ""
             let release = PluginRelease(version: version, tag: tag, notes: String(body.prefix(4000)), image: image, checksums: sums,
-                                        minApp: minApp(in: body))
+                                        manifest: asset({ $0 == "plugin-manifest.json" }), minApp: minApp(in: body))
             if best.map({ $0.version < version }) ?? true { best = release }
         }
         return best

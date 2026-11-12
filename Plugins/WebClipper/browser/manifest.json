@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "__MSG_extName__",
   "description": "__MSG_extDescription__",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "default_locale": "ru",
   "icons": {
     "16": "icons/icon-16.png",
@@ -30,9 +30,6 @@
   ],
   "host_permissions": [
     "http://127.0.0.1/*"
-  ],
-  "optional_host_permissions": [
-    "<all_urls>"
   ],
   "commands": {
     "_execute_action": {

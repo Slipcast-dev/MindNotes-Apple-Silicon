@@ -70,6 +70,32 @@ func runPluginTests() async {
         check(AppVersion("webclipper-v1.0.2") == nil, "тег плагина не примется за версию приложения (ADR-0014)")
     }
 
+    await test("Обновление плагина без вопроса — только тот же плагин, новее и без новых разрешений") {
+        func manifest(_ version: String, _ permissions: [String], id: String = "minerva.webclipper", api: Int = 1) -> PluginManifest {
+            let json = #"{"id":"\#(id)","name":"Web Clipper","version":"\#(version)","kind":"plugin","api":\#(api),"permissions":[\#(permissions.map { "\"\($0)\"" }.joined(separator: ","))]}"#
+            guard case .success(let m) = PluginManifest.parse(Data(json.utf8)) else { fatalError(json) }
+            return m
+        }
+        let installed = manifest("1.0.0", ["pages.list", "pages.create", "assets.create"])
+        let app = AppVersion("1.5.1")
+        check(manifest("1.0.1", ["pages.list", "pages.create", "assets.create"]).isTrustedUpdate(of: installed, app: app), "те же разрешения")
+        check(manifest("1.1.0", ["pages.create"]).isTrustedUpdate(of: installed, app: app), "меньше разрешений")
+        check(!manifest("1.0.1", ["pages.list", "pages.create", "assets.create", "tags.write"]).isTrustedUpdate(of: installed, app: app), "новое разрешение — только с вопросом")
+        check(!manifest("1.0.0", ["pages.create"]).isTrustedUpdate(of: installed, app: app), "та же версия — не обновление")
+        check(!manifest("0.9.0", ["pages.create"]).isTrustedUpdate(of: installed, app: app), "старая версия")
+        check(!manifest("1.0.1", ["pages.create"], id: "evil.plugin").isTrustedUpdate(of: installed, app: app), "чужой плагин")
+        check(!manifest("1.0.1", ["pages.create"], api: 2).isTrustedUpdate(of: installed, app: app), "несовместимый API")
+
+        let list: [[String: Any]] = [["tag_name": "webclipper-v1.0.1", "draft": false, "prerelease": false, "body": "", "assets": [
+            ["name": "MindNotes-Web-Clipper-1.0.1.dmg", "browser_download_url": "https://github.com/x/a.dmg"],
+            ["name": "SHA256SUMS.txt", "browser_download_url": "https://github.com/x/s"],
+            ["name": "plugin-manifest.json", "browser_download_url": "https://github.com/x/m.json"]]]]
+        let release = try require(PluginRelease.newest(in: try JSONSerialization.data(withJSONObject: list), prefix: "webclipper-v"))
+        checkEqual(release.manifest?.absoluteString, "https://github.com/x/m.json", "описание плагина из выпуска")
+        check(release.minApp == nil, "minApp необязателен")
+        check(LocalAPI.features.contains("remoteImages") && LocalAPI.features.contains("clips"), "приложение сообщает свои возможности")
+    }
+
     await test("Подключения: одно на расширение, старые дубли убираются") {
         func client(_ name: String, origin: String?, created: Int64, used: Int64? = nil, plugin: String = "p") -> PluginClient {
             PluginClient(id: UUID(), plugin: plugin, name: name, tokenHash: "h", createdAt: created, lastUsedAt: used, origin: origin)
@@ -172,6 +198,55 @@ func runPluginTests() async {
         if case .success(let untitled) = WebClip.parse(Data(#"{"url":"https://site.org/p"}"#.utf8)) {
             checkEqual(untitled.title, "site.org", "без заголовка — имя сайта")
         } else { check(false) }
+    }
+
+    await test("Картинки с других сайтов: только публичный https, подстановка и запасная ссылка") {
+        for ok in ["https://cdn.example.com/a.png", "https://images.site.ru/x/y.webp?w=800", "https://8.8.8.8/p.png"] {
+            check(WebClip.isPublicWebURL(URL(string: ok)!), ok)
+        }
+        for bad in ["http://cdn.example.com/a.png", "https://localhost/a.png", "https://127.0.0.1/a.png", "https://192.168.1.1/a.png",
+                    "https://10.0.0.5/a.png", "https://172.20.1.1/a.png", "https://169.254.169.254/latest", "https://router.local/a.png",
+                    "https://[::1]/a.png", "https://printer/a.png", "https://user:pw@cdn.example.com/a.png", "file:///etc/hosts",
+                    "https://2130706433/a.png", "https://0x7f.0.0.1/a.png", "https://0177.0.0.1/a.png", "https://127.1/a.png",
+                    "https://nas.home/a.png", "https://256.1.1.1/a.png"] {
+            check(!WebClip.isPublicWebURL(URL(string: bad)!), "запрещён: \(bad)")
+        }
+        let json: [String: Any] = ["mode": "article", "url": "https://example.com/post", "markdown": "Текст\n\n![Схема](remote-1.img)\n\n![](remote-2.img)",
+                                   "remoteImages": [["name": "remote-1.img", "url": "https://cdn.example.com/1.png"],
+                                                    ["name": "remote-2.img", "url": "https://cdn.example.com/2(1).jpg"]]]
+        let clip = try require(try? WebClip.parse(JSONSerialization.data(withJSONObject: json)).get())
+        checkEqual(clip.remoteImages.count, 2)
+        func problem(_ remote: [[String: Any]]) -> WebClip.Problem? {
+            if case .failure(let p) = WebClip.parse(try! JSONSerialization.data(withJSONObject: ["remoteImages": remote])) { return p }
+            return nil
+        }
+        checkEqual(problem([["name": "r.img", "url": "https://192.168.0.1/a.png"]]), .badField("remoteImages"), "локальный адрес не принимается")
+        checkEqual(problem([["name": "../r.img", "url": "https://cdn.example.com/a.png"]]), .badField("remoteImages"))
+        if case .success(let image) = WebClip.parse(try JSONSerialization.data(withJSONObject: ["mode": "image", "remoteImages": [["name": "image.img", "url": "https://cdn.example.com/a.png"]]])) {
+            checkEqual(image.remoteImages.count, 1, "картинка по правому щелчку может прийти адресом")
+        } else { check(false) }
+
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        let resolved = clip.resolvingRemote(["remote-1.img": WebClip.Image(name: "remote-1.png", mime: "image/png", data: png)], label: "Картинка")
+        checkEqual(resolved.markdown, "Текст\n\n![Схема](remote-1.png)\n\n[Картинка](https://cdn.example.com/2%281%29.jpg)",
+                   "скачанная — вложение с настоящим расширением, нескачанная — ссылка на оригинал")
+        checkEqual(resolved.images.map(\.name), ["remote-1.png"])
+        check(resolved.remoteImages.isEmpty)
+
+        checkEqual(WebClip.sniffImage(png)?.ext, "png")
+        checkEqual(WebClip.sniffImage(Data([0xFF, 0xD8, 0xFF, 0xE0]))?.ext, "jpg")
+        checkEqual(WebClip.sniffImage(Data("RIFF....WEBPVP8 ".utf8))?.ext, "webp")
+        check(WebClip.sniffImage(Data("<svg xmlns=".utf8)) == nil, "SVG не принимается")
+        check(WebClip.sniffImage(Data("<html>".utf8)) == nil, "страница ошибки вместо картинки отбрасывается")
+
+        // Через импорт: картинка с CDN становится вложением страницы.
+        try await withTempDir { dir in
+            let ws = try SQLiteWorkspace.create(at: dir.appendingPathComponent("w"), name: "A")
+            defer { ws.close() }
+            let page = try await ClipImport.run(resolved, into: ws, parent: nil, ids: RandomIDs(), now: 1)
+            let blocks = try await ws.blocks(ofPage: page.id)
+            checkEqual(blocks.map(\.type), [.bookmark, .paragraph, .image, .paragraph])
+        }
     }
 
     await test("Вырезка: страница с карточкой источника, заметкой, текстом и картинкой") {

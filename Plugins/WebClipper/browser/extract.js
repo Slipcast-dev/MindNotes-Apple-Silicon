@@ -240,15 +240,23 @@ function mnExtractPage(mode) {
   return { title, url: pageURL, siteName, excerpt, markdown: toMarkdown(articleRoot()), images };
 }
 
-// Метки mnimg-N после загрузки: скачанная картинка получает имя вложения, остальные становятся ссылкой на оригинал.
-function mnPlaceImages(markdown, sources, fetched, label) {
-  return markdown.replace(/!\[([^\]]*)\]\(mnimg-(\d+)\)/g, (_, alt, n) => {
+// Метки mnimg-N после загрузки: скачанная браузером картинка получает имя вложения; картинку с другого сайта (https)
+// скачает MindNotes — она получает имя remote-N.img и попадает в `remote`; остальные (http, встроенные) — ссылка или подпись.
+function mnPlaceImages(markdown, sources, fetched, label, remoteAllowed = true) {
+  const remote = [];
+  const text = markdown.replace(/!\[([^\]]*)\]\(mnimg-(\d+)\)/g, (_, alt, n) => {
     const got = fetched[Number(n) - 1];
     if (got) return `![${alt}](${got.name})`;
     const src = sources[Number(n) - 1]?.src || '';
+    if (remoteAllowed && /^https:/i.test(src)) {
+      const name = `remote-${n}.img`;
+      if (!remote.some((r) => r.name === name)) remote.push({ name, url: src });
+      return `![${alt}](${name})`;
+    }
     if (!/^https?:/i.test(src)) return alt;
     return `[${alt || label}](${src.replace(/\(/g, '%28').replace(/\)/g, '%29')})`;
   });
+  return { markdown: text, remote };
 }
 
 if (typeof module !== 'undefined') module.exports = { mnExtractPage, mnPlaceImages };

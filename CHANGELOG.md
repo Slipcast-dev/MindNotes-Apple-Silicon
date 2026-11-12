@@ -4,6 +4,15 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.5.2] - 2026-11-13
+
+### Added
+- **Plugins update themselves, independently of the app**: checked at launch and daily; a new version that asks for no new permissions installs without a prompt. The plugin card has “Check for Updates”, “Update automatically” and the last check time.
+- MindNotes tells extensions what it supports (`features` in `/v1/status`), so newer plugins also work with older MindNotes.
+
+### Changed
+- MindNotes downloads images from other sites (CDNs) for Web Clipper clips, so the extension no longer needs access to all sites. HTTPS and public addresses only; the type is checked by content.
+
 ## [1.5.1] - 2026-11-12
 
 ### Fixed

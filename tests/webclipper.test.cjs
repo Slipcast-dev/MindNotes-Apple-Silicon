@@ -47,12 +47,16 @@ test('переводы ru и en полные, все ключи из кода е
   for (const key of used) assert.ok(ru[key], key);
 });
 
-test('метки картинок: скачанные — вложения, остальные — ссылки, data: — подпись', () => {
+test('метки картинок: скачанные — вложения, с других сайтов — скачает MindNotes, data: — подпись', () => {
   const { mnPlaceImages } = require(path.join(dir, 'browser/extract.js'));
   const md = 'А\n\n![Схема](mnimg-1)\n\n![](mnimg-2)\n\n![Встроенная](mnimg-3)';
   const sources = [{ src: 'https://a.com/1.png' }, { src: 'https://cdn.com/x(1).jpg' }, { src: 'data:image/png;base64,AAAA' }];
   const out = mnPlaceImages(md, sources, [{ name: 'clip-1.png' }, null, null], 'Картинка');
-  assert.strictEqual(out, 'А\n\n![Схема](clip-1.png)\n\n[Картинка](https://cdn.com/x%281%29.jpg)\n\nВстроенная');
+  assert.strictEqual(out.markdown, 'А\n\n![Схема](clip-1.png)\n\n![](remote-2.img)\n\nВстроенная', 'картинку с CDN скачает MindNotes');
+  assert.deepStrictEqual(out.remote, [{ name: 'remote-2.img', url: 'https://cdn.com/x(1).jpg' }]);
+  const off = mnPlaceImages(md, sources, [], 'Картинка', false);
+  assert.strictEqual(off.markdown, 'А\n\n[Схема](https://a.com/1.png)\n\n[Картинка](https://cdn.com/x%281%29.jpg)\n\nВстроенная', 'без «Сохранять картинки» — ссылки');
+  assert.deepStrictEqual(off.remote, []);
 });
 
 test('установщик: идентификаторы MindNotes, Safari и типа пакета согласованы', () => {
@@ -113,4 +117,29 @@ test('выпуски плагина отдельно от приложения �
   assert.ok(/<!-- minApp: %s -->/.test(release), 'MindNotes узнаёт совместимость из описания выпуска');
   const bg = read('browser/background.js');
   assert.ok(/chrome\.runtime\.reload\(\)/.test(bg) && /cache: 'no-store'/.test(bg), 'расширение подхватывает новую версию с диска само');
+});
+
+test('расширению не нужен доступ ко всем сайтам', () => {
+  const m = json('browser/manifest.json');
+  assert.ok(!m.optional_host_permissions && !(m.permissions || []).includes('<all_urls>'), 'картинки с других сайтов скачивает MindNotes');
+  assert.ok(!/permissions\.request/.test(read('browser/popup.js')));
+  assert.ok(/body\.remoteImages = placed\.remote/.test(read('browser/background.js')));
+});
+
+test('плагин обновляется независимо от версии MindNotes', () => {
+  const api = read('browser/api.js');
+  const bg = read('browser/background.js');
+  assert.ok(/features: mnFeatures/.test(api), 'расширение спрашивает возможности MindNotes');
+  assert.ok(/let list = \['clips', 'targets', 'openPage'\]/.test(api), 'старая MindNotes без списка — только базовое');
+  assert.ok(/includes\('remoteImages'\)/.test(bg), 'картинки с CDN — только если MindNotes умеет');
+  const release = fs.readFileSync(path.join(root, 'scripts/release-webclipper.sh'), 'utf8');
+  assert.ok(/plugin-manifest\.json/.test(release) && /shasum -a 256 "\$DMG" plugin-manifest\.json/.test(release), 'описание плагина в выпуске и в суммах');
+  assert.ok(/minApp=""/.test(release), 'minApp необязателен');
+  const swift = fs.readFileSync(path.join(root, 'Sources/MindNotes/Workspace/Domain/LocalAPI.swift'), 'utf8');
+  for (const f of ['clips', 'targets', 'openPage', 'remoteImages']) assert.ok(swift.includes(`"${f}"`), f);
+});
+
+test('установщик умеет тихое обновление для MindNotes', () => {
+  const app = read('Installer/InstallerApp.swift');
+  assert.ok(/contains\("--update"\)/.test(app) && /syncChromeFolder/.test(app) && /exit\(/.test(app), 'без окна обновить файлы и выйти');
 });

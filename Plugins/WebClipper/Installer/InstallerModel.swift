@@ -53,16 +53,28 @@ final class InstallerModel: ObservableObject {
 
     /// Расширение для Chromium лежит в постоянной папке; при новой версии файлы заменяются, браузер подхватит их сам.
     func prepareChromeFolder() {
+        if !Self.syncChromeFolder() {
+            message = tr("Не удалось подготовить расширение в папке ", "Could not prepare the extension in ") + Paths.chromeExtension.path
+        }
+    }
+
+    /// Копия расширения из установщика в постоянную папку, если что-то изменилось. Замена — через временную папку,
+    /// чтобы браузер не увидел полуготовые файлы.
+    @discardableResult
+    static func syncChromeFolder() -> Bool {
         let fm = FileManager.default
         let source = Paths.payload.appendingPathComponent("browser/chrome", isDirectory: true)
         let target = Paths.chromeExtension
-        if !Self.differs(source, target) { return }
+        guard differs(source, target) else { return true }
         do {
             try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let staging = target.deletingLastPathComponent().appendingPathComponent(".chrome-\(UUID().uuidString)", isDirectory: true)
+            try fm.copyItem(at: source, to: staging)
             if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
-            try fm.copyItem(at: source, to: target)
+            try fm.moveItem(at: staging, to: target)
+            return true
         } catch {
-            message = tr("Не удалось подготовить расширение: ", "Could not prepare the extension: ") + error.localizedDescription
+            return false
         }
     }
 

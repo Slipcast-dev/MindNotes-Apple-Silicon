@@ -93,13 +93,7 @@ $('pair').onclick = async () => {
   finally { $('pair').disabled = false; setVisible($('pairWait'), false); }
 };
 
-$('images').onchange = async () => {
-  // Картинки с других сайтов (CDN) браузер отдаёт только с разрешением на все сайты; без него — только со страницы.
-  if ($('images').checked && chrome.permissions?.request) {
-    try { await chrome.permissions.request({ origins: ['<all_urls>'] }); } catch (e) { /* Safari спрашивает сам */ }
-  }
-  chrome.storage.local.set({ withImages: $('images').checked });
-};
+$('images').onchange = () => { chrome.storage.local.set({ withImages: $('images').checked }); };
 
 $('clip').onsubmit = async (event) => {
   event.preventDefault();

@@ -113,7 +113,6 @@ final class PluginHost: ObservableObject {
 
     /// Пакет копируется в папку расширений только после согласия; прежняя версия уходит в корзину.
     func install(from url: URL) {
-        let fm = FileManager.default
         guard url.pathExtension.lowercased() == PluginManifest.packageExtension,
               let data = try? Data(contentsOf: url.appendingPathComponent("manifest.json")) else {
             alert(L("Это не плагин MindNotes"), L("Нужна папка-пакет .mnplugin с manifest.json."))
@@ -149,16 +148,7 @@ final class PluginHost: ObservableObject {
         confirm.addButton(withTitle: L("Отмена"))
         guard confirm.runModal() == .alertFirstButtonReturn else { return }
 
-        do {
-            try fm.createDirectory(at: registry.folder, withIntermediateDirectories: true)
-            if url.standardizedFileURL != destination.standardizedFileURL {
-                let staging = registry.folder.appendingPathComponent(".install-\(UUID().uuidString)", isDirectory: true)
-                try fm.copyItem(at: url, to: staging)
-                if let old = existing?.folder { try fm.trashItem(at: old, resultingItemURL: nil) }
-                if fm.fileExists(atPath: destination.path) { try fm.trashItem(at: destination, resultingItemURL: nil) }
-                try fm.moveItem(at: staging, to: destination)
-            }
-        } catch {
+        do { try copyIntoExtensions(url, destination: destination, replacing: existing?.folder) } catch {
             alert(L("Плагин не установлен"), error.localizedDescription)
             return
         }
@@ -167,6 +157,38 @@ final class PluginHost: ObservableObject {
         openAutoPair(manifest.id)
         shell?.goSettings()
         shell?.notice = String(format: L("Плагин «%@» установлен. Настройки — в разделе «Расширения»."), manifest.name)
+    }
+
+    /// Пакет в папку расширений: через временную копию, прежняя версия — в корзину.
+    private func copyIntoExtensions(_ url: URL, destination: URL, replacing old: URL?) throws {
+        let fm = FileManager.default
+        let folder = ExtensionRegistry.shared.folder
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        guard url.standardizedFileURL != destination.standardizedFileURL else { return }
+        let staging = folder.appendingPathComponent(".install-\(UUID().uuidString)", isDirectory: true)
+        try fm.copyItem(at: url, to: staging)
+        if let old, fm.fileExists(atPath: old.path) { try fm.trashItem(at: old, resultingItemURL: nil) }
+        if fm.fileExists(atPath: destination.path) { try fm.trashItem(at: destination, resultingItemURL: nil) }
+        try fm.moveItem(at: staging, to: destination)
+    }
+
+    /// Обновление плагина из выпуска (ADR-0019, п. 9). Доверенное — тот же плагин, версия новее, разрешений не больше —
+    /// ставится без вопроса; иначе обычная установка с показом разрешений. Возвращает, стоит ли теперь новая версия.
+    @discardableResult
+    func installUpdate(from url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url.appendingPathComponent("manifest.json")),
+              case .success(let manifest) = PluginManifest.parse(data) else { return false }
+        let registry = ExtensionRegistry.shared
+        let existing = registry.items.first { $0.id == manifest.id }
+        let app = AppVersion((Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "")
+        if let existing, let installed = existing.plugin, manifest.isTrustedUpdate(of: installed, app: app) {
+            let destination = registry.folder.appendingPathComponent("\(manifest.id).\(PluginManifest.packageExtension)", isDirectory: true)
+            do { try copyIntoExtensions(url, destination: destination, replacing: existing.folder) } catch { return false }
+            registry.reload() // включённость и подключения браузеров сохраняются
+            return true
+        }
+        install(from: url)
+        return registry.items.first { $0.id == manifest.id }?.manifest.version == manifest.version
     }
 
     /// Удаление — в корзину Finder; подключения плагина отзываются.
@@ -249,7 +271,7 @@ final class PluginHost: ObservableObject {
         let caller = client(for: request)
         switch route {
         case .status:
-            var out: [String: Any] = ["app": AppEdition.displayName, "api": PluginManifest.apiVersion,
+            var out: [String: Any] = ["app": AppEdition.displayName, "api": PluginManifest.apiVersion, "features": LocalAPI.features,
                                       "version": (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "",
                                       "workspace": shell?.isOpen == true, "paired": caller != nil]
             if let caller { out["plugin"] = caller.plugin; out["active"] = isActive(caller.plugin) }
@@ -279,16 +301,22 @@ final class PluginHost: ObservableObject {
             let targets = shell.clipTargets().prefix(2000).map { ["id": $0.id.uuidString.lowercased(), "title": $0.title, "path": $0.path, "folder": $0.isFolder] as [String: Any] }
             return .json(200, ["targets": Array(targets), "defaultFolder": ShellModel.clipFolderTitle])
         case .clips:
-            let clip: WebClip
+            var clip: WebClip
             switch WebClip.parse(request.body) {
             case .success(let c): clip = c
             case .failure(let problem): return .error(400, "bad_clip", Self.describe(problem))
             }
-            if !clip.images.isEmpty, !plugin.manifest.permissions.contains(.assetsCreate) {
+            if !clip.images.isEmpty || !clip.remoteImages.isEmpty, !plugin.manifest.permissions.contains(.assetsCreate) {
                 return .error(403, "permission", String(format: L("У плагина нет разрешения: %@."), Self.title(.assetsCreate)))
             }
             if !clip.tags.isEmpty, !plugin.manifest.permissions.contains(.tagsWrite) {
                 return .error(403, "permission", String(format: L("У плагина нет разрешения: %@."), Self.title(.tagsWrite)))
+            }
+            // Картинки с других сайтов скачивает приложение: расширению не нужен доступ ко всем сайтам.
+            if !clip.remoteImages.isEmpty {
+                let budget = WebClip.maxTotalImageBytes - clip.images.reduce(0) { $0 + $1.data.count }
+                let fetched = await ClipImageFetcher.fetch(clip.remoteImages, budget: max(0, budget))
+                clip = clip.resolvingRemote(fetched, label: L("Картинка"))
             }
             switch await shell.saveClip(clip) {
             case .success(let page): return .json(201, ["page": ["id": page.id.uuidString.lowercased(), "title": page.title]])
@@ -493,41 +521,71 @@ enum ChromeInstallGuide {
     }
 }
 
-/// Строка обновления плагина в его карточке: проверка, «Доступна версия X», загрузка.
+/// Обновления плагина в его карточке (ADR-0019, п. 9): кнопка проверки видна всегда, рядом — «Обновлять
+/// автоматически» и время последней проверки; найденное обновление — с кнопкой или ставится само.
 struct PluginUpdateRow: View {
     @ObservedObject var updater = PluginUpdater.shared
     let plugin: PluginHost.Plugin
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            status
+            HStack(spacing: 10) {
+                Button("Проверить обновления") { Task { await updater.check(silent: false) } }
+                    .buttonStyle(NotesButtonStyle(kind: .plain))
+                    .disabled(busy)
+                Toggle("Обновлять автоматически", isOn: Binding(get: { updater.isAuto(plugin.id) }, set: { updater.setAuto(plugin.id, $0) }))
+                    .toggleStyle(.checkbox).font(.system(size: 12))
+                Spacer()
+            }
+        }
+    }
+
+    private var busy: Bool {
+        switch updater.state(plugin.id) {
+        case .checking, .downloading, .installing: return true
+        default: return false
+        }
+    }
+
+    private var lastChecked: String {
+        guard let date = updater.lastCheck[plugin.id] else { return L("ещё не проверялось") }
+        let f = DateFormatter()
+        f.doesRelativeDateFormatting = true
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return String(format: L("последняя проверка: %@"), f.string(from: date))
+    }
+
+    @ViewBuilder private var status: some View {
         HStack(spacing: 8) {
             switch updater.state(plugin.id) {
-            case .available(let release):
-                Text(String(format: L("Доступна версия %@"), release.version.description)).font(.system(size: 12, weight: .semibold))
+            case .available(let release, let trusted):
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(format: L("Доступна версия %@"), release.version.description)).font(.system(size: 12, weight: .semibold))
+                    if !trusted {
+                        Text("Новой версии нужны новые разрешения — MindNotes покажет их перед установкой.")
+                            .font(.system(size: 11)).foregroundColor(Tokens.muted)
+                    }
+                }
                 Spacer()
                 Button("Обновить") { updater.install(release, plugin: plugin.id) }.buttonStyle(NotesButtonStyle())
             case .needsApp(let release):
                 Text(String(format: L("Версии %@ нужна MindNotes %@ или новее — сначала обновите приложение."),
                             release.version.description, release.minApp?.description ?? "?"))
                     .font(.system(size: 11)).foregroundColor(Tokens.muted)
-                Spacer()
             case .checking:
                 ProgressView().controlSize(.small)
                 Text("Проверка обновлений…").font(.system(size: 11)).foregroundColor(Tokens.muted)
-                Spacer()
             case .downloading, .installing:
                 ProgressView().controlSize(.small)
                 Text("Загрузка и проверка обновления…").font(.system(size: 11)).foregroundColor(Tokens.muted)
-                Spacer()
             case .failed(let message):
                 Text(message).font(.system(size: 11)).foregroundColor(Tokens.danger)
-                Spacer()
-                Button("Повторить") { Task { await updater.check(silent: false) } }.buttonStyle(NotesButtonStyle(kind: .plain))
             case .upToDate:
-                Text("Установлена последняя версия").font(.system(size: 11)).foregroundColor(Tokens.muted)
-                Spacer()
+                Text(L("Установлена последняя версия") + " · " + lastChecked).font(.system(size: 11)).foregroundColor(Tokens.muted)
             case .idle:
-                Spacer()
-                Button("Проверить обновления") { Task { await updater.check(silent: false) } }.buttonStyle(NotesButtonStyle(kind: .plain))
+                Text(lastChecked.prefix(1).uppercased() + lastChecked.dropFirst()).font(.system(size: 11)).foregroundColor(Tokens.muted)
             }
         }
     }

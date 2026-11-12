@@ -7,6 +7,9 @@ enum LocalAPI {
     static let port: UInt16 = 27183
     static let maxHeader = 16 * 1024
     static let maxBody = 40 * 1024 * 1024
+    /// Что умеет это приложение (ADR-0019, п. 9). Клиент подстраивается под список, а не под номер версии MindNotes:
+    /// так плагин обновляется независимо. Новая возможность — новое слово; `api` растёт только при несовместимости.
+    static let features = ["clips", "targets", "openPage", "remoteImages"]
 
     struct Request: Equatable {
         var method: String

@@ -105,10 +105,16 @@ async function clip(tab, options) {
     body.title = body.title || tab.title || '';
     body.images = [{ name: 'screenshot.png', mime: 'image/png', data: dataUrl.split(',')[1] }];
   } else if (mode === 'image') {
-    const picture = await download(options.srcUrl);
-    if (!picture) throw new MNError('image', t('errImage'));
+    const picture = await download(options.srcUrl).catch(() => null);
     body.title = body.title || tab.title || '';
-    body.images = [{ name: 'image.' + ACCEPTED[picture.mime], ...picture }];
+    if (picture) body.images = [{ name: 'image.' + ACCEPTED[picture.mime], mime: picture.mime, data: picture.data }];
+    else if (/^https:/i.test(options.srcUrl || '') && (await mnAPI.features()).includes('remoteImages')) {
+      body.remoteImages = [{ name: 'image.img', url: options.srcUrl }]; // скачает MindNotes
+    } else if (/^https?:/i.test(options.srcUrl || '')) {
+      body.mode = 'bookmark'; // старая MindNotes не скачивает картинки сама — сохраняем ссылкой
+      body.url = options.srcUrl;
+    }
+    else throw new MNError('image', t('errImage'));
   } else if (mode === 'link') {
     body.mode = 'bookmark';
     body.url = options.linkUrl;
@@ -128,8 +134,12 @@ async function clip(tab, options) {
     body.siteName = result.siteName;
     const withImages = options.withImages !== false;
     const fetched = withImages ? await downloadAll(result.images) : [];
-    body.markdown = mnPlaceImages(result.markdown, result.images, fetched, t('imageLink'));
+    // Картинки с других сайтов скачивает MindNotes, если умеет; старая — получает их ссылками.
+    const remoteAllowed = withImages && (await mnAPI.features()).includes('remoteImages');
+    const placed = mnPlaceImages(result.markdown, result.images, fetched, t('imageLink'), remoteAllowed);
+    body.markdown = placed.markdown;
     body.images = fetched.filter(Boolean);
+    body.remoteImages = placed.remote; // картинки с других сайтов скачает MindNotes
   }
   return mnAPI.saveClip(body);
 }
@@ -147,7 +157,8 @@ async function downloadAll(list) {
   return out;
 }
 
-/// Картинка в base64. Без разрешения на все сайты браузер отдаст только картинки самой страницы — это нормально.
+/// Картинка в base64. Браузер отдаёт без лишних разрешений картинки самой страницы; картинки с других сайтов
+/// (CDN) расширение не скачивает, а передаёт адрес в MindNotes — так ему не нужен доступ ко всем сайтам.
 async function download(src) {
   if (!src) return null;
   let blob;

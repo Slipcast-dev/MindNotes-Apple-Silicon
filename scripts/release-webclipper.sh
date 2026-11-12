@@ -21,10 +21,12 @@ git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && fail "тег $TAG уж�
 [[ -z "${DRY_RUN:-}" ]] && git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1 && fail "тег $TAG уже есть на GitHub"
 grep -q "^## \[$version\]" "$SRC/CHANGELOG.md" || fail "в $SRC/CHANGELOG.md нет раздела ## [$version]"
 
-# 2. Совместимость: minApp обязателен, и такая MindNotes уже выпущена — иначе плагин некуда поставить.
-minApp=$(/usr/bin/plutil -extract minApp raw -o - "$SRC/manifest.json" 2>/dev/null) || fail "в $SRC/manifest.json нет minApp — укажите первую версию MindNotes, с которой работает плагин"
+# 2. Совместимость. Плагин подстраивается под возможности MindNotes (`features`), а не под её версию (ADR-0019, п. 9),
+#    поэтому minApp необязателен: он нужен только при несовместимом изменении API. Если задан — такая MindNotes
+#    уже должна быть выпущена, иначе плагин некуда поставить.
 latestApp=$(gh api "repos/$REPO/releases/latest" --jq .tag_name | sed 's/^v//')
-if [[ "$(printf '%s\n%s\n' "$minApp" "$latestApp" | sort -V | head -1)" != "$minApp" ]]; then
+minApp=$(/usr/bin/plutil -extract minApp raw -o - "$SRC/manifest.json" 2>/dev/null) || minApp=""
+if [[ -n "$minApp" && "$(printf '%s\n%s\n' "$minApp" "$latestApp" | sort -V | head -1)" != "$minApp" ]]; then
     message="плагину нужна MindNotes $minApp, а последняя выпущенная — $latestApp. Сначала выпустите приложение."
     [[ -n "${DRY_RUN:-}" ]] && echo "Предупреждение: $message" || fail "$message"
 fi
@@ -44,13 +46,18 @@ Open “MindNotes Web Clipper”: it moves itself to Applications and adds the p
 and the extension to your browsers. Requires a MindNotes version with plugin support.
 TXT
 hdiutil create -volname "MindNotes Web Clipper" -srcfolder "$STAGE" -ov -format UDZO "$OUT_DIR/$DMG" >/dev/null
-(cd "$OUT_DIR" && shasum -a 256 "$DMG" > SHA256SUMS.txt)
+# Описание плагина отдельным файлом: по нему MindNotes сравнивает разрешения до скачивания образа и решает,
+# можно ли обновить без вопроса.
+cp "$SRC/manifest.json" "$OUT_DIR/plugin-manifest.json"
+(cd "$OUT_DIR" && shasum -a 256 "$DMG" plugin-manifest.json > SHA256SUMS.txt)
 # Сборка не должна оставлять в системе второе расширение Safari.
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$OUT_DIR/MindNotes Web Clipper.app" 2>/dev/null || true
 
 notes="$OUT_DIR/notes.md"
 awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && /^## \[/ {exit} on {print}' "$SRC/CHANGELOG.md" > "$notes"
-printf '\nТребуется MindNotes %s или новее.\n\n<!-- minApp: %s -->\n' "$minApp" "$minApp" >> "$notes"
+if [[ -n "$minApp" ]]; then
+    printf '\nТребуется MindNotes %s или новее.\n\n<!-- minApp: %s -->\n' "$minApp" "$minApp" >> "$notes"
+fi
 
 if [[ -n "${DRY_RUN:-}" ]]; then
     echo "Проверка пройдена, публикация пропущена (DRY_RUN): $OUT_DIR/$DMG"
@@ -60,7 +67,7 @@ fi
 # 4. Тег и выпуск — не «последний», чтобы обновления приложения по-прежнему находили выпуск MindNotes.
 git tag -a "$TAG" -m "Web Clipper $version"
 git push origin "$TAG"
-gh release create "$TAG" "$OUT_DIR/$DMG" "$OUT_DIR/SHA256SUMS.txt" --repo "$REPO" \
+gh release create "$TAG" "$OUT_DIR/$DMG" "$OUT_DIR/plugin-manifest.json" "$OUT_DIR/SHA256SUMS.txt" --repo "$REPO" \
     --title "Web Clipper $version" --notes-file "$notes" --latest=false
 [[ "$(gh api "repos/$REPO/releases/latest" --jq .tag_name)" == "v$latestApp" ]] \
     || echo "ВНИМАНИЕ: последним выпуском на GitHub стал не MindNotes — проверьте выпуски, иначе приложение не найдёт свои обновления."
