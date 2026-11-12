@@ -106,6 +106,8 @@ final class DatabaseModel: ObservableObject {
     private var chain: Task<Void, Never>?
     private let flush: () async throws -> Void
     private let pagesChanged: () async throws -> Void
+    /// После успешной правки записей: синхронизация с Календарём подхватывает изменения.
+    var onChange: (() -> Void)?
     private let report: (String) -> Void
 
     /// Встроенное представление: состояние принадлежит блоку страницы, а не базе.
@@ -150,7 +152,7 @@ final class DatabaseModel: ObservableObject {
         let previous = chain
         chain = Task { @MainActor in
             await previous?.value
-            do { try await body() } catch { self.report((error as? LocalizedError)?.errorDescription ?? error.localizedDescription) }
+            do { try await body(); self.onChange?() } catch { self.report((error as? LocalizedError)?.errorDescription ?? error.localizedDescription) }
             do { try await self.load() } catch { self.report((error as? LocalizedError)?.errorDescription ?? error.localizedDescription) }
         }
     }

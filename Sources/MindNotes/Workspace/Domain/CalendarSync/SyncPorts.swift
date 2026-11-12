@@ -1,0 +1,107 @@
+import Foundation
+
+/// Порты синхронизации: движок не знает ни про EventKit, ни про хранилище MindNotes.
+/// В лаборатории это `EventKitGateway` и `JSONItemStore`, в тестах — подделки в памяти.
+
+enum AccessStatus: Equatable, Sendable {
+    case notDetermined, granted, denied, writeOnly
+}
+
+/// Календарь или список напоминаний.
+struct CalendarInfo: Identifiable, Equatable, Hashable, Sendable {
+    var id: String
+    var title: String
+    /// Название источника: iCloud, Google, «На Mac».
+    var source: String
+    /// 0xRRGGBB.
+    var color: UInt32
+    var isEditable: Bool
+}
+
+/// Элемент для видов календаря: экземпляр события любого видимого календаря или задача со сроком.
+struct AgendaEntry: Identifiable, Equatable, Sendable {
+    /// Уникален для экземпляра серии: id EventKit + начало.
+    var id: String
+    var kind: SyncKind
+    /// `calendarItemIdentifier` — по нему элемент открывается на редактирование.
+    var externalID: String
+    var title: String
+    var notes: String?
+    var start: Date
+    var end: Date
+    var isAllDay: Bool
+    var isCompleted: Bool
+    var isRecurring: Bool
+    var isEditable: Bool
+    var calendarID: String
+    var calendarTitle: String
+    var color: UInt32
+}
+
+/// Новое или изменённое событие из видов календаря.
+struct EventDraft: Equatable, Sendable {
+    /// `nil` — новое событие.
+    var externalID: String?
+    /// Начало изменяемого экземпляра серии.
+    var occurrenceStart: Date?
+    var calendarID: String
+    var title: String
+    var notes: String?
+    var start: Date
+    var end: Date
+    var isAllDay: Bool
+    var recurrence: SyncRecurrence?
+    var alarmMinutes: Int?
+}
+
+/// Какие экземпляры серии затрагивает правка.
+enum EditSpan: Sendable { case thisOnly, future }
+
+enum SyncError: Error, Equatable {
+    case accessDenied(SyncKind)
+    case noSource
+    case notFound
+    case eventKit(String)
+}
+
+@MainActor
+protocol CalendarGateway: AnyObject {
+    func status(_ kind: SyncKind) -> AccessStatus
+    func requestAccess(_ kind: SyncKind) async -> Bool
+    /// Возвращает id календаря приложения, создавая его при необходимости.
+    func ensureContainer(_ kind: SyncKind, preferredID: String?, title: String) throws -> String
+    func removeContainer(_ id: String) throws
+    func containers(_ kind: SyncKind) -> [CalendarInfo]
+    func fetch(_ kind: SyncKind, container: String, window: DateInterval?) async throws -> [RemoteItem]
+    /// Элементы по идентификаторам EventKit в любом календаре; ненайденные пропускаются.
+    func lookup(_ externalIDs: [String], kind: SyncKind) -> [RemoteItem]
+    /// Создаёт или обновляет элемент и возвращает его состояние после сохранения.
+    func upsert(_ item: LocalItem, container: String, alarmMinutes: Int?) throws -> RemoteItem
+    func delete(externalID: String, kind: SyncKind) throws
+    /// События видимых календарей и задачи со сроком в интервале.
+    func agenda(_ interval: DateInterval, calendarIDs: Set<String>?, reminderListIDs: [String]) async -> [AgendaEntry]
+    /// Правка из видов календаря: пишет прямо в EventKit, а элементы приложения подтягиваются сверкой.
+    @discardableResult
+    func saveEvent(_ draft: EventDraft, span: EditSpan) throws -> String
+    func deleteEvent(externalID: String, occurrenceStart: Date?, span: EditSpan) throws
+    func setReminderCompleted(externalID: String, _ done: Bool) throws
+    /// Вызывается при любом изменении в базе Календаря (в том числе после собственных записей).
+    var onChange: (() -> Void)? { get set }
+}
+
+@MainActor
+protocol LocalItemStore: AnyObject {
+    func all(_ kind: SyncKind) -> [LocalItem]
+    func item(_ id: UUID) -> LocalItem?
+    func save(_ item: LocalItem)
+    func purge(_ id: UUID)
+    /// Перед сверкой: подготовить снимок (например, перечитать базу).
+    func prepare() async
+    /// После сверки: дождаться записи изменений.
+    func finish() async
+}
+
+extension LocalItemStore {
+    func prepare() async {}
+    func finish() async {}
+}

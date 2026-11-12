@@ -40,6 +40,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Slipcast-dev. All rights reserved.</string>
   <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>MindNotes synchronizes database records with Calendar.</string>
+  <key>NSRemindersFullAccessUsageDescription</key><string>MindNotes synchronizes database records with Reminders.</string>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>

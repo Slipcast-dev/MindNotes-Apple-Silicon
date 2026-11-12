@@ -177,6 +177,8 @@ struct NotesLayout: View {
         case .settings: SettingsScreen()
         case .files: FilesScreen()
         case .trash: TrashScreen()
+        case .calendar:
+            if let host = shell.calendarSync { CalendarView(engine: host.engine).background(Tokens.paper) } else { Color.clear }
         case .templates: TemplatesScreen()
         case .tag(let id): TagScreen(id: id).id(id)
         default: HomeScreen().background(Tokens.paper)
@@ -219,6 +221,7 @@ struct CrumbBar: View {
         case .backups: return L("Резервные копии")
         case .settings: return L("Настройки")
         case .trash: return L("Корзина")
+        case .calendar: return L("Календарь")
         case .templates: return L("Шаблоны")
         case .tag(let id): return shell.tags.first { $0.id == id }?.name ?? L("Тег")
         case .files: return L("Импорт")

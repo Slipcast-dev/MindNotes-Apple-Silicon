@@ -5,6 +5,8 @@ if await handleChildMode() { exit(0) }
 
 await runDomainTests()
 await runAllNotesTests()
+await runCalendarSyncTests()
+do { try await runAdapterTests() } catch { TestRun.failed.append("calendar adapter: \(error)") }
 
 print("passed=\(TestRun.passed) failed=\(TestRun.failed.count)")
 if !TestRun.failed.isEmpty {

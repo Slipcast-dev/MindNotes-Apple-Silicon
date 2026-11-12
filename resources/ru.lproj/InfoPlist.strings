@@ -1,0 +1,3 @@
+/* Тексты запросов доступа macOS. */
+"NSCalendarsFullAccessUsageDescription" = "MindNotes синхронизирует записи баз данных с Календарём.";
+"NSRemindersFullAccessUsageDescription" = "MindNotes синхронизирует записи баз данных с Напоминаниями.";
