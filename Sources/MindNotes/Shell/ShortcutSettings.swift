@@ -106,7 +106,6 @@ struct ShortcutsSettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Сочетания клавиш").font(.system(size: 17, weight: .semibold))
                 Spacer()
                 Button(L("Сбросить все")) {
                     guard PromptAlert.confirm(L("Вернуть стандартные сочетания клавиш?"), detail: L("Все свои сочетания будут заменены стандартными."), action: L("Сбросить")) else { return }
@@ -117,7 +116,7 @@ struct ShortcutsSettings: View {
                 .buttonStyle(NotesButtonStyle())
                 .disabled(settings.overrides.isEmpty)
             }
-            .padding(.top, 24).padding(.bottom, 4)
+            .padding(.bottom, 4)
             Text("Нажмите на сочетание, чтобы задать своё: зажмите ⌘ или ⌃ с нужной клавишей. Esc — отмена, ⌫ — убрать сочетание.")
                 .font(.system(size: 13)).foregroundColor(Tokens.muted).padding(.bottom, 10)
             if let message {

@@ -98,7 +98,6 @@ struct ExtensionsSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Расширения").font(.system(size: 17, weight: .semibold)).padding(.top, 24).padding(.bottom, 10)
             VStack(alignment: .leading, spacing: 10) {
                 Text("Свои темы, иконки приложения и плагины. Код плагинов не исполняется внутри MindNotes: они работают в браузере или своей программе и обращаются к приложению только с вашего разрешения.")
                     .font(.system(size: 12)).foregroundColor(Tokens.muted)

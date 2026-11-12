@@ -119,9 +119,10 @@ struct SettingsScreen: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Tokens.line))
 
                 AISettingsSection()
-                ShortcutsSettings()
+                // Длинные разделы свёрнуты по умолчанию: заголовок раскрывает, состояние запоминается.
+                CollapsibleSettingsSection(title: L("Сочетания клавиш"), key: "settings.expanded.shortcuts") { ShortcutsSettings() }
                 if shell.isOpen { PeopleSettings() }
-                ExtensionsSettings()
+                CollapsibleSettingsSection(title: L("Расширения"), key: "settings.expanded.extensions") { ExtensionsSettings() }
 
                 Text("Пространства").font(.system(size: 17, weight: .semibold)).padding(.top, 24).padding(.bottom, 10)
                 VStack(spacing: 0) {
@@ -272,5 +273,40 @@ struct PeopleSettings: View {
         guard !name.isEmpty else { return }
         shell.addPerson(name: name)
         newName = ""
+    }
+}
+
+/// Раздел настроек со сворачиваемым содержимым: щелчок по заголовку раскрывает или сворачивает.
+struct CollapsibleSettingsSection<Content: View>: View {
+    let title: String
+    @AppStorage private var expanded: Bool
+    private let content: Content
+
+    init(title: String, key: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        _expanded = AppStorage(wrappedValue: false, key)
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { expanded.toggle() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .foregroundColor(Tokens.muted)
+                        .frame(width: 12)
+                    Text(title).font(.system(size: 17, weight: .semibold)).foregroundColor(Tokens.ink)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 24).padding(.bottom, 10)
+            .accessibilityLabel(Text(title))
+            .accessibilityValue(Text(expanded ? "Развёрнуто" : "Свёрнуто"))
+            if expanded { content }
+        }
     }
 }
