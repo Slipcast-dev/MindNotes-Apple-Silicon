@@ -4,7 +4,7 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.1] - 2026-11-12
 
 ### Added
 - **Keyboard shortcuts in Settings**: every menu command with its standard shortcut; set your own, remove one, or reset one or all to the standard ones.

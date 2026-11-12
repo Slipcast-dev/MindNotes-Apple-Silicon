@@ -43,8 +43,9 @@
 
 | Что | Где | SHA-256 |
 |---|---|---|
-| Приложение 1.4.0 (исполняемый файл arm64) | `build/MindNotes.app` | `a160fe608dd1ed1c9b643169606e1f7bf80ffb0be580fa1fd90a8e254e5e0a44` |
-| Образ для установки 1.4.0 (страница Releases) | `build/MindNotes-1.4.0.dmg` | `a461201314b747375507d1ff602e8a16ef59bc937c640f6d4406985ccf265a27` |
+| Приложение 1.4.1 (исполняемый файл arm64) | `build/MindNotes.app` | `138f542eae42c80fcffaf7c20106c0681106168fc96836f6302c84fc7f13e754` |
+| Образ для установки 1.4.1 (страница Releases) | `build/MindNotes-1.4.1.dmg` | `f8918e2092a2195b94602f835a2c6a8d2463c2d92a13ccbc18d96fe4850a7f40` |
+| Образ выпуска 1.4.0 (страница Releases) | `build/MindNotes-1.4.0.dmg` | `a461201314b747375507d1ff602e8a16ef59bc937c640f6d4406985ccf265a27` |
 | Образ выпуска 1.3.0 (страница Releases) | `build/MindNotes-1.3.0.dmg` | `9fdc8386f2ab62fded64d4bc605579c85bb880f5467b28c772a9162dbcee1626` |
 | Демо-архив, вымышленные данные | `build/Demo-workspace.mindnotesbackup` | `f92ad064fabea4148c4f60acf1262535ab7545a5ae6c3dfb5d4ebaeff0224085` |
 
