@@ -4,6 +4,11 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.4.2] - 2026-11-12
+
+### Fixed
+- Updates no longer fail with “The request timed out”: the image is downloaded as a file instead of byte by byte on the main thread, which stalled the download. Versions 1.3.0–1.4.1 have the old downloader, so install this version from the `.dmg` once; later updates then work from the app.
+
 ## [1.4.1] - 2026-11-12
 
 ### Added

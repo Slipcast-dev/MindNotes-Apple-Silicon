@@ -46,6 +46,20 @@ final class Updater: ObservableObject {
         return URLSession(configuration: config)
     }()
 
+    /// Загрузка файлов выпуска: целиком в файл (download task). Прежнее чтение образа по байту в главном потоке
+    /// не успевало забирать данные, загрузка вставала, и через 20 с запрос обрывался по времени (1.3.0–1.4.1).
+    private static let files: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpCookieAcceptPolicy = .never
+        config.httpShouldSetCookies = false
+        config.urlCache = nil
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 30 * 60
+        config.httpAdditionalHeaders = ["User-Agent": "MindNotes updater", "Accept": "application/octet-stream"]
+        return URLSession(configuration: config)
+    }()
+    private var progressObservation: NSKeyValueObservation?
+
     /// Запуск: в автоматическом режиме проверка сейчас (если не было сегодня) и раз в сутки.
     func start() {
         guard canUpdate, mode == .automatic else { return }
@@ -99,7 +113,9 @@ final class Updater: ObservableObject {
             do {
                 state = .downloading(0)
                 let image = try await download(release.image)
-                let sums = try await Self.session.data(from: release.checksums).0
+                let sumsFile = try await fetch(release.checksums, limit: 1 << 20, progress: false)
+                defer { try? FileManager.default.removeItem(at: sumsFile) }
+                let sums = try Data(contentsOf: sumsFile)
                 guard let expected = ReleaseInfo.checksums(String(decoding: sums, as: UTF8.self))[release.image.lastPathComponent] else {
                     throw UpdateError(L("В выпуске нет контрольной суммы образа."))
                 }
@@ -118,28 +134,37 @@ final class Updater: ObservableObject {
     struct UpdateError: Error { let message: String; init(_ m: String) { message = m } }
 
     private func download(_ url: URL) async throws -> URL {
-        let (bytes, response) = try await Self.session.bytes(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw URLError(.badServerResponse) }
-        let total = max(1, http.expectedContentLength)
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("MindNotes-update-\(UUID().uuidString).dmg")
-        FileManager.default.createFile(atPath: file.path, contents: nil)
-        let handle = try FileHandle(forWritingTo: file)
-        defer { try? handle.close() }
-        var buffer = Data()
-        var received: Int64 = 0
-        for try await byte in bytes {
-            buffer.append(byte)
-            if buffer.count >= 1 << 20 {
-                try handle.write(contentsOf: buffer)
-                received += Int64(buffer.count)
-                buffer.removeAll(keepingCapacity: true)
-                state = .downloading(min(1, Double(received) / Double(total)))
-            }
-            if received > 2 << 30 { throw UpdateError(L("Образ слишком большой.")) }
-        }
-        try handle.write(contentsOf: buffer)
+        let file = try await fetch(url, limit: 2 << 30, progress: true)
         state = .downloading(1)
         return file
+    }
+
+    /// Файл выпуска во временную папку. Прогресс — от самой загрузки; размер ограничен.
+    private func fetch(_ url: URL, limit: Int64, progress: Bool) async throws -> URL {
+        let target = FileManager.default.temporaryDirectory.appendingPathComponent("MindNotes-update-\(UUID().uuidString)-\(url.lastPathComponent)")
+        defer { progressObservation = nil }
+        return try await withCheckedThrowingContinuation { (done: CheckedContinuation<URL, Error>) in
+            let task = Self.files.downloadTask(with: url) { temp, response, error in
+                if let error { return done.resume(throwing: error) }
+                guard let temp, let http = response as? HTTPURLResponse, http.statusCode == 200 else { return done.resume(throwing: URLError(.badServerResponse)) }
+                do {
+                    let size = (try FileManager.default.attributesOfItem(atPath: temp.path)[.size] as? NSNumber)?.int64Value ?? 0
+                    guard size > 0, size <= limit else { throw UpdateError(L("Образ слишком большой.")) }
+                    // Временный файл удаляется сразу после этого обработчика: переносим его к себе.
+                    try FileManager.default.moveItem(at: temp, to: target)
+                    done.resume(returning: target)
+                } catch {
+                    done.resume(throwing: error)
+                }
+            }
+            if progress {
+                progressObservation = task.progress.observe(\.fractionCompleted) { [weak self] p, _ in
+                    let value = min(1, max(0, p.fractionCompleted))
+                    Task { @MainActor in if case .downloading = self?.state { self?.state = .downloading(value) } }
+                }
+            }
+            task.resume()
+        }
     }
 
     nonisolated private static func sha256(of file: URL) throws -> String {
