@@ -908,11 +908,20 @@ struct AIPropertyConfig: Equatable {
     var prompt: String = ""
     /// Обновлять ячейку записи после правки её страницы (через 5 с тишины). По умолчанию выключено: каждый раз — запрос.
     var auto = false
+    /// Выбор и множественный выбор: ИИ может добавить новый вариант, если ни один не подходит
+    /// (не больше `AIValues.maxNewOptionsPerFill` за одно заполнение). По умолчанию включено.
+    var newOptions = true
 
-    init(kind: Kind, prompt: String = "", auto: Bool = false) {
+    init(kind: Kind, prompt: String = "", auto: Bool = false, newOptions: Bool = true) {
         self.kind = kind
         self.prompt = prompt
         self.auto = auto
+        self.newOptions = newOptions
+    }
+
+    /// Можно ли создавать варианты у этого свойства: только выбор и множественный выбор, статус — нет.
+    func createsOptions(_ property: PropertyDefinition) -> Bool {
+        newOptions && (property.type == .select || property.type == .multiSelect)
     }
 
     init?(json: JSONValue?) {
@@ -920,12 +929,14 @@ struct AIPropertyConfig: Equatable {
         self.kind = kind
         prompt = json?["prompt"]?.stringValue ?? ""
         auto = json?["auto"] == .bool(true)
+        newOptions = json?["newOptions"] != .bool(false)
     }
 
     var json: JSONValue {
         var o: [String: JSONValue] = ["kind": .string(kind.rawValue)]
         if !prompt.isEmpty { o["prompt"] = .string(prompt) }
         if auto { o["auto"] = .bool(true) }
+        if !newOptions { o["newOptions"] = .bool(false) }
         return .object(o)
     }
 
@@ -963,7 +974,7 @@ struct AIPropertyConfig: Equatable {
 
     func request(title: String, properties: [(name: String, value: String)], body: String, target: PropertyDefinition? = nil) -> String {
         var task = "Задание: " + instruction
-        if let target { task += "\nСвойство: «" + target.name + "», " + AIValues.describe(target) }
+        if let target { task += "\nСвойство: «" + target.name + "», " + AIValues.describe(target, allowNew: createsOptions(target)) }
         var record = "Заголовок: " + title
         for p in properties where !p.value.isEmpty { record += "\n" + p.name + ": " + p.value }
         let text = String(body.prefix(8_000))
@@ -1061,8 +1072,14 @@ enum AIValues {
     }
 
     /// Схема поля `value`. У выбора — список вариантов: модель не может придумать новый.
-    static func schema(for property: PropertyDefinition) -> JSONValue {
+    static func schema(for property: PropertyDefinition, allowNew: Bool = false) -> JSONValue {
         let options = names(property)
+        // Новые варианты разрешены: без `enum`, существующие — подсказкой в описании.
+        if allowNew, property.type == .select || property.type == .multiSelect {
+            let hint = options.isEmpty ? "Короткий вариант" : "Лучше из существующих: " + options.prefix(100).joined(separator: ", ")
+            let item: JSONValue = .object(["type": "string", "description": .string(hint)])
+            return property.type == .select ? item : .object(["type": "array", "items": item])
+        }
         switch property.type {
         case .number: return .object(["type": "number"])
         case .checkbox: return .object(["type": "boolean"])
@@ -1076,12 +1093,12 @@ enum AIValues {
         }
     }
 
-    static func format(for property: PropertyDefinition) -> JSONValue {
+    static func format(for property: PropertyDefinition, allowNew: Bool = false) -> JSONValue {
         .object([
             "type": "json_schema",
             "schema": .object([
                 "type": "object",
-                "properties": .object(["value": schema(for: property)]),
+                "properties": .object(["value": schema(for: property, allowNew: allowNew)]),
                 "required": .array(["value"]),
                 "additionalProperties": .bool(false),
             ]),
@@ -1089,8 +1106,14 @@ enum AIValues {
     }
 
     /// Подсказка модели о типе свойства.
-    static func describe(_ property: PropertyDefinition) -> String {
+    static func describe(_ property: PropertyDefinition, allowNew: Bool = false) -> String {
         let options = names(property)
+        if allowNew, property.type == .select || property.type == .multiSelect {
+            let one = property.type == .select ? "один вариант" : "несколько вариантов"
+            return options.isEmpty
+                ? one + ": короткие названия в 1–3 слова"
+                : one + " из: " + options.joined(separator: ", ") + "; если ни один не подходит — новый короткий вариант в 1–3 слова"
+        }
         switch property.type {
         case .number: return "число"
         case .checkbox: return "да или нет (true/false)"
@@ -1321,5 +1344,58 @@ extension AIValues {
             return (page, decodeValue(item["value"]))
         }
         return (database, old, decodeMarks(json["marks"]?.stringValue))
+    }
+}
+
+// MARK: Новые варианты выбора от ИИ
+
+extension AIValues {
+    /// Предел новых вариантов за одно заполнение свойства: список не разрастается мусором.
+    static let maxNewOptionsPerFill = 10
+    static let maxOptionLength = 60
+
+    enum OptionChoice: Equatable {
+        case existing(UUID)
+        case new(String)
+    }
+
+    /// Названия вариантов из ответа модели (выбор — строка, множественный — массив или строка через запятую).
+    /// nil — свойство не выбор.
+    static func optionNames(from json: JSONValue?, property: PropertyDefinition) -> [String]? {
+        guard property.type == .select || property.type == .multiSelect, let json else { return nil }
+        if json == .null { return [] }
+        let raw: [String]
+        if let list = json.arrayValue { raw = list.compactMap(\.stringValue) }
+        else if let text = json.stringValue { raw = property.type == .multiSelect ? text.split(separator: ",").map(String.init) : [text] }
+        else { return nil }
+        return raw
+    }
+
+    /// Чистое название варианта: без лишних пробелов, кавычек и точки в конце; пусто или слишком длинно — nil.
+    static func cleanOptionName(_ raw: String) -> String? {
+        var t = raw.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"'«»“”.")))
+        t = t.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !t.isEmpty, t.count <= maxOptionLength else { return nil }
+        return t
+    }
+
+    /// Что выбрать и что создать: существующие — по имени без учёта регистра и ё/е, новые — не больше `budget`.
+    /// Повторы убираются; что не влезло в предел, пропускается.
+    static func planOptions(_ names: [String], existing: [PropertyOption], budget: Int) -> [OptionChoice] {
+        var out: [OptionChoice] = []
+        var seen: Set<String> = []
+        var left = max(0, budget)
+        for raw in names {
+            guard let name = cleanOptionName(raw) else { continue }
+            let key = SearchText.normalize(name)
+            guard seen.insert(key).inserted else { continue }
+            if let match = existing.first(where: { SearchText.normalize($0.name.trimmingCharacters(in: .whitespaces)) == key }) {
+                out.append(.existing(match.id))
+            } else if left > 0 {
+                out.append(.new(name))
+                left -= 1
+            }
+        }
+        return out
     }
 }

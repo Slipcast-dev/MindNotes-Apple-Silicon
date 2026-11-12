@@ -592,4 +592,40 @@ func runAITests() async {
         check(!AIFailure.mentionsTools("Invalid API key"))
         check(!AIFailure.mentionsTools("max_tokens is too large"))
     }
+
+    await test("ИИ-свойство: новые варианты выбора — без дублей и не больше предела") {
+        let work = PropertyOption(id: UUID(), name: "Работа", color: nil, sortKey: "a")
+        let home = PropertyOption(id: UUID(), name: "Ёлка", color: nil, sortKey: "b")
+        let plan = AIValues.planOptions(["работа", " «Учёба». ", "елка", "Учеба", "", String(repeating: "я", count: 61), "Спорт"], existing: [work, home], budget: 1)
+        checkEqual(plan, [.existing(work.id), .new("Учёба"), .existing(home.id)], "регистр, ё/е, кавычки и точка не важны; предел — 1 новый")
+        checkEqual(AIValues.planOptions(["А", "Б"], existing: [], budget: 0), [], "предел исчерпан")
+        checkEqual(AIValues.cleanOptionName("  много   пробелов "), "много пробелов")
+        check(AIValues.maxNewOptionsPerFill == 10)
+
+        var tags = PropertyDefinition(id: UUID(), databaseID: UUID(), name: "Теги", type: .multiSelect, sortKey: "a")
+        tags.options = [work]
+        checkEqual(AIValues.optionNames(from: .array(["а", "б"]), property: tags), ["а", "б"])
+        checkEqual(AIValues.optionNames(from: .string("а, б"), property: tags), ["а", " б"])
+        checkEqual(AIValues.optionNames(from: .null, property: tags), [])
+        let text = PropertyDefinition(id: UUID(), databaseID: UUID(), name: "Т", type: .text, sortKey: "a")
+        check(AIValues.optionNames(from: .string("а"), property: text) == nil, "не выбор")
+
+        // Разрешены новые: в схеме нет enum, существующие — подсказкой; у статуса enum остаётся.
+        let open = AIValues.schema(for: tags, allowNew: true)
+        check(open["items"]?["enum"] == nil && open["items"]?["description"]?.stringValue?.contains("Работа") == true)
+        checkEqual(AIValues.schema(for: tags)["items"]?["enum"], .array(["Работа"]), "без разрешения — только существующие")
+        var status = PropertyDefinition(id: UUID(), databaseID: UUID(), name: "С", type: .status, sortKey: "a")
+        status.options = [work]
+        checkEqual(AIValues.schema(for: status, allowNew: true)["enum"], .array(["Работа"]), "статус — только свои варианты")
+
+        let config = AIPropertyConfig(kind: .extract)
+        check(config.newOptions && config.createsOptions(tags) && !config.createsOptions(status) && !config.createsOptions(text))
+        check(AIPropertyConfig(json: config.json)?.newOptions == true, "по умолчанию включено и не пишется лишним полем")
+        check(config.json["newOptions"] == nil)
+        let off = AIPropertyConfig(kind: .extract, newOptions: false)
+        checkEqual(AIPropertyConfig(json: off.json)?.newOptions, false)
+        check(!off.createsOptions(tags))
+        check(config.request(title: "З", properties: [], body: "", target: tags).contains("новый короткий вариант"))
+        check(!off.request(title: "З", properties: [], body: "", target: tags).contains("новый"))
+    }
 }

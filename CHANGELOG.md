@@ -4,6 +4,14 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **AI properties can add new options** to select and multi-select properties when none of the existing ones fits — up to 10 per fill, matching existing names regardless of case; can be turned off per property.
+
+### Changed
+- The “Ask AI” preview shows the answer as blocks — headings, lists, tasks, quotes, code, tables and inline formatting — exactly as it will be inserted.
+
 ## [1.4.2] - 2026-11-12
 
 ### Fixed

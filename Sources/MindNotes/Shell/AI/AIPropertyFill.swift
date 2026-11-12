@@ -91,14 +91,25 @@ final class AIPropertyFiller: ObservableObject {
             .map { (name: $0.name, value: PropertyDisplay.text(row.values[$0.id], property: $0) ?? "") }
         let request = config.request(title: row.title, properties: others, body: body, target: property)
         return AIRequest.body(model: AISettings.shared.model, system: AIPropertyConfig.system, messages: [AIRequest.userText(request)],
-                              effort: .low, stream: stream, maxTokens: 2_048, format: AIValues.format(for: property), fallbacks: stream)
+                              effort: .low, stream: stream, maxTokens: 2_048,
+                              format: AIValues.format(for: property, allowNew: config.createsOptions(property)), fallbacks: stream)
     }
 
     /// Ответ модели в значение свойства; nil — ответа нет или он не подходит к типу.
-    private func value(from turn: AIAssistantTurn?, property: PropertyDefinition) -> PropertyValue?? {
+    /// С `creator` у выбора недостающие варианты создаются (в пределах заполнения).
+    private func value(from turn: AIAssistantTurn?, property: PropertyDefinition, creator: AIOptionCreator?) async -> PropertyValue?? {
         guard let turn, turn.stopReason == "end_turn" else { return .none }
         AISettings.shared.record(turn.usage)
-        return AIValues.value(from: JSONValue.parse(turn.text.trimmingCharacters(in: .whitespacesAndNewlines))?["value"], property: property)
+        let json = JSONValue.parse(turn.text.trimmingCharacters(in: .whitespacesAndNewlines))?["value"]
+        if let creator, let names = AIValues.optionNames(from: json, property: property) {
+            return .some(await creator.value(for: names))
+        }
+        return AIValues.value(from: json, property: property)
+    }
+
+    /// Создатель вариантов на одно заполнение; nil — свойство не выбор или новые варианты выключены.
+    private func creator(for property: PropertyDefinition, config: AIPropertyConfig, store: SQLiteWorkspace) -> AIOptionCreator? {
+        config.createsOptions(property) ? AIOptionCreator(property: property, store: store) : nil
     }
 
     // MARK: Заполнение
@@ -142,6 +153,7 @@ final class AIPropertyFiller: ObservableObject {
                     }
                 }
                 progress[property.id] = Progress(total: rows.count)
+                let optionCreator = creator(for: property, config: config, store: store)
                 var written: [(page: UUID, value: PropertyValue?)] = []
                 var old: [(page: UUID, value: PropertyValue?)] = []
                 var start = 0
@@ -149,18 +161,20 @@ final class AIPropertyFiller: ObservableObject {
                     let chunk = Array(rows[start..<min(start + Self.parallel, rows.count)])
                     start += chunk.count
                     var values: [(page: UUID, value: PropertyValue?)] = []
-                    await withTaskGroup(of: (UUID, PropertyValue??).self) { group in
+                    // Ответы — параллельно; разбор и создание вариантов — по очереди, чтобы не было дублей.
+                    var turns: [(UUID, AIAssistantTurn?)] = []
+                    await withTaskGroup(of: (UUID, AIAssistantTurn?).self) { group in
                         for row in chunk {
                             group.addTask { @MainActor in
                                 let body = await self.params(for: row, config: config, property: property, database: database, shell: shell, stream: true)
-                                let turn = try? await AIClient.stream(body, onEvent: { _, _ in })
-                                return (row.id, self.value(from: turn, property: property))
+                                return (row.id, try? await AIClient.stream(body, onEvent: { _, _ in }))
                             }
                         }
-                        for await (id, result) in group {
-                            if case .some(let value) = result { values.append((id, value)) } else { progress[property.id]?.failed += 1 }
-                            progress[property.id]?.done += 1
-                        }
+                        for await item in group { turns.append(item) }
+                    }
+                    for (id, turn) in turns {
+                        if case .some(let value) = await value(from: turn, property: property, creator: optionCreator) { values.append((id, value)) } else { progress[property.id]?.failed += 1 }
+                        progress[property.id]?.done += 1
                     }
                     guard !Task.isCancelled else { break }
                     if !values.isEmpty {
@@ -172,7 +186,11 @@ final class AIPropertyFiller: ObservableObject {
                 }
                 await finishRun(property: property.id, database: database.id, written: written, old: old, owned: owned, store: store)
                 let failed = progress[property.id]?.failed ?? 0
-                if failed > 0 { shell.notice = String(format: L("ИИ не заполнил записей: %d. Попробуйте ещё раз."), failed) }
+                var notes: [String] = []
+                if let optionCreator, optionCreator.created > 0 { notes.append(String(format: L("Новых вариантов: %d."), optionCreator.created)) }
+                if let optionCreator, optionCreator.skipped > 0 { notes.append(String(format: L("Предел новых вариантов (%d) достигнут: часть значений не создана."), AIValues.maxNewOptionsPerFill)) }
+                if failed > 0 { notes.append(String(format: L("ИИ не заполнил записей: %d. Попробуйте ещё раз."), failed)) }
+                if !notes.isEmpty { shell.notice = notes.joined(separator: " ") }
             } catch {
                 shell.errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
@@ -288,6 +306,7 @@ final class AIPropertyFiller: ObservableObject {
         var written: [(page: UUID, value: PropertyValue?)] = []
         var old: [(page: UUID, value: PropertyValue?)] = []
         var failed = 0
+        let optionCreator = AIPropertyConfig(json: property.config.extra[AIPropertyConfig.key]).flatMap { creator(for: property, config: $0, store: store) }
         // В пакете нет замены модели при отказе: отказанные и неудавшиеся записи повторяются обычным запросом,
         // у которого сервер сам переключается на подходящую модель (`fallbacks`).
         var retried: [String: AIAssistantTurn?] = [:]
@@ -304,7 +323,7 @@ final class AIPropertyFiller: ObservableObject {
         for (id, batchTurn) in results {
             guard let page = UUID(uuidString: id) else { continue }
             let turn = retried[id] ?? batchTurn
-            guard case .some(let value) = value(from: turn, property: property) else { failed += 1; continue }
+            guard case .some(let value) = await value(from: turn, property: property, creator: optionCreator) else { failed += 1; continue }
             // За время ожидания ячейку могли заполнить вручную: «пустые» и «созданные ИИ» её не трогают,
             // «Перезаписать все» перезаписывает, как и просили.
             let current = (try? await store.recordValues(page: page, database: database))?[property.id]
@@ -340,7 +359,8 @@ final class AIPropertyFiller: ObservableObject {
                 let owned = await loadMarks(property.id, store: store)
                 guard AIValues.shouldFill(values[property.id], mark: owned[page], scope: .aiOwned) else { continue }
                 let body = await params(for: row, config: config, property: property, database: database, shell: shell, stream: true)
-                guard case .some(let value) = self.value(from: try? await AIClient.stream(body, onEvent: { _, _ in }), property: property) else { continue }
+                let turn = try? await AIClient.stream(body, onEvent: { _, _ in })
+                guard case .some(let value) = await self.value(from: turn, property: property, creator: creator(for: property, config: config, store: store)) else { continue }
                 guard value != values[property.id] else { continue }
                 try? await store.setValues(property: property.id, [(page, value)], now: SystemClock().nowMillis())
                 var next = owned
@@ -369,12 +389,12 @@ struct AIPropertyControls: View {
                     Button(L("Без ИИ")) { filler.setConfig(nil, property: property, model: model) }
                     Divider()
                     ForEach(AIPropertyConfig.Kind.available(for: property.type).filter { $0 != .custom }, id: \.self) { kind in
-                        Button(L(AIPropertyConfig.title(kind))) { filler.setConfig(AIPropertyConfig(kind: kind, auto: config?.auto ?? false), property: property, model: model) }
+                        Button(L(AIPropertyConfig.title(kind))) { filler.setConfig(AIPropertyConfig(kind: kind, auto: config?.auto ?? false, newOptions: config?.newOptions ?? true), property: property, model: model) }
                     }
                     Button(L("Свой запрос…")) {
                         guard let prompt = PromptAlert.ask(L("Что ИИ должен написать в этом свойстве?"), value: config?.prompt ?? ""),
                               !prompt.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                        filler.setConfig(AIPropertyConfig(kind: .custom, prompt: prompt, auto: config?.auto ?? false), property: property, model: model)
+                        filler.setConfig(AIPropertyConfig(kind: .custom, prompt: prompt, auto: config?.auto ?? false, newOptions: config?.newOptions ?? true), property: property, model: model)
                     }
                 }
                 .fixedSize()
@@ -388,6 +408,16 @@ struct AIPropertyControls: View {
                     .toggleStyle(.checkbox)
                     .font(.system(size: 12))
                     .help(L("Через 5 секунд после правки страницы записи ИИ обновит её значение; каждый раз — платный запрос"))
+                    if property.type == .select || property.type == .multiSelect {
+                        Toggle(String(format: L("Новые варианты (до %d за заполнение)"), AIValues.maxNewOptionsPerFill), isOn: Binding(get: { config.newOptions }, set: { on in
+                            var next = config
+                            next.newOptions = on
+                            filler.setConfig(next, property: property, model: model)
+                        }))
+                        .toggleStyle(.checkbox)
+                        .font(.system(size: 12))
+                        .help(L("Если ни один вариант не подходит, ИИ добавит новый. Выключено — только существующие варианты."))
+                    }
                 }
             }
             if config != nil { actions.padding(.leading, 20) }
@@ -460,5 +490,50 @@ struct AIMarkBadge: View {
             guard let store = shell.store else { return }
             await filler.ensureMarks(property, store: store)
         }
+    }
+}
+
+/// Создание недостающих вариантов выбора в одном заполнении: не больше `AIValues.maxNewOptionsPerFill`,
+/// без дублей (имена сверяются без учёта регистра и ё/е), цвета по кругу палитры.
+@MainActor
+final class AIOptionCreator {
+    private let property: PropertyDefinition
+    private let store: SQLiteWorkspace
+    private var known: [PropertyOption]
+    private(set) var created = 0
+    /// Сколько названий не создано из-за предела.
+    private(set) var skipped = 0
+
+    init(property: PropertyDefinition, store: SQLiteWorkspace) {
+        self.property = property
+        self.store = store
+        known = property.options
+    }
+
+    func value(for names: [String]) async -> PropertyValue? {
+        let budget = AIValues.maxNewOptionsPerFill - created
+        let plan = AIValues.planOptions(names, existing: known, budget: budget)
+        let wanted = Set(names.compactMap(AIValues.cleanOptionName).map(SearchText.normalize)).count
+        skipped += max(0, wanted - plan.count)
+        var ids: [UUID] = []
+        for choice in plan {
+            switch choice {
+            case .existing(let id):
+                ids.append(id)
+            case .new(let name):
+                let id = UUID()
+                let color = BlockColor.names[known.count % BlockColor.names.count]
+                do {
+                    try await store.addOption(property: property.id, name: name, color: color, id: id)
+                    known.append(PropertyOption(id: id, name: name, color: color, sortKey: ""))
+                    created += 1
+                    ids.append(id)
+                } catch {
+                    continue
+                }
+            }
+        }
+        guard !ids.isEmpty else { return nil }
+        return .options(property.type == .multiSelect ? ids : [ids[0]])
     }
 }

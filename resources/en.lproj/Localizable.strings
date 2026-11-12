@@ -1596,3 +1596,7 @@
 "Подключить браузеры" = "Connect Browsers";
 "Развёрнуто" = "Expanded";
 "Свёрнуто" = "Collapsed";
+"Новых вариантов: %d." = "New options: %d.";
+"Предел новых вариантов (%d) достигнут: часть значений не создана." = "The new-option limit (%d) was reached: some values were not created.";
+"Новые варианты (до %d за заполнение)" = "New options (up to %d per fill)";
+"Если ни один вариант не подходит, ИИ добавит новый. Выключено — только существующие варианты." = "If no option fits, AI adds a new one. When off, only existing options are used.";

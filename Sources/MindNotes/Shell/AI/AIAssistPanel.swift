@@ -291,7 +291,8 @@ struct AIAssistView: View {
                     if case .failed(let message) = model.phase {
                         Label(message, systemImage: "exclamationmark.triangle").font(.system(size: 13)).foregroundColor(Tokens.danger)
                     } else {
-                        Text(rendered).font(.system(size: 14)).foregroundColor(Tokens.ink).textSelection(.enabled)
+                        // Блоками, как будет после вставки: тот же импорт Markdown, что и при «Заменить».
+                        AIBlockPreview(markdown: model.output)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if model.phase == .generating {
                             HStack(spacing: 6) {
@@ -332,9 +333,6 @@ struct AIAssistView: View {
         }
     }
 
-    private var rendered: AttributedString {
-        (try? AttributedString(markdown: model.output, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(model.output)
-    }
 }
 
 /// Строка меню ИИ.
@@ -358,5 +356,133 @@ struct MenuRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+    }
+}
+
+/// Предпросмотр ответа ИИ блоками: заголовки, списки, задачи, цитаты, выноски, код, разделители, таблицы
+/// и форматирование внутри строки — так, как ответ ляжет на страницу.
+struct AIBlockPreview: View {
+    let markdown: String
+
+    struct Item: Identifiable {
+        let id: Int
+        let fragment: BlockFragment
+        /// Номер пункта нумерованного списка.
+        let number: Int
+    }
+
+    /// Блоки ответа; номера идут подряд, пока не прервётся нумерованный список.
+    static func items(_ markdown: String) -> [Item] {
+        var out: [Item] = []
+        var counter = 0
+        for (i, fragment) in MarkdownImport.fragments(from: markdown.trimmingCharacters(in: .whitespacesAndNewlines)).enumerated() {
+            counter = fragment.type == BlockType.numbered.rawValue ? counter + 1 : 0
+            out.append(Item(id: i, fragment: fragment, number: counter))
+        }
+        return out
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Self.items(markdown)) { item in block(item) }
+        }
+        .textSelection(.enabled)
+    }
+
+    @ViewBuilder private func block(_ item: Item) -> some View {
+        let f = item.fragment
+        let content = f.content
+        switch BlockType(rawValue: f.type) {
+        case .heading1: line(content, size: 22, weight: .bold)
+        case .heading2: line(content, size: 18, weight: .bold)
+        case .heading3: line(content, size: 15, weight: .semibold)
+        case .bullet: marked(Text("•").font(.system(size: 14)), content)
+        case .numbered: marked(Text("\(item.number).").font(.system(size: 14)).monospacedDigit(), content)
+        case .task:
+            marked(Image(systemName: content?.checked == true ? "checkmark.square" : "square").font(.system(size: 13)).foregroundColor(Tokens.muted), content,
+                   done: content?.checked == true)
+        case .toggle: marked(Image(systemName: "chevron.right").font(.system(size: 10)).foregroundColor(Tokens.muted), content)
+        case .quote:
+            HStack(alignment: .top, spacing: 8) {
+                Rectangle().fill(Tokens.ink).frame(width: 2)
+                line(content, size: 14)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        case .callout:
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "lightbulb").foregroundColor(Tokens.muted)
+                line(content, size: 14)
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Tokens.soft))
+        case .code:
+            Text(content?.plainText ?? f.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Tokens.ink)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Tokens.soft))
+        case .divider:
+            Rectangle().fill(Tokens.line).frame(height: 1).padding(.vertical, 4)
+        case .table:
+            table(f)
+        default:
+            if content != nil { line(content, size: 14) } else { Text("[\(f.type)]").font(.system(size: 12)).foregroundColor(Tokens.muted) }
+        }
+    }
+
+    private func line(_ content: BlockContent?, size: CGFloat, weight: Font.Weight = .regular, done: Bool = false) -> some View {
+        Text(Self.attributed(content?.runs ?? [], size: size, weight: weight))
+            .foregroundColor(done ? Tokens.muted : Tokens.ink)
+            .strikethrough(done)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func marked<Marker: View>(_ marker: Marker, _ content: BlockContent?, done: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            marker.frame(minWidth: 16, alignment: .trailing)
+            line(content, size: 14, done: done)
+        }
+    }
+
+    private func table(_ fragment: BlockFragment) -> some View {
+        let rows = (JSONValue.parse(fragment.json)?["rows"]?.arrayValue ?? []).map { $0.arrayValue?.compactMap(\.stringValue) ?? [] }
+        let columns = rows.map(\.count).max() ?? 0
+        return Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { r, row in
+                GridRow {
+                    ForEach(0..<columns, id: \.self) { c in
+                        Text(c < row.count ? row[c] : "")
+                            .font(.system(size: 12, weight: r == 0 ? .semibold : .regular))
+                            .padding(.horizontal, 6).padding(.vertical, 4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .overlay(Rectangle().stroke(Tokens.line, lineWidth: 0.5))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Отрезки текста с метками: жирный, курсив, подчёркнутый, зачёркнутый, код, ссылка.
+    static func attributed(_ runs: [TextRun], size: CGFloat, weight: Font.Weight = .regular) -> AttributedString {
+        var out = AttributedString()
+        for run in runs {
+            var part = AttributedString(run.text)
+            let bold = run.marks.contains("b")
+            var font = Font.system(size: size, weight: bold ? .bold : weight, design: run.marks.contains("code") ? .monospaced : .default)
+            if run.marks.contains("i") { font = font.italic() }
+            part.font = font
+            if run.marks.contains("u") { part.underlineStyle = .single }
+            if run.marks.contains("s") { part.strikethroughStyle = .single }
+            if run.marks.contains("code") { part.backgroundColor = Tokens.soft }
+            if let link = run.marks.first(where: { $0.hasPrefix("a:") }), let url = URL(string: String(link.dropFirst(2))) {
+                part.link = url
+                part.foregroundColor = Tokens.accent
+            }
+            out += part
+        }
+        return out
     }
 }

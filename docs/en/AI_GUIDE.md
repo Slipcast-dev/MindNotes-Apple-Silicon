@@ -14,11 +14,11 @@ Text you ask AI about is sent to the chosen provider. Pricing follows the provid
 
 ## Where it works
 
-- **On a selection:** “✦ Ask AI” on the formatting toolbar or ⌘J → an action or your own prompt. The answer is a preview first: “Replace selection”, “Insert below”, “Try again”, or a follow-up. Inserting is undone with one ⌘Z.
+- **On a selection:** “✦ Ask AI” on the formatting toolbar or ⌘J → an action or your own prompt. The answer is a preview first, already shown as blocks the way it will look on the page: “Replace selection”, “Insert below”, “Try again”, or a follow-up. Inserting is undone with one ⌘Z.
 - **On an empty line:** Space → “Continue writing”, “Summarize page”, drafts.
 - **Chat** — “Notes AI” in the sidebar (between Search and Home) or ⌘L. Drag the panel's left edge to resize it; the provider and model are shown at the bottom, where the model can be switched. Sources: “This page”, “All pages”, “Tools only”; “@” attaches a page, 📎 an image, PDF or text file. Chat history is stored in the workspace.
 - **The agent in chat** searches and reads pages and databases, and proposes changes — new pages, text, database records, properties, trash — as a card first. Nothing changes until “Apply”; editing existing content and trash always ask; “Undo” reverts everything.
-- **AI properties in databases:** “Properties” → property → ✦ → fill mode → “Fill empty”, “Update AI-filled” or “Overwrite all…”. AI-filled cells show ✦; a manual edit removes the mark. “Undo fill” reverts the last fill. “Update when the record changes” is optional (each update is a paid request). With Claude, more than 50 records can be sent as a half-price batch.
+- **AI properties in databases:** “Properties” → property → ✦ → fill mode → “Fill empty”, “Update AI-filled” or “Overwrite all…”. For select and multi-select AI may add a new option when none fits — up to 10 per fill (“New options” in Properties). AI-filled cells show ✦; a manual edit removes the mark. “Undo fill” reverts the last fill. “Update when the record changes” is optional (each update is a paid request). With Claude, more than 50 records can be sent as a half-price batch.
 
 ## Privacy
 
