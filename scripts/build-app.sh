@@ -49,6 +49,23 @@ cat > "$APP/Contents/Info.plist" <<EOF
       <key>CFBundleTypeExtensions</key>
       <array>$EXTS</array>
     </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>MindNotes Plugin</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSTypeIsPackage</key><true/>
+      <key>LSItemContentTypes</key><array><string>local.personal.mindnotes.plugin</string></array>
+    </dict>
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key><string>local.personal.mindnotes.plugin</string>
+      <key>UTTypeDescription</key><string>MindNotes Plugin</string>
+      <key>UTTypeConformsTo</key><array><string>com.apple.package</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict><key>public.filename-extension</key><array><string>mnplugin</string></array></dict>
+    </dict>
   </array>
 </dict>
 </plist>

@@ -1,0 +1,19 @@
+{
+  "id": "minerva.webclipper",
+  "name": "Web Clipper",
+  "version": "1.0.0",
+  "kind": "plugin",
+  "api": 1,
+  "author": "Minerva",
+  "description": "Сохраняет статьи, выделенный текст, закладки и скриншоты из Chrome и Safari в новые страницы MindNotes.",
+  "permissions": [
+    "pages.list",
+    "pages.create",
+    "pages.open",
+    "assets.create",
+    "tags.write"
+  ],
+  "components": {
+    "chrome": "browser/chrome"
+  }
+}

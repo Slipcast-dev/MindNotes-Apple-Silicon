@@ -1,9 +1,10 @@
 import Foundation
 
 /// Расширения (ADR-0015): только описания и картинки, чужой код не исполняется.
+/// Плагин (ADR-0019) — тоже расширение: его код работает вне приложения, а сюда попадает только описание.
 struct ExtensionManifest: Equatable, Identifiable {
     enum Kind: Equatable {
-        case theme, appIcon
+        case theme, appIcon, plugin
         /// Вид более новой версии или неизвестный: показывается, но не используется.
         case unsupported(String)
     }
@@ -28,6 +29,7 @@ struct ExtensionManifest: Equatable, Identifiable {
         switch kind {
         case "theme": k = .theme
         case "appIcon": k = .appIcon
+        case "plugin": k = .plugin
         default: k = .unsupported(kind)
         }
         return ExtensionManifest(id: id, name: String(name.prefix(80)), version: (o["version"] as? String) ?? "1.0", kind: k,

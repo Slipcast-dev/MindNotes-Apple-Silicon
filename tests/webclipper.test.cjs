@@ -1,0 +1,102 @@
+'use strict';
+// Плагин WebClipper (ADR-0019): описание пакета и расширения согласованы, переводы полные, метки картинок.
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('fs');
+const path = require('path');
+
+const root = path.join(__dirname, '..');
+const dir = path.join(root, 'Plugins/WebClipper');
+const json = (p) => JSON.parse(fs.readFileSync(path.join(dir, p), 'utf8'));
+const read = (p) => fs.readFileSync(path.join(dir, p), 'utf8');
+
+test('версии и id плагина и расширения согласованы', () => {
+  const plugin = json('manifest.json');
+  const browser = json('browser/manifest.json');
+  assert.strictEqual(plugin.kind, 'plugin');
+  assert.strictEqual(plugin.version, browser.version);
+  assert.strictEqual(plugin.api, 1);
+  assert.ok(read('browser/api.js').includes(`const MN_PLUGIN = '${plugin.id}'`), 'расширение называет себя id плагина');
+});
+
+test('разрешения плагина известны приложению, порт один и тот же', () => {
+  const swift = fs.readFileSync(path.join(root, 'Sources/MindNotes/Workspace/Domain/Plugins.swift'), 'utf8');
+  const known = [...swift.matchAll(/case \w+ = "([a-z.]+)"/g)].map((m) => m[1]);
+  for (const p of json('manifest.json').permissions) assert.ok(known.includes(p), p);
+  const api = fs.readFileSync(path.join(root, 'Sources/MindNotes/Workspace/Domain/LocalAPI.swift'), 'utf8');
+  const port = /static let port: UInt16 = (\d+)/.exec(api)[1];
+  assert.ok(read('browser/api.js').includes(`http://127.0.0.1:${port}`));
+  assert.deepStrictEqual(json('browser/manifest.json').host_permissions, ['http://127.0.0.1/*'], 'постоянный доступ — только к MindNotes');
+});
+
+test('файлы из манифеста расширения на месте (значки кладёт сборка)', () => {
+  const m = json('browser/manifest.json');
+  for (const f of [m.action.default_popup, m.background.service_worker, 'api.js', 'extract.js', 'popup.js', 'popup.css']) {
+    assert.ok(fs.existsSync(path.join(dir, 'browser', f)), f);
+  }
+  assert.ok(fs.readFileSync(path.join(root, 'scripts/build-webclipper.sh'), 'utf8').includes('icon-$size.png'));
+});
+
+test('переводы ru и en полные, все ключи из кода есть', () => {
+  const ru = json('browser/_locales/ru/messages.json');
+  const en = json('browser/_locales/en/messages.json');
+  assert.deepStrictEqual(Object.keys(ru).sort(), Object.keys(en).sort());
+  const code = ['popup.html', 'popup.js', 'background.js', 'api.js', 'manifest.json'].map((f) => read('browser/' + f)).join('\n');
+  const used = new Set([...code.matchAll(/(?:data-i18n(?:-placeholder)?="|\bt\('|getMessage\('|__MSG_)([A-Za-z0-9]+)/g)].map((m) => m[1]));
+  for (const key of used) assert.ok(ru[key], key);
+});
+
+test('метки картинок: скачанные — вложения, остальные — ссылки, data: — подпись', () => {
+  const { mnPlaceImages } = require(path.join(dir, 'browser/extract.js'));
+  const md = 'А\n\n![Схема](mnimg-1)\n\n![](mnimg-2)\n\n![Встроенная](mnimg-3)';
+  const sources = [{ src: 'https://a.com/1.png' }, { src: 'https://cdn.com/x(1).jpg' }, { src: 'data:image/png;base64,AAAA' }];
+  const out = mnPlaceImages(md, sources, [{ name: 'clip-1.png' }, null, null], 'Картинка');
+  assert.strictEqual(out, 'А\n\n![Схема](clip-1.png)\n\n[Картинка](https://cdn.com/x%281%29.jpg)\n\nВстроенная');
+});
+
+test('установщик: идентификаторы MindNotes, Safari и типа пакета согласованы', () => {
+  const browsers = read('Installer/Browsers.swift');
+  const build = fs.readFileSync(path.join(root, 'scripts/build-webclipper.sh'), 'utf8');
+  const appBuild = fs.readFileSync(path.join(root, 'scripts/build-app.sh'), 'utf8');
+  const edition = fs.readFileSync(path.join(root, 'Sources/MindNotes/Core/AppEdition.swift'), 'utf8');
+  const host = fs.readFileSync(path.join(root, 'Sources/MindNotes/Shell/Plugins/PluginHost.swift'), 'utf8');
+  const container = /BUNDLE_ID=(\S+)/.exec(build)[1];
+  assert.strictEqual(/mindNotesBundleID = "([^"]+)"/.exec(browsers)[1], /bundleID = "([^"]+)"/.exec(edition)[1], 'установщик ищет ту же MindNotes');
+  assert.ok(/safariExtensionID = "([^"]+)"/.exec(browsers)[1].startsWith(container + '.'), 'id расширения Safari начинается с id программы');
+  assert.strictEqual(/installerBundleID = "([^"]+)"/.exec(host)[1], container, 'MindNotes находит установщик');
+  const uti = /"UTTypeIdentifier"\] as\? String\) == "([^"]+)"/.exec(browsers)[1];
+  assert.ok(appBuild.includes(`<key>UTTypeIdentifier</key><string>${uti}</string>`), 'проверка поддержки плагинов смотрит на объявленный тип');
+});
+
+test('самонастройка: расширение подключается само только в окне автоподключения', () => {
+  const api = read('browser/api.js');
+  const bg = read('browser/background.js');
+  assert.ok(/pair\(true\)/.test(api) && /status\.pairing/.test(api), 'тихая привязка только когда MindNotes открыл окно');
+  assert.ok(/chrome\.alarms\.create\('mn-pair'/.test(bg) && /onInstalled\.addListener\(\(\) => \{\s*ensurePaired\(\)/.test(bg));
+  assert.ok(json('browser/manifest.json').permissions.includes('alarms'));
+});
+
+test('окно расширения: скрытые панели не показываются, даже если у них свой display', () => {
+  const css = read('browser/popup.css');
+  assert.ok(/\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}/.test(css), 'без этого правила окно показывает все состояния сразу');
+  const html = read('browser/popup.html');
+  for (const id of ['offline', 'unpaired', 'noWorkspace', 'clip', 'done', 'error']) {
+    assert.ok(new RegExp(`id="${id}"[^>]*hidden`).test(html), `${id} скрыт до проверки`);
+  }
+});
+
+test('автоподключение идёт только из фона и по одному запросу', () => {
+  const bg = read('browser/background.js');
+  assert.ok(/pairing = pairing \|\| mnAPI\.autoPair\(\)/.test(bg), 'одна попытка за раз');
+  assert.ok(!/mnAPI\.autoPair\(/.test(read('browser/popup.js')), 'окно не подключается само, а просит фон');
+});
+
+test('окно расширения прячет панели и стилем из кода, а не только атрибутом', () => {
+  const js = read('browser/popup.js');
+  assert.ok(/el\.style\.display = visible \? '' : 'none'/.test(js), 'скрытие не зависит от таблицы стилей');
+  assert.ok(!/\.hidden = /.test(js.replace(/el\.hidden = !visible/, '')), 'все показы и скрытия идут через setVisible');
+  const html = read('browser/popup.html');
+  for (const id of ['offline', 'unpaired', 'noWorkspace', 'clip', 'done', 'error']) {
+    assert.ok(new RegExp(`id="${id}"[^>]*style="display:none"`).test(html), `${id} скрыт до проверки состояния`);
+  }
+});

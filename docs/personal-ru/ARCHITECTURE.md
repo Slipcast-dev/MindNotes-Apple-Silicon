@@ -21,7 +21,9 @@ Sources/MindNotes/
   ImportExport/              # Markdown, CSV, папки, экспорт Notion, экспорт пространства
   Shell/                     # RootView, ShellModel, боковая панель, Screens/, Database/, расширения, токены оформления
   Shell/AI/                  # ИИ-ассистент (ADR-0016): настройки, панель над выделением, чат и агент с подтверждением
-  Shell/Network/             # единственное место с сетью: превью ссылок, обновления, клиент ИИ и ключ в Keychain
+  Shell/Plugins/             # хост плагинов (ADR-0019): установка .mnplugin, разрешения, привязка клиентов, вырезки
+  Shell/Network/             # единственное место с сетью: превью ссылок, обновления, клиент ИИ и ключ в Keychain, локальный API плагинов
+Plugins/WebClipper/          # плагин: расширение Chrome/Safari (сборка scripts/build-webclipper.sh)
 ```
 
 | Слой | Импорт | Может использовать |

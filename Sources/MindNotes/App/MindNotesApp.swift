@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         // Расширения читаются до оформления: своя тема и иконка нужны с первого кадра (ADR-0015).
+        // Хост плагинов узнаёт оболочку раньше: перечитывание реестра запускает локальный API (ADR-0019).
+        PluginHost.shared.shell = shell
         ExtensionRegistry.shared.reload()
         Tokens.customColors = ExtensionRegistry.shared.theme(preferences.customThemeID)
         preferences.applyIcon()
@@ -25,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shell.restoreLastWorkspace()
         updater.start() // Фоновая проверка обновлений в автоматическом режиме (ADR-0014).
         let paths = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
-        for path in paths where FileManager.default.fileExists(atPath: path) { shell.previewFile(URL(fileURLWithPath: path)) }
+        for path in paths where FileManager.default.fileExists(atPath: path) { open(URL(fileURLWithPath: path)) }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -35,10 +37,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
-    /// Файл из Finder только показывается: импорт — отдельное действие (FR-01).
+    /// Файл из Finder только показывается: импорт — отдельное действие (FR-01). Пакет плагина предлагается установить.
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls { shell.previewFile(url) }
         NSApp.activate(ignoringOtherApps: true)
+        for url in urls { open(url) }
+    }
+
+    private func open(_ url: URL) {
+        if url.pathExtension.lowercased() == PluginManifest.packageExtension {
+            // Вопрос об установке — после того как окно появилось.
+            DispatchQueue.main.async { PluginHost.shared.install(from: url) }
+        } else {
+            shell.previewFile(url)
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { true }

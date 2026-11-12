@@ -21,7 +21,9 @@ Sources/MindNotes/
   ImportExport/              # Markdown, CSV, folders, Notion export, workspace export
   Shell/                     # RootView, ShellModel, sidebar, Screens/, Database/, extensions, design tokens
   Shell/AI/                  # optional AI (ADR-0016, ADR-0018): settings, selection panel, chat and agent with confirmation, AI properties
-  Shell/Network/             # the only place with network access: link previews, updates, the AI client and keys in the keychain
+  Shell/Plugins/             # plugin host (ADR-0019): .mnplugin install, permissions, client pairing, clips
+  Shell/Network/             # the only place with network access: link previews, updates, the AI client and keys in the keychain, the plugins' local API
+Plugins/WebClipper/          # plugin: Chrome/Safari extension (built by scripts/build-webclipper.sh)
 ```
 
 | Layer | Imports | May use |

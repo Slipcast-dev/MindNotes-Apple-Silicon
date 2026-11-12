@@ -13,6 +13,7 @@ final class ExtensionRegistry: ObservableObject {
         var problem: String?
         var theme: ThemeColors?
         var icon: NSImage?
+        var plugin: PluginManifest?
         var id: String { manifest.id }
     }
 
@@ -28,6 +29,8 @@ final class ExtensionRegistry: ObservableObject {
 
     var themes: [Item] { items.filter { $0.theme != nil && $0.problem == nil } }
     var icons: [Item] { items.filter { $0.icon != nil && $0.problem == nil } }
+    /// Плагины показываются и с ошибкой: в настройках видна причина (ADR-0019).
+    var plugins: [Item] { items.filter { $0.manifest.kind == .plugin } }
 
     func theme(_ id: String?) -> ThemeColors? { themes.first { $0.id == id }?.theme }
     func icon(_ id: String?) -> NSImage? { icons.first { $0.id == id }?.icon }
@@ -54,6 +57,13 @@ final class ExtensionRegistry: ObservableObject {
                 let parsed = (try? Data(contentsOf: dir.appendingPathComponent("theme.json"))).map(ThemeColors.parse) ?? (nil, L("нет theme.json"))
                 item.theme = parsed.colors
                 item.problem = parsed.error
+            } else if manifest.kind == .plugin {
+                switch PluginManifest.parse(data) {
+                case .success(let plugin):
+                    item.plugin = plugin
+                    item.problem = plugin.problem(app: app).map(PluginHost.describe)
+                case .failure(let problem): item.problem = PluginHost.describe(problem)
+                }
             } else if manifest.kind == .appIcon {
                 let file = dir.appendingPathComponent("icon.png")
                 let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
@@ -63,6 +73,7 @@ final class ExtensionRegistry: ObservableObject {
         }
         items = found
         broken = bad
+        PluginHost.shared.registryChanged()
     }
 
     /// Папка создаётся при первом открытии; в ней лежит пример описания.
@@ -80,6 +91,7 @@ struct ExtensionsSettings: View {
         switch kind {
         case .theme: return L("Тема")
         case .appIcon: return L("Иконка приложения")
+        case .plugin: return L("Плагин")
         case .unsupported(let k): return k
         }
     }
@@ -88,12 +100,13 @@ struct ExtensionsSettings: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Расширения").font(.system(size: 17, weight: .semibold)).padding(.top, 24).padding(.bottom, 10)
             VStack(alignment: .leading, spacing: 10) {
-                Text("Свои темы и иконки приложения: папка с manifest.json в папке расширений. Код из расширений не исполняется.")
+                Text("Свои темы, иконки приложения и плагины. Код плагинов не исполняется внутри MindNotes: они работают в браузере или своей программе и обращаются к приложению только с вашего разрешения.")
                     .font(.system(size: 12)).foregroundColor(Tokens.muted)
-                if registry.items.isEmpty && registry.broken.isEmpty {
+                if registry.items.filter({ $0.manifest.kind != .plugin }).isEmpty && registry.broken.isEmpty && registry.plugins.isEmpty {
                     Text("Расширений нет.").font(.system(size: 13)).foregroundColor(Tokens.muted)
                 }
-                ForEach(registry.items) { item in
+                PluginsSettings()
+                ForEach(registry.items.filter { $0.manifest.kind != .plugin }) { item in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.manifest.name).font(.system(size: 13, weight: .semibold))
@@ -112,7 +125,8 @@ struct ExtensionsSettings: View {
                     }
                 }
                 HStack {
-                    Button("Открыть папку расширений") { registry.openFolder() }.buttonStyle(NotesButtonStyle())
+                    Button("Установить плагин…") { PluginHost.shared.presentInstall() }.buttonStyle(NotesButtonStyle())
+                    Button("Открыть папку расширений") { registry.openFolder() }.buttonStyle(NotesButtonStyle(kind: .plain))
                     Button("Обновить список") { registry.reload() }.buttonStyle(NotesButtonStyle(kind: .plain))
                 }
             }

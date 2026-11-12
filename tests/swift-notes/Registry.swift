@@ -57,5 +57,6 @@ func runAllNotesTests() async {
     await runAITests()
     await runShortcutTests()
     await runPageLockTests()
+    await runPluginTests()
     await runAcceptanceTests()
 }

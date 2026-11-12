@@ -2113,6 +2113,15 @@ final class ShellModel: ObservableObject {
         try? await store?.setMeta("import." + fingerprint, f.string(from: Date()))
     }
 
+    /// Запись извне (плагин, ADR-0019): пространство уже изменено через хранилище, оболочка перечитывает страницы и теги.
+    func refreshAfterExternalWrite() async throws {
+        guard let session, let store else { return }
+        try await session.refreshPages()
+        databaseIndex = try await store.databaseIndex()
+        pages = session.pages
+        try await reloadTags()
+    }
+
     private func afterImport(open page: UUID) async throws {
         guard let session, let store else { return }
         try await session.refreshPages()
@@ -2247,7 +2256,7 @@ final class ShellModel: ObservableObject {
         }
     }
 
-    private static func describe(_ error: Error) -> String {
+    static func describe(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 

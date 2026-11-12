@@ -1,0 +1,122 @@
+{
+  "extName": {
+    "message": "MindNotes Web Clipper"
+  },
+  "extDescription": {
+    "message": "Saves articles, selected text, bookmarks and screenshots to MindNotes."
+  },
+  "actionTitle": {
+    "message": "Save to MindNotes"
+  },
+  "commandClipArticle": {
+    "message": "Save the article to MindNotes without the popup"
+  },
+  "menuArticle": {
+    "message": "Save page to MindNotes"
+  },
+  "menuSelection": {
+    "message": "Save selection to MindNotes"
+  },
+  "menuLink": {
+    "message": "Save link to MindNotes"
+  },
+  "menuImage": {
+    "message": "Save image to MindNotes"
+  },
+  "actionFailed": {
+    "message": "Not saved: $1"
+  },
+  "errOffline": {
+    "message": "MindNotes is not responding. Start the app and turn on the Web Clipper plugin."
+  },
+  "errImage": {
+    "message": "Could not download the image."
+  },
+  "errPage": {
+    "message": "The browser does not let extensions read this page. Save it as a bookmark or a screenshot."
+  },
+  "errSelection": {
+    "message": "Select some text on the page first."
+  },
+  "errDisabled": {
+    "message": "The plugin is turned off in MindNotes: Settings → Extensions."
+  },
+  "errUnknown": {
+    "message": "Could not save."
+  },
+  "imageLink": {
+    "message": "Image"
+  },
+  "offlineText": {
+    "message": "MindNotes is not responding. Start the app and check that the Web Clipper plugin is on in Settings → Extensions."
+  },
+  "retry": {
+    "message": "Check again"
+  },
+  "pairText": {
+    "message": "Connect the extension to MindNotes. The app will ask for permission — confirm it there."
+  },
+  "pair": {
+    "message": "Connect"
+  },
+  "pairWait": {
+    "message": "Answer the question in the MindNotes window…"
+  },
+  "noWorkspaceText": {
+    "message": "No workspace is open in MindNotes. Open one and try again."
+  },
+  "connected": {
+    "message": "connected"
+  },
+  "modeArticle": {
+    "message": "Article"
+  },
+  "modeSelection": {
+    "message": "Selection"
+  },
+  "modeBookmark": {
+    "message": "Bookmark"
+  },
+  "modeScreenshot": {
+    "message": "Screenshot"
+  },
+  "fieldTitle": {
+    "message": "Title"
+  },
+  "fieldFolder": {
+    "message": "Save to"
+  },
+  "fieldTags": {
+    "message": "Tags"
+  },
+  "tagsPlaceholder": {
+    "message": "comma separated"
+  },
+  "fieldNote": {
+    "message": "Note"
+  },
+  "fieldImages": {
+    "message": "Save images"
+  },
+  "defaultFolder": {
+    "message": "📁 $1 (default)"
+  },
+  "defaultFolderPlain": {
+    "message": "📁 Default folder"
+  },
+  "save": {
+    "message": "Save"
+  },
+  "saving": {
+    "message": "Saving…"
+  },
+  "saved": {
+    "message": "Saved: “$1”"
+  },
+  "openInApp": {
+    "message": "Open in MindNotes"
+  },
+  "again": {
+    "message": "Again"
+  }
+}

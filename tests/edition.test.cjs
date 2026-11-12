@@ -50,12 +50,17 @@ test('AT-15: сеть только в Shell/Network (ADR-0011), ИИ тольк�
       || ['AIClient.swift', 'AIKeychain.swift'].some((name) => file === path.join('Sources', 'MindNotes', 'Shell', 'Network', name))
       || file === path.join('Sources', 'MindNotes', 'Workspace', 'Domain', 'AIProviders.swift');
     let checked = allowed ? text.replace(/\b(URLSession|URLSessionConfiguration|WKWebView|WKWebViewConfiguration)\b/g, '') : text;
+    // ADR-0019: слушатель локального API плагинов — единственный файл с Network.framework, только 127.0.0.1.
+    if (file === path.join('Sources', 'MindNotes', 'Shell', 'Network', 'LocalAPIServer.swift')) checked = checked.replace(/\b(import Network|NWConnection)\b/g, '');
     // ADR-0018: названия провайдеров — только в файлах ИИ.
     if (aiFile) checked = checked.replace(/\b(Anthropic|OpenAI)\b/g, '');
     if (!aiFile) assert.ok(!/\bAIClient\b/.test(text), `${file}: запросы ИИ только из Shell/AI`);
     assert.ok(!forbidden.test(checked), `${file}: ${checked.match(forbidden)?.[0]}`);
     if (!allowed) assert.ok(!network.test(text), `${file}: сеть вне Shell/Network`);
   }
+  const listener = read('Sources/MindNotes/Shell/Network/LocalAPIServer.swift');
+  assert.ok(/acceptLocalOnly = true/.test(listener) && /requiredLocalEndpoint = \.hostPort\(host: NWEndpoint\.Host\(LocalAPI\.host\)/.test(listener), 'API плагинов слушает только этот Mac');
+  assert.ok(/static let host = "127\.0\.0\.1"/.test(read('Sources/MindNotes/Workspace/Domain/LocalAPI.swift')), 'адрес — 127.0.0.1, не 0.0.0.0');
   const fetcher = read('Sources/MindNotes/Shell/Network/LinkPreviewFetcher.swift');
   assert.ok(/guard isEnabled, url\.scheme\?\.lowercased\(\) == "https"/.test(fetcher), 'запрос только при включённом превью и по https');
   assert.ok(/guard isEnabled else \{\s*NSWorkspace\.shared\.open\(url\)/.test(fetcher), 'окно встраивания только при включённом превью');
