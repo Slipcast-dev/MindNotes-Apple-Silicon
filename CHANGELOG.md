@@ -4,7 +4,7 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.5.1] - 2026-11-12
 
 ### Fixed
 - Installing an update no longer hangs at “Checking and installing”: the update window blocked the normal quit, so the app was never replaced. The workspace is now saved and closed before the replacement, the window closes, and if the app still has not quit, it exits on its own after 3 seconds.
