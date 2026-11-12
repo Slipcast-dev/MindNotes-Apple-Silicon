@@ -45,11 +45,11 @@
 |---|---|---|
 | Приложение 1.5.1 (исполняемый файл arm64) | `build/MindNotes.app` | `40b665530557a10a956a5eadd32ec94977d35116baaa76932c5a0f91da467f90` |
 | Образ для установки 1.5.1 (страница Releases) | `build/MindNotes-1.5.1.dmg` | `809b6f0d3c80c5af7efa72c7044ac92b7e6dafb43277e4df19a43274c0ba77b9` |
-| Образ выпуска 1.5.0 (страница Releases) | `build/MindNotes-1.5.0.dmg` | `0509aa305c7bf310106b1188c9d2a7fa947ec8bdc31f471db0b21a95067d087b` |
-| Образ выпуска 1.4.2 (страница Releases) | `build/MindNotes-1.4.2.dmg` | `d284d2872c0fe2462bd08383c3c9a19987125805392318df0003013220d685e9` |
-| Образ выпуска 1.4.1 (страница Releases) | `build/MindNotes-1.4.1.dmg` | `f8918e2092a2195b94602f835a2c6a8d2463c2d92a13ccbc18d96fe4850a7f40` |
-| Образ выпуска 1.4.0 (страница Releases) | `build/MindNotes-1.4.0.dmg` | `a461201314b747375507d1ff602e8a16ef59bc937c640f6d4406985ccf265a27` |
-| Образ выпуска 1.3.0 (страница Releases) | `build/MindNotes-1.3.0.dmg` | `9fdc8386f2ab62fded64d4bc605579c85bb880f5467b28c772a9162dbcee1626` |
+| Образ выпуска 1.5.0 (страница Releases) | `MindNotes-1.5.0.dmg` | `0509aa305c7bf310106b1188c9d2a7fa947ec8bdc31f471db0b21a95067d087b` |
+| Образ выпуска 1.4.2 (страница Releases) | `MindNotes-1.4.2.dmg` | `d284d2872c0fe2462bd08383c3c9a19987125805392318df0003013220d685e9` |
+| Образ выпуска 1.4.1 (страница Releases) | `MindNotes-1.4.1.dmg` | `f8918e2092a2195b94602f835a2c6a8d2463c2d92a13ccbc18d96fe4850a7f40` |
+| Образ выпуска 1.4.0 (страница Releases) | `MindNotes-1.4.0.dmg` | `a461201314b747375507d1ff602e8a16ef59bc937c640f6d4406985ccf265a27` |
+| Образ выпуска 1.3.0 (страница Releases) | `MindNotes-1.3.0.dmg` | `9fdc8386f2ab62fded64d4bc605579c85bb880f5467b28c772a9162dbcee1626` |
 | Демо-архив, вымышленные данные | `build/Demo-workspace.mindnotesbackup` | `f92ad064fabea4148c4f60acf1262535ab7545a5ae6c3dfb5d4ebaeff0224085` |
 
 Суммы также в `build/SHA256SUMS.txt`. Сборка: `./scripts/build-app.sh`, образ: `./scripts/make-dmg.sh`, демо: `./scripts/make-demo.sh`. Подпись ad-hoc, не notarization: при первом запуске нужно «Всё равно открыть» в «Конфиденциальность и безопасность». Исполняемый файл собирается заново при каждой сборке, поэтому его сумма у новой сборки будет другой.

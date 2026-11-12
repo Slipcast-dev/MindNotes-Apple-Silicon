@@ -23,8 +23,10 @@ A personal, local knowledge base for Mac: pages, a block editor, search, links a
 - Images, files and video attachments
 - Import of Markdown, CSV, folders and Notion exports; export to Markdown and CSV
 - Manual and automatic backups
-- Collapsible sidebar with custom sections, Peek, light/dark and black-and-white themes
+- Collapsible sidebar with custom sections you can drag to reorder, Peek, light/dark and black-and-white themes
+- Password lock for a page, record, database or folder (password, Touch ID or Mac password)
 - Automatic or manual updates; extensions for custom themes and app icons
+- Plugins with permissions, released separately; the first one is [Web Clipper](Plugins/WebClipper/README.md) for Chrome and Safari ([latest release](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/releases/tag/webclipper-v1.0.0))
 - Optional AI (off by default): Ask AI on a selection, chat with an agent that proposes changes before applying them, AI-filled database properties; Claude, OpenAI, OpenRouter, Gemini, DeepSeek, Mistral, xAI, Groq or a local model via Ollama or LM Studio
 
 The interface is available in English and Russian.
@@ -36,7 +38,7 @@ Only when you choose it: link previews (off by default), checking GitHub for upd
 ## Documentation
 
 - [Build, run and restore](docs/en/BUILD_AND_USE.md)
-- [Extensions: themes and icons](docs/en/EXTENSIONS.md)
+- [Extensions: themes, icons and plugins](docs/en/EXTENSIONS.md)
 - [AI](docs/en/AI_GUIDE.md)
 - [Architecture](docs/en/ARCHITECTURE.md)
 - [Known limitations](docs/en/KNOWN_LIMITATIONS.md)
