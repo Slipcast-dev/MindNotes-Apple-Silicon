@@ -91,7 +91,7 @@ enum EditorAction: Equatable {
          Item(title: t("Зачёркнутый"), action: .mark("s"), key: "x", modifiers: [.command, .shift]),
          Item(title: t("Встроенный код"), action: .mark("code"), key: "e"),
          Item(title: t("Ссылка…"), action: .link, key: "k", modifiers: [.command, .shift]),
-         Item(title: t("Убрать форматирование"), action: .clearFormat, key: "\\")]
+         Item(title: t("Убрать форматирование"), action: .clearFormat, key: "\\", modifiers: [.command, .control])]
     }
 
     static var colors: [Item] {
@@ -132,6 +132,20 @@ enum EditorAction: Equatable {
         guard !q.isEmpty else { return slashItems }
         return slashItems.filter { item in
             normalized(item.title).contains(q) || item.aliases.contains { normalized($0).contains(q) }
+        }
+    }
+}
+
+extension EditorAction {
+    /// ID команды в списке настраиваемых сочетаний (`ShortcutCatalog`); nil — сочетания у действия нет.
+    var shortcutID: String? {
+        switch self {
+        case .mark(let m): return "format.mark." + m
+        case .link: return "format.link"
+        case .clearFormat: return "format.clear"
+        case .turnInto(let type): return "format.type." + type.rawValue
+        case .duplicateBlock: return "block.duplicate"
+        default: return nil
         }
     }
 }

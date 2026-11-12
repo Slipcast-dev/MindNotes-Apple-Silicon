@@ -92,7 +92,7 @@ Custom themes and app icons are folders with a `manifest.json` in the extensions
 
 ## AI
 
-Optional and off by default: Settings → “AI” → “Turn on AI”, choose a provider, paste a key (local Ollama and LM Studio need none) and click “Check”. ⌘J or “✦ Ask AI” on a selection, Space on an empty line, ⇧⌘J for the chat. The agent proposes every change first. Details: [AI_GUIDE.md](AI_GUIDE.md).
+Optional and off by default: Settings → “AI” → “Turn on AI”, choose a provider, paste a key (local Ollama and LM Studio need none) and click “Check”. ⌘J or “✦ Ask AI” on a selection, Space on an empty line, ⌘L for the chat. The agent proposes every change first. Details: [AI_GUIDE.md](AI_GUIDE.md).
 
 ## Page password
 
@@ -100,7 +100,11 @@ Optional and off by default: Settings → “AI” → “Turn on AI”, choose 
 
 ## Editor
 
-Block menu: `/` at the start of a line or after a space. Shortcuts: `# `, `## `, `### `, `- `, `1. `, `[] `, `> `, `---`. Formatting: ⌘B, ⌘I, ⌘U, ⇧⌘X, ⌘E, ⇧⌘K; the same actions are in the “Format” menu, the context menu and the toolbar that appears over a selection. Tab and Shift+Tab change nesting.
+Block menu: `/` at the start of a line or after a space. Shortcuts: `# `, `## `, `### `, `- `, `1. `, `[] `, `> `, `---`. Formatting: ⌘B, ⌘I, ⌘U, ⇧⌘X, ⌘E, ⇧⌘K; the same actions are in the “Format” menu, the context menu and the toolbar that appears over a selection. Tab and Shift+Tab change nesting. Clear formatting is ⌃⌘\\ (⌘\\ toggles the sidebar).
+
+## Keyboard shortcuts
+
+Settings → “Keyboard Shortcuts” lists every command with its standard shortcut. Click a shortcut and press a new one with ⌘ or ⌃; Esc cancels, ⌫ removes it. If the shortcut belonged to another command, it is removed there. The ↺ button restores one command, “Reset All” restores every standard shortcut. The sidebar shows the current shortcuts for Search and Notes AI.
 
 ## Demo workspace
 

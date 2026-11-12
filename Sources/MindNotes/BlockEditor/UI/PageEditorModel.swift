@@ -337,7 +337,7 @@ struct FormatToolbarView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(L("Спросить ИИ") + " (⌘J)")
+                .help(L("Спросить ИИ") + (ShortcutSettings.shared.display("ai.ask").isEmpty ? "" : " (" + ShortcutSettings.shared.display("ai.ask") + ")"))
                 Rectangle().fill(Tokens.line).frame(width: 1, height: 20)
             }
             Menu(L("Тип")) {
@@ -396,27 +396,18 @@ struct FormatToolbarView: View {
 
 /// Меню «Формат» в строке меню: тот же список действий, что в правом клике.
 struct FormatCommands: Commands {
+    /// Сочетания из настроек (ADR: «Сочетания клавиш» в настройках).
+    @ObservedObject var shortcuts: ShortcutSettings
+
     private func run(_ action: EditorAction) {
         Task { @MainActor in (NSApp.keyWindow?.firstResponder as? BlockTextView)?.controller?.run(action) }
     }
 
     @ViewBuilder private func buttons(_ items: [EditorAction.Item]) -> some View {
         ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-            if item.key.isEmpty {
-                Button(item.title) { run(item.action) }
-            } else {
-                Button(item.title) { run(item.action) }
-                    .keyboardShortcut(KeyEquivalent(Character(item.key)), modifiers: Self.modifiers(item.modifiers))
-            }
+            Button(item.title) { run(item.action) }
+                .appShortcut(item.action.shortcutID.flatMap { shortcuts.shortcut($0) })
         }
-    }
-
-    private static func modifiers(_ flags: NSEvent.ModifierFlags) -> EventModifiers {
-        var out: EventModifiers = []
-        if flags.contains(.command) { out.insert(.command) }
-        if flags.contains(.shift) { out.insert(.shift) }
-        if flags.contains(.option) { out.insert(.option) }
-        return out
     }
 
     var body: some Commands {
@@ -436,7 +427,7 @@ struct FormatCommands: Commands {
             Button(L("Спросить ИИ")) {
                 Task { @MainActor in (NSApp.keyWindow?.firstResponder as? BlockTextView)?.controller?.requestAI() }
             }
-            .keyboardShortcut("j", modifiers: .command)
+            .appShortcut(shortcuts.shortcut("ai.ask"))
         }
     }
 }

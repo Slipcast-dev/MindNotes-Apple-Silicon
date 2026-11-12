@@ -4,6 +4,18 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Keyboard shortcuts in Settings**: every menu command with its standard shortcut; set your own, remove one, or reset one or all to the standard ones.
+
+### Changed
+- The AI chat opens with ⌘L (was ⇧⌘J); the sidebar shows ⌘L next to “Notes AI”, like ⌘K next to Search.
+- Clear formatting is ⌃⌘\ — it used to share ⌘\ with the sidebar.
+- The sidebar item is now called “Notes AI”.
+- The AI chat panel can be resized by dragging its left edge; the full provider and model name is shown at the bottom, with a menu to switch the model.
+- AI settings: search models by part of their name.
+
 ## [1.4.0] - 2026-11-12
 
 ### Added

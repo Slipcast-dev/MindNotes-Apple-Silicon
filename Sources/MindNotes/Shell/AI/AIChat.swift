@@ -652,6 +652,10 @@ struct AIChatPanel: View {
     @ObservedObject private var data = AIWorkspace.shared
     @EnvironmentObject private var shell: ShellModel
     @FocusState private var focused: Bool
+    /// Ширина панели тянется за левый край и запоминается.
+    @AppStorage("aiChatWidth") private var width: Double = 360
+    @State private var resizeStart: Double?
+    static let widthRange: ClosedRange<Double> = 300...900
 
     var body: some View {
         VStack(spacing: 0) {
@@ -676,9 +680,10 @@ struct AIChatPanel: View {
                 composer
             }
         }
-        .frame(width: 360)
+        .frame(width: CGFloat(width.clamped(to: Self.widthRange)))
         .background(RoundedRectangle(cornerRadius: 12).fill(Tokens.card))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Tokens.line))
+        .overlay(alignment: .leading) { resizeHandle }
         .environment(\.openURL, OpenURLAction { url in
             if let page = PageLink.page(from: url) {
                 shell.openPage(page)
@@ -687,6 +692,26 @@ struct AIChatPanel: View {
             return .systemAction
         })
         .onAppear { chat.shell = shell; focused = true }
+    }
+
+    /// Левый край панели: тянуть влево — шире, вправо — уже. Двойной щелчок возвращает 360.
+    private var resizeHandle: some View {
+        Color.clear
+            .frame(width: 8)
+            .contentShape(Rectangle())
+            .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { g in
+                        let start = resizeStart ?? width.clamped(to: Self.widthRange)
+                        resizeStart = start
+                        width = (start - Double(g.translation.width)).clamped(to: Self.widthRange)
+                    }
+                    .onEnded { _ in resizeStart = nil }
+            )
+            .onTapGesture(count: 2) { width = 360 }
+            .help(L("Потяните, чтобы изменить ширину"))
+            .accessibilityLabel(Text("Ширина чата"))
     }
 
     private var header: some View {
@@ -709,7 +734,7 @@ struct AIChatPanel: View {
             Button { chat.reset() } label: { Image(systemName: "square.and.pencil") }
                 .buttonStyle(.plain).help(L("Новый чат")).accessibilityLabel(Text("Новый чат"))
             Button { chat.isOpen = false } label: { Image(systemName: "xmark") }
-                .buttonStyle(.plain).help(L("Закрыть") + " (⇧⌘J)").accessibilityLabel(Text("Закрыть"))
+                .buttonStyle(.plain).help(L("Закрыть") + (ShortcutSettings.shared.display("ai.chat").isEmpty ? "" : " (" + ShortcutSettings.shared.display("ai.chat") + ")")).accessibilityLabel(Text("Закрыть"))
         }
         .foregroundColor(Tokens.muted)
         .padding(.horizontal, 12)
@@ -828,7 +853,6 @@ struct AIChatPanel: View {
                 .labelsHidden()
                 .fixedSize()
                 .help(L("Что ИИ получит вместе с вопросом"))
-                Text(settings.model).font(.system(size: 11)).foregroundColor(Tokens.muted).lineLimit(1)
                 Spacer()
                 if chat.busy {
                     Button { chat.stop() } label: { Image(systemName: "stop.circle.fill").font(.system(size: 20)) }
@@ -840,11 +864,50 @@ struct AIChatPanel: View {
                         .help(L("Отправить")).accessibilityLabel(Text("Отправить"))
                 }
             }
+            modelLine
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Tokens.paper))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Tokens.line))
         .padding(10)
+    }
+
+    /// Провайдер и модель отдельной строкой: название видно целиком, модель меняется здесь же.
+    private var modelLine: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "cpu").font(.system(size: 10)).foregroundColor(Tokens.muted)
+            Text(settings.provider.name).font(.system(size: 11)).foregroundColor(Tokens.muted).lineLimit(1).fixedSize()
+            Text("·").font(.system(size: 11)).foregroundColor(Tokens.muted)
+            Menu {
+                ForEach(chatModels, id: \.self) { name in
+                    Button { settings.model = name } label: {
+                        if name == settings.model { Label(name, systemImage: "checkmark") } else { Text(name) }
+                    }
+                }
+                Divider()
+                Button(L("Настройки ИИ…")) { shell.goSettings() }
+            } label: {
+                Text(settings.model.isEmpty ? L("Модель не выбрана") : settings.model)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize(horizontal: false, vertical: true)
+            .layoutPriority(1)
+            .help(settings.provider.name + " · " + settings.model)
+            .accessibilityLabel(Text("Модель"))
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Модели провайдера: загруженные по «Проверить» или стартовые, и текущая.
+    private var chatModels: [String] {
+        let provider = settings.provider
+        var list = settings.availableModels.isEmpty ? provider.suggestedModels : settings.availableModels
+        if !provider.defaultModel.isEmpty, !list.contains(provider.defaultModel) { list.insert(provider.defaultModel, at: 0) }
+        if !settings.model.isEmpty, !list.contains(settings.model) { list.append(settings.model) }
+        return list
     }
 
     /// Открытая страница и последние, без скрытых от ИИ и баз.
@@ -933,4 +996,8 @@ struct AIProposalCard: View {
             Label(why, systemImage: "exclamationmark.triangle").font(.system(size: 12)).foregroundColor(Tokens.danger)
         }
     }
+}
+
+private extension Double {
+    func clamped(to range: ClosedRange<Double>) -> Double { Swift.min(Swift.max(self, range.lowerBound), range.upperBound) }
 }

@@ -1498,3 +1498,29 @@
 "У каждого провайдера свой ключ и своя модель" = "Each provider has its own key and model";
 "Заполнено ИИ" = "Filled by AI";
 "Эта модель не поддерживает инструменты: ответ без поиска и правки страниц. Выберите другую модель в настройках ИИ." = "This model doesn't support tools: answering without searching or editing pages. Choose another model in AI settings.";
+"Потяните, чтобы изменить ширину" = "Drag to change the width";
+"Ширина чата" = "Chat width";
+"Настройки ИИ…" = "AI Settings…";
+"Модель не выбрана" = "No model selected";
+"Поиск модели…" = "Search models…";
+"Поиск модели" = "Search models";
+"Ничего не найдено. Нажмите «Проверить», чтобы загрузить все модели провайдера, или Enter — взять это название как есть." = "Nothing found. Click Check to load all of the provider's models, or press Enter to use this name as is.";
+"Ничего не найдено. Enter — взять это название как есть." = "Nothing found. Press Enter to use this name as is.";
+"Найдено моделей: %d" = "Models found: %d";
+"Использовать «%@»" = "Use “%@”";
+
+/* Keyboard shortcuts */
+"%@ было у «%@» — там сочетание снято." = "%@ belonged to “%@” — it was removed there.";
+"Блоки" = "Blocks";
+"Вернуть стандартное" = "Restore standard";
+"Вернуть стандартные сочетания клавиш?" = "Restore standard keyboard shortcuts?";
+"Восстановлены стандартные сочетания." = "Standard shortcuts restored.";
+"Все свои сочетания будут заменены стандартными." = "All your shortcuts will be replaced with the standard ones.";
+"Нажмите на сочетание, чтобы задать своё: зажмите ⌘ или ⌃ с нужной клавишей. Esc — отмена, ⌫ — убрать сочетание." = "Click a shortcut to set your own: hold ⌘ or ⌃ and press a key. Esc cancels, ⌫ removes the shortcut.";
+"Нажмите сочетание…" = "Press shortcut…";
+"Нужна клавиша вместе с ⌘ или ⌃." = "Use a key together with ⌘ or ⌃.";
+"Сбросить все" = "Reset All";
+"Сочетание для «%@»" = "Shortcut for “%@”";
+"Сочетания клавиш" = "Keyboard Shortcuts";
+"Стандартно: %@" = "Standard: %@";
+"Стандартно: нет" = "Standard: none";

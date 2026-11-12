@@ -77,12 +77,17 @@ struct AISettingsSection: View {
                             ForEach(models, id: \.self) { Text($0 == settings.provider.defaultModel ? L("Авто") + " (\($0))" : $0).tag($0) }
                         }
                         .labelsHidden().frame(width: 220)
-                        TextField(L("Другая модель"), text: $modelDraft).textFieldStyle(.roundedBorder).frame(width: 140)
+                        TextField(L("Поиск модели…"), text: $modelDraft).textFieldStyle(.roundedBorder).frame(width: 180)
                             .onSubmit {
+                                // Enter: первая найденная модель, иначе введённое название как есть.
                                 let name = modelDraft.trimmingCharacters(in: .whitespaces)
-                                if !name.isEmpty { settings.model = name; modelDraft = "" }
+                                guard !name.isEmpty else { return }
+                                settings.model = modelMatches.first ?? name
+                                modelDraft = ""
                             }
+                            .accessibilityLabel(Text("Поиск модели"))
                     }
+                    if !modelDraft.trimmingCharacters(in: .whitespaces).isEmpty { modelSearchResults }
                     divider
                     row(L("Глубина ответов в чате"), L("Тщательнее — дольше и дороже")) {
                         Picker("", selection: $settings.chatEffort) {
@@ -176,6 +181,54 @@ struct AISettingsSection: View {
                 checkResult = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
+    }
+
+    /// Модели провайдера по части названия: регистр, «-», «_», «/», «.» и пробелы не важны.
+    private var modelMatches: [String] {
+        func key(_ text: String) -> String {
+            SearchText.normalize(text).filter { !"-_/. :".contains($0) }
+        }
+        let query = key(modelDraft)
+        guard !query.isEmpty else { return [] }
+        // Сначала начинающиеся с запроса, затем содержащие его.
+        let all = models.filter { key($0).contains(query) }
+        return all.filter { key($0).hasPrefix(query) || key($0.split(separator: "/").last.map(String.init) ?? $0).hasPrefix(query) }
+            + all.filter { !(key($0).hasPrefix(query) || key($0.split(separator: "/").last.map(String.init) ?? $0).hasPrefix(query)) }
+    }
+
+    private var modelSearchResults: some View {
+        let matches = modelMatches
+        let name = modelDraft.trimmingCharacters(in: .whitespaces)
+        return VStack(alignment: .leading, spacing: 0) {
+            if matches.isEmpty {
+                Text(settings.availableModels.isEmpty
+                     ? L("Ничего не найдено. Нажмите «Проверить», чтобы загрузить все модели провайдера, или Enter — взять это название как есть.")
+                     : L("Ничего не найдено. Enter — взять это название как есть."))
+                    .font(.system(size: 12)).foregroundColor(Tokens.muted)
+                    .padding(.vertical, 6)
+            } else {
+                Text(String(format: L("Найдено моделей: %d"), matches.count)).font(.system(size: 11)).foregroundColor(Tokens.muted).padding(.bottom, 2)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(matches, id: \.self) { model in
+                            MenuRow(symbol: model == settings.model ? "checkmark" : "cpu", title: model) {
+                                settings.model = model
+                                modelDraft = ""
+                            }
+                        }
+                    }
+                }
+                .frame(maxHeight: min(CGFloat(matches.count) * 28, 224))
+            }
+            if !name.isEmpty, !matches.contains(name) {
+                MenuRow(symbol: "plus", title: String(format: L("Использовать «%@»"), name)) {
+                    settings.model = name
+                    modelDraft = ""
+                }
+            }
+        }
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func changeProvider(to id: String) {

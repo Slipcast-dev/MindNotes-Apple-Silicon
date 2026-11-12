@@ -119,6 +119,7 @@ struct SettingsScreen: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Tokens.line))
 
                 AISettingsSection()
+                ShortcutsSettings()
                 if shell.isOpen { PeopleSettings() }
                 ExtensionsSettings()
 

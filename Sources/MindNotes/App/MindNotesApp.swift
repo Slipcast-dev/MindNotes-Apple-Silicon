@@ -47,6 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct MindNotesApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    /// Свои сочетания клавиш: меню перестраивается при их изменении.
+    @ObservedObject private var shortcuts = ShortcutSettings.shared
 
     init() {
         AppEdition.migrateFromPreviousName()
@@ -64,39 +66,39 @@ struct MindNotesApp: App {
         .defaultSize(width: 1240, height: 820)
         .windowToolbarStyle(.unified)
         .commands {
-            FormatCommands()
+            FormatCommands(shortcuts: shortcuts)
             CommandMenu(L("Переход")) {
                 // Меню не следит за состоянием оболочки: выключенный при запуске пункт так и оставался бы выключенным,
                 // и ⌘K не работал. Проверка — внутри действия.
                 Button("Поиск…") { if delegate.shell.isOpen { delegate.shell.showsSearch = true } }
-                    .keyboardShortcut("k")
+                    .appShortcut(shortcuts.shortcut("nav.search"))
                 Button("Назад") { delegate.shell.goBack() }
-                    .keyboardShortcut("[")
+                    .appShortcut(shortcuts.shortcut("nav.back"))
                 Button("Вперёд") { delegate.shell.goForward() }
-                    .keyboardShortcut("]")
+                    .appShortcut(shortcuts.shortcut("nav.forward"))
                 Button("Боковая панель") { delegate.shell.toggleSidebar() }
-                    .keyboardShortcut("\\")
+                    .appShortcut(shortcuts.shortcut("nav.sidebar"))
                 Divider()
                 Button("Главная") { delegate.shell.goHome() }
-                    .keyboardShortcut("h", modifiers: [.command, .shift])
+                    .appShortcut(shortcuts.shortcut("nav.home"))
                 Button("Чат с ИИ") { if delegate.shell.isOpen { AIChatModel.shared.toggle() } }
-                    .keyboardShortcut("j", modifiers: [.command, .shift])
+                    .appShortcut(shortcuts.shortcut("ai.chat"))
             }
             CommandGroup(after: .appInfo) {
                 Button("Проверить обновления…") { Task { await delegate.updater.check(silent: false) } }
             }
             CommandGroup(replacing: .appSettings) {
                 Button("Настройки…") { delegate.shell.goSettings() }
-                    .keyboardShortcut(",")
+                    .appShortcut(shortcuts.shortcut("app.settings"))
             }
             CommandGroup(replacing: .newItem) {
                 Button("Новая страница") { if delegate.shell.isOpen { delegate.shell.createPage() } }
-                    .keyboardShortcut("n")
+                    .appShortcut(shortcuts.shortcut("file.newPage"))
                 Button("Новая папка") { if delegate.shell.isOpen { delegate.shell.createFolder() } }
-                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    .appShortcut(shortcuts.shortcut("file.newFolder"))
                 Divider()
                 Button("Открыть файл…") { delegate.shell.presentOpenFile() }
-                    .keyboardShortcut("o")
+                    .appShortcut(shortcuts.shortcut("file.open"))
             }
         }
     }

@@ -8,6 +8,8 @@ struct SidebarRow: View {
     var tint: Color?
     /// Значок-emoji страницы вместо символа.
     var emoji: String?
+    /// Сочетание клавиш справа, как у «Поиска».
+    var badge: String? = nil
     let action: () -> Void
     @State private var hover = false
 
@@ -27,6 +29,7 @@ struct SidebarRow: View {
                     .foregroundColor(active ? Tokens.accent : Tokens.ink)
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                if let badge, !badge.isEmpty { ShortcutBadge(text: badge) }
             }
             .padding(.vertical, Tokens.theme == .notion ? 5 : 8) // В Notion строка панели — около 28 точек.
             .padding(.leading, 10 + indent)
@@ -92,6 +95,7 @@ struct NotesSidebar: View {
     /// Пункт «ИИ» виден только при включённом ИИ (ADR-0016).
     @ObservedObject private var ai = AISettings.shared
     @ObservedObject private var chat = AIChatModel.shared
+    @ObservedObject private var shortcuts = ShortcutSettings.shared
     /// Свёрнутые страницы дерева. По умолчанию всё развёрнуто.
     @State private var collapsed: Set<UUID> = []
     /// Перетаскивание страницы внутри панели: свой жест, без системного буфера обмена.
@@ -281,12 +285,7 @@ struct NotesSidebar: View {
                             Image(systemName: "magnifyingglass").font(.system(size: 11)).frame(width: 16).foregroundColor(Tokens.muted)
                             Text("Поиск").font(.system(size: 13))
                             Spacer()
-                            Text("⌘K")
-                                .font(.system(size: 11))
-                                .foregroundColor(Tokens.muted)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Tokens.line))
+                            ShortcutBadge(text: shortcuts.display("nav.search"))
                         }
                         .padding(.vertical, 8)
                         .padding(.horizontal, 10)
@@ -296,7 +295,7 @@ struct NotesSidebar: View {
                 }
                 // «ИИ» — между «Поиском» и «Главной», как в Notion.
                 if shell.isOpen, ai.enabled {
-                    SidebarRow(title: L("ИИ"), symbol: "sparkles", active: chat.isOpen, tint: AIStyle.tint) { chat.toggle() }
+                    SidebarRow(title: "Notes AI", symbol: "sparkles", active: chat.isOpen, tint: AIStyle.tint, badge: shortcuts.display("ai.chat")) { chat.toggle() }
                 }
                 SidebarRow(title: L("Главная"), symbol: "house", active: shell.section == .home) { shell.goHome() }
                 SidebarRow(title: L("Импорт"), symbol: "square.and.arrow.down", active: shell.section == .files) { shell.goFiles() }
@@ -463,5 +462,20 @@ struct PageTreeRow: View {
                 PageLockMenuItems(page: page.id)
                 Divider()
                 Button("Удалить") { shell.trash(page.id) }
+    }
+}
+
+/// Сочетание клавиш в рамке справа от пункта панели.
+struct ShortcutBadge: View {
+    let text: String
+    var body: some View {
+        if !text.isEmpty {
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundColor(Tokens.muted)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Tokens.line))
+        }
     }
 }
