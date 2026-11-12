@@ -126,7 +126,6 @@ struct SettingsScreen: View {
                 if let host = shell.calendarSync {
                     CollapsibleSettingsSection(title: L("Календарь и Напоминания"), key: "settings.expanded.calendar") {
                         CalendarSyncSettingsView(engine: host.engine, extra: AnyView(CalendarBindingsView(host: host)))
-                            .frame(minHeight: 560)
                     }
                 }
 

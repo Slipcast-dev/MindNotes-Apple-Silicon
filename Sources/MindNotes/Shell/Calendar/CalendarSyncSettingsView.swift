@@ -1,89 +1,102 @@
 import AppKit
 import SwiftUI
 
-/// Экран «Синхронизация» (макет 2) и его состояния: подключение (макет 1) и нет доступа (макет 5).
-/// При переносе в MindNotes встраивается в `SettingsScreen` как `CollapsibleSettingsSection`.
+/// Настройки синхронизации в оформлении MindNotes: карточки со строками «название — элемент управления».
+/// В MindNotes встраивается в `SettingsScreen` внутри `CollapsibleSettingsSection`.
 struct CalendarSyncSettingsView: View {
     @Bindable var engine: CalendarSyncEngine
-    /// Дополнительные разделы формы: в MindNotes — выбор баз данных (`CalendarBindingsView`).
+    /// Дополнительные разделы: в MindNotes — выбор баз данных (`CalendarBindingsView`).
     var extra: AnyView? = nil
     @State private var showPicker = false
     @State private var refresh = 0
 
     var body: some View {
-        Form {
+        VStack(alignment: .leading, spacing: 0) {
             if !engine.settings.eventsEnabled && !engine.settings.remindersEnabled {
-                Section { CalendarConnectCard(engine: engine) }
+                CalCard { CalendarConnectCard(engine: engine) }.padding(.bottom, 8)
             }
-            accessWarnings
+            ForEach(SyncKind.allCases, id: \.self) { kind in
+                if engine.settings.isEnabled(kind) && engine.status(kind) != .granted && engine.status(kind) != .notDetermined {
+                    AccessDeniedBanner(kind: kind).padding(.bottom, 8)
+                }
+            }
             kindSection(.event)
             kindSection(.reminder)
             if let extra { extra }
-            Section(L("Общие")) {
-                Picker(L("При конфликте"), selection: Binding(get: { engine.settings.conflictPolicy },
-                                                               set: { engine.setPolicy($0) })) {
-                    ForEach(ConflictPolicy.allCases) { Text($0.title).tag($0) }
-                }
-                HStack {
-                    Button {
-                        Task { await engine.syncNow() }
-                    } label: {
-                        Label(L("Синхронизировать"), systemImage: "arrow.triangle.2.circlepath")
+            CalSectionTitle(L("Общие"))
+            CalCard {
+                CalRow(L("При конфликте"), L("Что делать, если элемент изменили и здесь, и в Календаре")) {
+                    Picker("", selection: Binding(get: { engine.settings.conflictPolicy }, set: { engine.setPolicy($0) })) {
+                        ForEach(ConflictPolicy.allCases) { Text($0.title).tag($0) }
                     }
-                    .disabled(engine.isSyncing)
-                    if engine.isSyncing { ProgressView().controlSize(.small) }
-                    Spacer()
-                    Text(lastSyncText).foregroundStyle(.secondary).font(.callout)
+                    .labelsHidden().fixedSize()
+                }
+                CalDivider()
+                CalRow(L("Синхронизировать"), lastSyncText) {
+                    HStack(spacing: 8) {
+                        if engine.isSyncing { ProgressView().controlSize(.small) }
+                        Button { Task { await engine.syncNow() } } label: {
+                            Label(L("Синхронизировать"), systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .buttonStyle(CalButtonStyle(kind: .normal))
+                        .disabled(engine.isSyncing)
+                    }
                 }
             }
         }
-        .formStyle(.grouped)
         .sheet(isPresented: $showPicker) { CalendarPickerView(engine: engine) }
         .id(refresh)
+        .onAppear { engine.refreshAccess() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            refresh += 1   // доступ могли выдать или отозвать в Системных настройках
-        }
-    }
-
-    @ViewBuilder private var accessWarnings: some View {
-        ForEach(SyncKind.allCases, id: \.self) { kind in
-            if engine.settings.isEnabled(kind) && engine.status(kind) != .granted {
-                Section { AccessDeniedBanner(kind: kind) }
-            }
+            engine.refreshAccess()   // доступ могли выдать или отозвать в Системных настройках
+            refresh += 1
         }
     }
 
     @ViewBuilder private func kindSection(_ kind: SyncKind) -> some View {
         let isEvent = kind == .event
-        Section(isEvent ? L("Календарь") : L("Напоминания")) {
-            Toggle(isEvent ? L("Синхронизировать события") : L("Синхронизировать задачи"), isOn: Binding(
-                get: { engine.settings.isEnabled(kind) },
-                set: { on in Task { if on { await engine.enable(kind) } else { engine.disable(kind) } } }))
-
+        CalSectionTitle(isEvent ? L("Календарь") : L("Напоминания"))
+        CalCard {
+            CalRow(isEvent ? L("Синхронизировать события") : L("Синхронизировать задачи"),
+                   isEvent ? L("События появятся в Календаре на всех устройствах Apple")
+                           : L("Задачи появятся в Напоминаниях на всех устройствах Apple")) {
+                Toggle("", isOn: Binding(get: { engine.settings.isEnabled(kind) },
+                                         set: { on in Task { if on { await engine.enable(kind) } else { engine.disable(kind) } } }))
+                    .toggleStyle(.switch).labelsHidden()
+            }
             if engine.settings.isEnabled(kind) && engine.status(kind) == .granted {
                 let editable = engine.gateway.containers(kind).filter(\.isEditable)
-                Picker(isEvent ? L("Календарь приложения") : L("Список"), selection: Binding(
-                    get: { engine.settings.containerID(kind) ?? "" },
-                    set: { id in Task { await engine.setContainer(kind, id: id) } })) {
-                    ForEach(editable) { c in
-                        Label { Text("\(c.title) · \(c.source)") } icon: { Image(systemName: "circle.fill").foregroundStyle(Color(rgb: c.color)) }
-                            .tag(c.id)
+                CalDivider()
+                CalRow(isEvent ? L("Календарь приложения") : L("Список"),
+                       isEvent ? L("Куда записываются события приложения") : L("Куда записываются задачи приложения")) {
+                    Picker("", selection: Binding(get: { engine.settings.containerID(kind) ?? "" },
+                                                  set: { id in Task { await engine.setContainer(kind, id: id) } })) {
+                        ForEach(editable) { c in Text("\(c.title) · \(c.source)").tag(c.id) }
                     }
+                    .labelsHidden().fixedSize()
                 }
                 if isEvent {
-                    LabeledContent(L("Показывать календари")) {
-                        Button(visibleText) { showPicker = true }
+                    CalDivider()
+                    CalRow(L("Показывать календари"), L("Какие календари видны в разделе «Календарь»")) {
+                        Button(visibleText) { showPicker = true }.buttonStyle(CalButtonStyle(kind: .normal))
                     }
-                    Picker(L("Оповещение"), selection: Binding(get: { engine.settings.defaultAlarmMinutes ?? -1 },
-                                                               set: { engine.setDefaultAlarm($0 < 0 ? nil : $0) })) {
-                        Text(L("Нет")).tag(-1)
-                        Text(L("В момент начала")).tag(0)
-                        ForEach([5, 15, 30, 60, 1440], id: \.self) { Text(alarmTitle($0)).tag($0) }
+                    CalDivider()
+                    CalRow(L("Оповещение"), L("Для новых событий")) {
+                        Picker("", selection: Binding(get: { engine.settings.defaultAlarmMinutes ?? -1 },
+                                                      set: { engine.setDefaultAlarm($0 < 0 ? nil : $0) })) {
+                            Text(L("Нет")).tag(-1)
+                            Text(L("В момент начала")).tag(0)
+                            ForEach([5, 15, 30, 60, 1440], id: \.self) { Text(alarmTitle($0)).tag($0) }
+                        }
+                        .labelsHidden().fixedSize()
                     }
                 } else {
-                    Picker(L("Выполненные"), selection: Binding(get: { engine.settings.completedDays },
-                                                                set: { engine.setCompletedDays($0) })) {
-                        ForEach([7, 30, 90, 365], id: \.self) { Text(L("%d дн.", $0)).tag($0) }
+                    CalDivider()
+                    CalRow(L("Выполненные"), L("За какой срок показывать выполненные задачи")) {
+                        Picker("", selection: Binding(get: { engine.settings.completedDays }, set: { engine.setCompletedDays($0) })) {
+                            ForEach([7, 30, 90, 365], id: \.self) { Text(L("%d дн.", $0)).tag($0) }
+                        }
+                        .labelsHidden().fixedSize()
                     }
                 }
             }
@@ -106,7 +119,56 @@ struct CalendarSyncSettingsView: View {
     }
 }
 
-/// Макет 1: приглашение подключить Календарь и Напоминания.
+// MARK: Карточки в стиле настроек MindNotes
+
+struct CalSectionTitle: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text).font(.system(size: 17, weight: .semibold)).foregroundStyle(CalStyle.ink)
+            .padding(.top, 22).padding(.bottom, 10)
+    }
+}
+
+struct CalCard<Content: View>: View {
+    @ViewBuilder let content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) { content }
+            .padding(.horizontal, 18)
+            .background(RoundedRectangle(cornerRadius: 12).fill(CalStyle.card))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(CalStyle.line))
+    }
+}
+
+struct CalRow<Control: View>: View {
+    let title: String
+    let subtitle: String?
+    let control: Control
+
+    init(_ title: String, _ subtitle: String? = nil, @ViewBuilder control: () -> Control) {
+        self.title = title
+        self.subtitle = subtitle
+        self.control = control()
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(CalStyle.ink)
+                if let subtitle { Text(subtitle).font(.system(size: 12)).foregroundStyle(CalStyle.muted) }
+            }
+            Spacer(minLength: 12)
+            control
+        }
+        .padding(.vertical, 13)
+    }
+}
+
+struct CalDivider: View {
+    var body: some View { Rectangle().fill(CalStyle.line).frame(height: 1) }
+}
+
+/// Приглашение подключить Календарь и Напоминания.
 struct CalendarConnectCard: View {
     let engine: CalendarSyncEngine
     @State private var events = true
@@ -117,16 +179,19 @@ struct CalendarConnectCard: View {
         VStack(spacing: 12) {
             HStack(spacing: 10) {
                 Image(systemName: "calendar")
-                Image(systemName: "arrow.left.arrow.right").foregroundStyle(.secondary).font(.title3)
+                Image(systemName: "arrow.left.arrow.right").foregroundStyle(CalStyle.muted).font(.title3)
                 Image(systemName: "checklist")
             }
-            .font(.largeTitle)
-            .foregroundStyle(.tint)
-            Text(L("Подключите Календарь и Напоминания")).font(.headline)
+            .font(.system(size: 30))
+            .foregroundStyle(CalStyle.accent)
+            Text(L("Подключите Календарь и Напоминания")).font(CalStyle.titleFont(22)).foregroundStyle(CalStyle.ink)
             Text(L("События и задачи будут видны на всех ваших устройствах Apple."))
-                .foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Toggle(L("Календарь"), isOn: $events)
-            Toggle(L("Напоминания"), isOn: $reminders)
+                .font(.system(size: 13)).foregroundStyle(CalStyle.muted).multilineTextAlignment(.center)
+            HStack(spacing: 18) {
+                Toggle(L("Календарь"), isOn: $events)
+                Toggle(L("Напоминания"), isOn: $reminders)
+            }
+            .toggleStyle(.checkbox)
             Button {
                 busy = true
                 Task {
@@ -134,32 +199,58 @@ struct CalendarConnectCard: View {
                     if reminders { await engine.enable(.reminder) }
                     busy = false
                 }
-            } label: {
-                Text(L("Разрешить доступ")).frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
+            } label: { Text(L("Разрешить доступ")) }
+            .buttonStyle(CalButtonStyle(kind: .primary))
             .disabled(busy || (!events && !reminders))
         }
-        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
     }
 }
 
-/// Макет 5: доступ запрещён или отозван.
+/// Доступ запрещён или отозван. Отдельно объясняет случай, когда в Системных настройках доступ уже включён:
+/// macOS запомнила разрешение для прежней сборки, и его нужно сбросить.
 struct AccessDeniedBanner: View {
     let kind: SyncKind
+    @State private var copied = false
+
+    private var bundleID: String { Bundle.main.bundleIdentifier ?? "local.personal.MindNotes" }
+    private var command: String { "tccutil reset Calendar \(bundleID); tccutil reset Reminders \(bundleID)" }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(kind == .event ? L("Нет доступа к Календарю") : L("Нет доступа к Напоминаниям")).font(.headline)
-                Text(L("Элементы хранятся только в приложении и не видны на других устройствах."))
-                    .foregroundStyle(.secondary)
-                Button(L("Открыть Системные настройки")) {
-                    NSWorkspace.shared.open(EventKitGateway.privacySettingsURL(kind))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(CalStyle.danger)
+                Text(kind == .event ? L("Нет доступа к Календарю") : L("Нет доступа к Напоминаниям"))
+                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(CalStyle.ink)
+            }
+            Text(L("Элементы хранятся только в приложении и не видны на других устройствах."))
+                .font(.system(size: 13)).foregroundStyle(CalStyle.muted)
+            Button(L("Открыть Системные настройки")) { NSWorkspace.shared.open(EventKitGateway.privacySettingsURL(kind)) }
+                .buttonStyle(CalButtonStyle(kind: .primary))
+            CalDivider()
+            Text(L("Доступ уже включён, а приложение его не видит?"))
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(CalStyle.ink)
+            Text(L("macOS запомнила разрешение для прежней сборки. Закройте приложение, выполните команду в Терминале, откройте приложение снова и нажмите «Разрешить доступ»."))
+                .font(.system(size: 12)).foregroundStyle(CalStyle.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Text(command).font(.system(size: 11, design: .monospaced)).foregroundStyle(CalStyle.ink)
+                    .textSelection(.enabled)
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(CalStyle.soft))
+                Button(copied ? L("Скопировано") : L("Скопировать")) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                    copied = true
                 }
+                .buttonStyle(CalButtonStyle(kind: .normal))
             }
         }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(CalStyle.card))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(CalStyle.danger.opacity(0.5)))
     }
 }
 

@@ -11,6 +11,8 @@ final class CalendarSyncEngine {
     private(set) var conflicts: [SyncConflict] = []
     private(set) var isSyncing = false
     private(set) var lastSummary = SyncSummary()
+    /// Доступ к Календарю и Напоминаниям. Обновляется `refreshAccess()`: экраны перерисовываются сами.
+    private(set) var access: [SyncKind: AccessStatus] = [:]
 
     @ObservationIgnored let gateway: CalendarGateway
     @ObservationIgnored let store: LocalItemStore
@@ -34,21 +36,32 @@ final class CalendarSyncEngine {
         self.now = now
         self.settings = SyncSettings.load(defaults, key: settingsKey)
         gateway.onChange = { [weak self] in self?.scheduleSync() }
+        refreshAccess()
     }
 
     // MARK: Доступ и настройки
 
-    func status(_ kind: SyncKind) -> AccessStatus { gateway.status(kind) }
+    func status(_ kind: SyncKind) -> AccessStatus { access[kind] ?? gateway.status(kind) }
+
+    /// Перечитать доступ (после возврата из Системных настроек). Если доступ появился у включённого вида — сразу сверка.
+    func refreshAccess() {
+        var fresh: [SyncKind: AccessStatus] = [:]
+        for k in SyncKind.allCases { fresh[k] = gateway.status(k) }
+        let gained = SyncKind.allCases.contains { fresh[$0] == .granted && access[$0] != .granted && settings.isEnabled($0) }
+        if fresh != access { access = fresh }
+        if gained { scheduleSync() }
+    }
 
     /// Включает синхронизацию вида: спрашивает доступ, создаёт календарь приложения, сразу сверяет.
     @discardableResult
     func enable(_ kind: SyncKind) async -> Bool {
-        if gateway.status(kind) != .granted {
-            guard await gateway.requestAccess(kind) else {
-                note(.warning, .noAccess(kind))
-                update { $0.setEnabled(kind, false) }
-                return false
-            }
+        // Запрос нужен и при уже выданном доступе: шлюз заодно пересоздаёт хранилище EventKit.
+        let ok = await gateway.requestAccess(kind)
+        refreshAccess()
+        guard ok else {
+            note(.warning, .noAccess(kind))
+            update { $0.setEnabled(kind, false) }
+            return false
         }
         do {
             let id = try gateway.ensureContainer(kind, preferredID: settings.containerID(kind), title: containerTitle)
@@ -102,6 +115,7 @@ final class CalendarSyncEngine {
 
     func syncNow() async {
         if isSyncing { pendingResync = true; return }
+        refreshAccess()
         isSyncing = true
         defer { isSyncing = false }
         repeat {

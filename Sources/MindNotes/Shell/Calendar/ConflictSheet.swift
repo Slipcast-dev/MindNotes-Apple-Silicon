@@ -23,12 +23,13 @@ struct ConflictSheet: View {
                 Button(L("Всегда выбирать новее")) { Task { await engine.resolveAllByNewer() } }
                 Spacer()
                 Button(L("Оставить выбранную")) { Task { await engine.resolve(conflict, keepApp: keepApp) } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(CalButtonStyle(kind: .primary))
                     .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
         .frame(width: 420)
+        .background(CalStyle.paper)
     }
 
     private func version(title: String, icon: String, fields: SyncFields, date: Date, chosen: Bool,

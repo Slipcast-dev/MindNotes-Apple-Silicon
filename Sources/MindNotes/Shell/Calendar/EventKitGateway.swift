@@ -6,6 +6,9 @@ import EventKit
 final class EventKitGateway: CalendarGateway {
     private(set) var store = EKEventStore()
     var onChange: (() -> Void)?
+    /// Последний виденный статус: хранилище, созданное до выдачи доступа, календарей не видит,
+    /// поэтому при смене статуса оно пересоздаётся.
+    private var seen: [SyncKind: EKAuthorizationStatus] = [:]
     /// Схема url, по которой элемент узнаёт свой UUID приложения.
     let urlPrefix: String
     private var observer: NSObjectProtocol?
@@ -22,7 +25,10 @@ final class EventKitGateway: CalendarGateway {
     private func entity(_ kind: SyncKind) -> EKEntityType { kind == .event ? .event : .reminder }
 
     func status(_ kind: SyncKind) -> AccessStatus {
-        switch EKEventStore.authorizationStatus(for: entity(kind)) {
+        let now = EKEventStore.authorizationStatus(for: entity(kind))
+        if let old = seen[kind], old != now { store = EKEventStore() }
+        seen[kind] = now
+        switch now {
         case .fullAccess: return .granted
         case .writeOnly: return .writeOnly
         case .notDetermined: return .notDetermined
@@ -34,11 +40,12 @@ final class EventKitGateway: CalendarGateway {
         do {
             let ok = kind == .event ? try await store.requestFullAccessToEvents()
                                     : try await store.requestFullAccessToReminders()
-            // После первого разрешения хранилище нужно пересоздать, иначе оно не видит календари.
+            // После разрешения хранилище нужно пересоздать, иначе оно не видит календари.
             if ok { store = EKEventStore() }
-            return ok
+            seen[kind] = EKEventStore.authorizationStatus(for: entity(kind))
+            return ok || seen[kind] == .fullAccess
         } catch {
-            return false
+            return EKEventStore.authorizationStatus(for: entity(kind)) == .fullAccess
         }
     }
 

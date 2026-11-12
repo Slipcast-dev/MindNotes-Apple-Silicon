@@ -34,6 +34,8 @@ struct EventEditorSheet: View {
             buttons
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(CalStyle.paper)
         .frame(width: 440)
         .confirmationDialog(L("Это повторяющееся событие"), isPresented: Binding(get: { askSpan != nil }, set: { if !$0 { askSpan = nil } })) {
             Button(L("Только это событие")) { askSpan?(.thisOnly); askSpan = nil }
@@ -96,7 +98,7 @@ struct EventEditorSheet: View {
             Spacer()
             Button(draft.readOnly ? L("Закрыть") : L("Отмена")) { dismiss() }.keyboardShortcut(.cancelAction)
             if !draft.readOnly {
-                Button(L("Готово")) { save() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                Button(L("Готово")) { save() }.keyboardShortcut(.defaultAction).buttonStyle(CalButtonStyle(kind: .primary))
             }
         }
     }

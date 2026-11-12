@@ -73,7 +73,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-codesign --force --sign - "$APP" >/dev/null
+# Ad-hoc подпись с требованием «по идентификатору»: разрешения macOS (Календарь, Напоминания, уведомления)
+# привязываются к bundle id, а не к хешу сборки, и не теряются после пересборки.
+codesign --force --sign - --requirements '=designated => identifier "local.personal.MindNotes"' "$APP" >/dev/null
 # A fresh mtime makes Finder drop its cached (generic) icon for a rebuilt bundle.
 touch "$APP"
 echo "Built $APP"

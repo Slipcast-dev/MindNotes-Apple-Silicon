@@ -1706,3 +1706,19 @@
 "Это повторяющееся событие" = "This is a repeating event";
 "весь день" = "all day";
 "Календарь и Напоминания" = "Calendar and Reminders";
+
+/* Синхронизация с Календарём и Напоминаниями */
+"macOS запомнила разрешение для прежней сборки. Закройте приложение, выполните команду в Терминале, откройте приложение снова и нажмите «Разрешить доступ»." = "macOS remembered the permission for an earlier build. Quit the app, run the command in Terminal, open the app again and click Allow access.";
+"Для новых событий" = "For new events";
+"Доступ уже включён, а приложение его не видит?" = "Access is already on but the app doesn't see it?";
+"За какой срок показывать выполненные задачи" = "How long to show completed tasks";
+"Задачи появятся в Напоминаниях на всех устройствах Apple" = "Tasks will appear in Reminders on all your Apple devices";
+"Какие календари видны в разделе «Календарь»" = "Which calendars are shown in Calendar";
+"Куда записываются задачи приложения" = "Where the app's tasks are saved";
+"Куда записываются события приложения" = "Where the app's events are saved";
+"Не синхронизируется" = "Not synced";
+"Нет событий" = "No events";
+"Скопировано" = "Copied";
+"Скопировать" = "Copy";
+"События появятся в Календаре на всех устройствах Apple" = "Events will appear in Calendar on all your Apple devices";
+"Что делать, если элемент изменили и здесь, и в Календаре" = "What to do if an item changed both here and in Calendar";

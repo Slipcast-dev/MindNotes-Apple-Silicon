@@ -13,15 +13,17 @@ struct SyncLogView: View {
                 List(engine.log) { e in
                     HStack(alignment: .firstTextBaseline) {
                         Image(systemName: icon(e.level)).foregroundStyle(color(e.level))
-                        Text(e.message.text)
+                        Text(e.message.text).foregroundStyle(CalStyle.ink)
                         Spacer()
-                        Text(e.date.formatted(date: .omitted, time: .standard)).foregroundStyle(.secondary).font(.caption)
+                        Text(e.date.formatted(date: .omitted, time: .standard)).foregroundStyle(CalStyle.muted).font(.caption)
                     }
+                    .listRowSeparatorTint(CalStyle.line)
                 }
+                .scrollContentBackground(.hidden)
             }
             HStack {
                 Spacer()
-                Button(L("Очистить")) { engine.clearLog() }.disabled(engine.log.isEmpty)
+                Button(L("Очистить")) { engine.clearLog() }.buttonStyle(CalButtonStyle(kind: .normal)).disabled(engine.log.isEmpty)
             }
             .padding(10)
         }
