@@ -43,8 +43,9 @@
 
 | Что | Где | SHA-256 |
 |---|---|---|
-| Приложение 1.4.2 (исполняемый файл arm64) | `build/MindNotes.app` | `eb44cb19253ab5792f6bc1abcc3b507556a77444fadd5ffb537a947c0627e3d1` |
-| Образ для установки 1.4.2 (страница Releases) | `build/MindNotes-1.4.2.dmg` | `d284d2872c0fe2462bd08383c3c9a19987125805392318df0003013220d685e9` |
+| Приложение 1.5.0 (исполняемый файл arm64) | `build/MindNotes.app` | `cb0b47cfa75985b8703a82991b75fc844ad58f3000def52ec2463e2e4cfbe3e6` |
+| Образ для установки 1.5.0 (страница Releases) | `build/MindNotes-1.5.0.dmg` | `0509aa305c7bf310106b1188c9d2a7fa947ec8bdc31f471db0b21a95067d087b` |
+| Образ выпуска 1.4.2 (страница Releases) | `build/MindNotes-1.4.2.dmg` | `d284d2872c0fe2462bd08383c3c9a19987125805392318df0003013220d685e9` |
 | Образ выпуска 1.4.1 (страница Releases) | `build/MindNotes-1.4.1.dmg` | `f8918e2092a2195b94602f835a2c6a8d2463c2d92a13ccbc18d96fe4850a7f40` |
 | Образ выпуска 1.4.0 (страница Releases) | `build/MindNotes-1.4.0.dmg` | `a461201314b747375507d1ff602e8a16ef59bc937c640f6d4406985ccf265a27` |
 | Образ выпуска 1.3.0 (страница Releases) | `build/MindNotes-1.3.0.dmg` | `9fdc8386f2ab62fded64d4bc605579c85bb880f5467b28c772a9162dbcee1626` |

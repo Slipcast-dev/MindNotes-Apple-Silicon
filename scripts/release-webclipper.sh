@@ -24,8 +24,10 @@ grep -q "^## \[$version\]" "$SRC/CHANGELOG.md" || fail "в $SRC/CHANGELOG.md н�
 # 2. Совместимость: minApp обязателен, и такая MindNotes уже выпущена — иначе плагин некуда поставить.
 minApp=$(/usr/bin/plutil -extract minApp raw -o - "$SRC/manifest.json" 2>/dev/null) || fail "в $SRC/manifest.json нет minApp — укажите первую версию MindNotes, с которой работает плагин"
 latestApp=$(gh api "repos/$REPO/releases/latest" --jq .tag_name | sed 's/^v//')
-[[ "$(printf '%s\n%s\n' "$minApp" "$latestApp" | sort -V | head -1)" == "$minApp" ]] \
-    || fail "плагину нужна MindNotes $minApp, а последняя выпущенная — $latestApp. Сначала выпустите приложение."
+if [[ "$(printf '%s\n%s\n' "$minApp" "$latestApp" | sort -V | head -1)" != "$minApp" ]]; then
+    message="плагину нужна MindNotes $minApp, а последняя выпущенная — $latestApp. Сначала выпустите приложение."
+    [[ -n "${DRY_RUN:-}" ]] && echo "Предупреждение: $message" || fail "$message"
+fi
 
 # 3. Тесты и сборка.
 ./scripts/test.sh >/dev/null || fail "тесты не прошли (./scripts/test.sh)"

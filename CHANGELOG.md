@@ -4,7 +4,7 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.5.0] - 2026-11-12
 
 ### Added
 - **Plugins** (ADR-0019): `.mnplugin` packages with permissions, consent-based install, a local API for browser extensions on this Mac only, automatic browser connection and plugin updates from GitHub releases.
@@ -12,6 +12,7 @@ All notable changes to MindNotes. The format follows [Keep a Changelog](https://
 - **AI properties can add new options** to select and multi-select properties when none of the existing ones fits — up to 10 per fill, matching existing names regardless of case; can be turned off per property.
 
 ### Changed
+- In Settings, “Keyboard Shortcuts” and “Extensions” collapse; the state is remembered.
 - The “Ask AI” preview shows the answer as blocks — headings, lists, tasks, quotes, code, tables and inline formatting — exactly as it will be inserted.
 
 ## [1.4.2] - 2026-11-12
