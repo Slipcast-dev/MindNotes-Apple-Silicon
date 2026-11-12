@@ -7,6 +7,8 @@ All notable changes to MindNotes. The format follows [Keep a Changelog](https://
 ## [Unreleased]
 
 ### Added
+- **Plugins** (ADR-0019): `.mnplugin` packages with permissions, consent-based install, a local API for browser extensions on this Mac only, automatic browser connection and plugin updates from GitHub releases.
+- **Web Clipper**, the first plugin: articles, selections, bookmarks, screenshots and images from Chrome and Safari into new pages; installed by its own installer app and released separately (`webclipper-v…` tags).
 - **AI properties can add new options** to select and multi-select properties when none of the existing ones fits — up to 10 per fill, matching existing names regardless of case; can be turned off per property.
 
 ### Changed

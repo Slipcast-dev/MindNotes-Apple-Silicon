@@ -34,6 +34,42 @@ func runPluginTests() async {
         } else { check(false) }
     }
 
+    await test("Выпуски плагина: свой префикс тега, самый новый годный, minApp из описания") {
+        check(PluginManifest.isSafeTagPrefix("webclipper-v"))
+        check(!PluginManifest.isSafeTagPrefix("v"), "префикс приложения не годится: перепутались бы выпуски")
+        check(!PluginManifest.isSafeTagPrefix("../x-v") && !PluginManifest.isSafeTagPrefix("Web-v"))
+        if case .success(let m) = PluginManifest.parse(Data(#"{"id":"x","name":"X","kind":"plugin","updates":"webclipper-v"}"#.utf8)) {
+            checkEqual(m.updates, "webclipper-v")
+        } else { check(false) }
+        if case .failure(let p) = PluginManifest.parse(Data(#"{"id":"x","name":"X","kind":"plugin","updates":"v"}"#.utf8)) {
+            checkEqual(p, .badComponent("updates"))
+        } else { check(false) }
+
+        func release(_ tag: String, draft: Bool = false, pre: Bool = false, dmg: String? = "a.dmg", host: String = "github.com", body: String = "") -> [String: Any] {
+            var assets: [[String: Any]] = [["name": "SHA256SUMS.txt", "browser_download_url": "https://\(host)/s"]]
+            if let dmg { assets.append(["name": dmg, "browser_download_url": "https://\(host)/\(dmg)"]) }
+            return ["tag_name": tag, "draft": draft, "prerelease": pre, "assets": assets, "body": body]
+        }
+        let list: [[String: Any]] = [
+            release("v1.9.0"),                                 // выпуск приложения
+            release("webclipper-v1.0.1", body: "Исправления\n<!-- minApp: 1.5.0 -->"),
+            release("webclipper-v1.2.0", draft: true),
+            release("webclipper-v1.1.0", pre: true),
+            release("webclipper-v1.0.5", dmg: nil),            // без образа
+            release("webclipper-v1.0.9", host: "evil.example"), // не GitHub
+            release("otherplugin-v9.0.0"),
+            release("webclipper-v1.0.2", body: "<!-- minApp: 1.6 -->"),
+        ]
+        let data = try JSONSerialization.data(withJSONObject: list)
+        let newest = try require(PluginRelease.newest(in: data, prefix: "webclipper-v"))
+        checkEqual(newest.tag, "webclipper-v1.0.2", "черновики, предварительные, без образа и не с GitHub пропущены")
+        checkEqual(newest.minApp, AppVersion("1.6"))
+        checkEqual(newest.image.lastPathComponent, "a.dmg")
+        check(PluginRelease.newest(in: data, prefix: "nothing-v") == nil)
+        check(PluginRelease.minApp(in: "без пометки") == nil)
+        check(AppVersion("webclipper-v1.0.2") == nil, "тег плагина не примется за версию приложения (ADR-0014)")
+    }
+
     await test("Подключения: одно на расширение, старые дубли убираются") {
         func client(_ name: String, origin: String?, created: Int64, used: Int64? = nil, plugin: String = "p") -> PluginClient {
             PluginClient(id: UUID(), plugin: plugin, name: name, tokenHash: "h", createdAt: created, lastUsedAt: used, origin: origin)

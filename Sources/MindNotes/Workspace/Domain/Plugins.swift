@@ -27,6 +27,8 @@ struct PluginManifest: Equatable {
     /// Компоненты, которые ставятся вне приложения: имя → путь внутри пакета.
     var components: [String: String]
     var minApp: AppVersion?
+    /// Префикс тегов выпусков плагина в репозитории приложения (`webclipper-v`): по нему ищутся обновления.
+    var updates: String?
 
     static func == (a: PluginManifest, b: PluginManifest) -> Bool {
         a.id == b.id && a.version == b.version && a.permissions == b.permissions && a.components == b.components
@@ -58,10 +60,16 @@ struct PluginManifest: Equatable {
                   key.count <= 40, key.allSatisfy({ $0.isLetter || $0.isNumber || "-_".contains($0) }) else { return .failure(.badComponent(key)) }
             components[key] = path
         }
+        var updates: String?
+        if let prefix = o["updates"] as? String {
+            guard isSafeTagPrefix(prefix) else { return .failure(.badComponent("updates")) }
+            updates = prefix
+        }
         let manifest = PluginManifest(id: base.id, name: base.name, version: base.version, api: api,
                                       summary: (o["description"] as? String).map { String($0.prefix(300)) },
                                       author: (o["author"] as? String).map { String($0.prefix(80)) },
-                                      permissions: known, unknownPermissions: unknown, components: components, minApp: base.minApp)
+                                      permissions: known, unknownPermissions: unknown, components: components, minApp: base.minApp,
+                                      updates: updates)
         return .success(manifest)
     }
 
@@ -71,6 +79,12 @@ struct PluginManifest: Equatable {
         if !unknownPermissions.isEmpty { return .unknownPermissions(unknownPermissions) }
         if let minApp, let app, app < minApp { return .newerApp(minApp.description) }
         return nil
+    }
+
+    /// Префикс тега: строчные латинские буквы, цифры и дефис, оканчивается на `-v` — не совпадёт с тегами приложения `v1.2.3`.
+    static func isSafeTagPrefix(_ prefix: String) -> Bool {
+        (3...40).contains(prefix.count) && prefix.hasSuffix("-v")
+            && prefix.allSatisfy { ($0.isASCII && ($0.isLowercase || $0.isNumber)) || $0 == "-" }
     }
 
     /// Путь внутри пакета: без абсолютного начала, `..` и пустых частей.
@@ -106,5 +120,50 @@ struct PluginClient: Codable, Equatable, Identifiable {
         var best: [String: PluginClient] = [:]
         for c in list where best[key(c)].map({ recency(c) >= recency($0) }) ?? true { best[key(c)] = c }
         return list.filter { best[key($0)]?.id == $0.id }
+    }
+}
+
+/// Выпуск плагина на GitHub (ADR-0019): тег `<префикс><версия>`, образ установщика `.dmg` и `SHA256SUMS.txt`.
+struct PluginRelease: Equatable {
+    var version: AppVersion
+    var tag: String
+    var notes: String
+    var image: URL
+    var checksums: URL
+    /// Самая старая MindNotes, с которой работает выпуск: строка `<!-- minApp: X -->` в описании.
+    var minApp: AppVersion?
+
+    static func == (a: PluginRelease, b: PluginRelease) -> Bool { a.tag == b.tag && a.image == b.image }
+
+    /// Самый новый годный выпуск плагина из списка `GET /repos/…/releases`. Черновики, предварительные выпуски,
+    /// чужие теги и выпуски без образа или сумм пропускаются; ссылки — только https на github.com.
+    static func newest(in data: Data, prefix: String) -> PluginRelease? {
+        guard PluginManifest.isSafeTagPrefix(prefix), let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
+        var best: PluginRelease?
+        for object in list {
+            guard let tag = object["tag_name"] as? String, tag.hasPrefix(prefix),
+                  let version = AppVersion(String(tag.dropFirst(prefix.count))),
+                  object["draft"] as? Bool != true, object["prerelease"] as? Bool != true,
+                  let assets = object["assets"] as? [[String: Any]] else { continue }
+            func asset(_ match: (String) -> Bool) -> URL? {
+                for a in assets {
+                    guard let name = a["name"] as? String, match(name), let raw = a["browser_download_url"] as? String,
+                          let url = URL(string: raw), url.scheme == "https", url.host?.hasSuffix("github.com") == true else { continue }
+                    return url
+                }
+                return nil
+            }
+            guard let image = asset({ $0.hasSuffix(".dmg") }), let sums = asset({ $0 == "SHA256SUMS.txt" }) else { continue }
+            let body = (object["body"] as? String) ?? ""
+            let release = PluginRelease(version: version, tag: tag, notes: String(body.prefix(4000)), image: image, checksums: sums,
+                                        minApp: minApp(in: body))
+            if best.map({ $0.version < version }) ?? true { best = release }
+        }
+        return best
+    }
+
+    static func minApp(in body: String) -> AppVersion? {
+        guard let start = body.range(of: "<!-- minApp:"), let end = body.range(of: "-->", range: start.upperBound..<body.endIndex) else { return nil }
+        return AppVersion(body[start.upperBound..<end.lowerBound].trimmingCharacters(in: .whitespaces))
     }
 }

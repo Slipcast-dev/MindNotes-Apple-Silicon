@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shell.loadKnownWorkspaces()
         shell.restoreLastWorkspace()
         updater.start() // Фоновая проверка обновлений в автоматическом режиме (ADR-0014).
+        PluginUpdater.shared.start(mode: updater.mode) // Обновления плагинов — в том же режиме (ADR-0019).
         let paths = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
         for path in paths where FileManager.default.fileExists(atPath: path) { open(URL(fileURLWithPath: path)) }
     }

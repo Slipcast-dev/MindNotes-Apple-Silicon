@@ -129,4 +129,6 @@ $('open').onclick = async () => {
 };
 $('again').onclick = refresh;
 
+// При каждом открытии окна фон сверяет версию на диске: после обновления расширение перезапустится само.
+chrome.runtime.sendMessage({ type: 'checkUpdate' }).catch(() => {});
 refresh();

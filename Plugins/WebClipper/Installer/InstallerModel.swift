@@ -30,7 +30,10 @@ final class InstallerModel: ObservableObject {
         refreshNow()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in Task { @MainActor in self?.refreshNow() } }
         // Первый запуск — сразу ставим всё: пользователь для этого и открыл установщик.
-        if auto, !UserDefaults.standard.bool(forKey: "autoStarted") {
+        // Обновление (новый установщик, старый плагин в MindNotes) — тоже сразу: MindNotes спросит «Обновить?».
+        let installed = Paths.version(of: Paths.installedPlugin.appendingPathComponent("manifest.json"))
+        let isUpdate = installed != nil && installed != Paths.payloadVersion
+        if auto, !UserDefaults.standard.bool(forKey: "autoStarted") || isUpdate {
             UserDefaults.standard.set(true, forKey: "autoStarted")
             Task { await installAll() }
         }

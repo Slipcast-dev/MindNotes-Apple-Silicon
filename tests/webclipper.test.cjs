@@ -16,6 +16,7 @@ test('версии и id плагина и расширения согласов
   assert.strictEqual(plugin.kind, 'plugin');
   assert.strictEqual(plugin.version, browser.version);
   assert.strictEqual(plugin.api, 1);
+  assert.strictEqual(plugin.author, 'MindNotes', 'в настройках плагин подписан именем приложения');
   assert.ok(read('browser/api.js').includes(`const MN_PLUGIN = '${plugin.id}'`), 'расширение называет себя id плагина');
 });
 
@@ -99,4 +100,17 @@ test('окно расширения прячет панели и стилем и
   for (const id of ['offline', 'unpaired', 'noWorkspace', 'clip', 'done', 'error']) {
     assert.ok(new RegExp(`id="${id}"[^>]*style="display:none"`).test(html), `${id} скрыт до проверки состояния`);
   }
+});
+
+test('выпуски плагина отдельно от приложения и не мешают его обновлениям', () => {
+  const plugin = json('manifest.json');
+  assert.strictEqual(plugin.updates, 'webclipper-v', 'свой префикс тегов');
+  const changelog = read('CHANGELOG.md');
+  assert.ok(changelog.includes(`## [${plugin.version}]`), 'у текущей версии плагина есть запись в журнале');
+  const release = fs.readFileSync(path.join(root, 'scripts/release-webclipper.sh'), 'utf8');
+  assert.ok(release.includes('--latest=false'), 'выпуск плагина не становится «последним»: по нему MindNotes ищет свои обновления');
+  assert.ok(/minApp/.test(release) && /releases\/latest/.test(release), 'плагин не выходит раньше подходящей MindNotes');
+  assert.ok(/<!-- minApp: %s -->/.test(release), 'MindNotes узнаёт совместимость из описания выпуска');
+  const bg = read('browser/background.js');
+  assert.ok(/chrome\.runtime\.reload\(\)/.test(bg) && /cache: 'no-store'/.test(bg), 'расширение подхватывает новую версию с диска само');
 });

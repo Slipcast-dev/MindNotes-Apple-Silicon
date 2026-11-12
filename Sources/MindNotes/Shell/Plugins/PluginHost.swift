@@ -426,6 +426,7 @@ struct PluginsSettings: View {
                 }
             }
             if let summary = plugin.manifest.summary { Text(summary).font(.system(size: 12)).foregroundColor(Tokens.muted) }
+            if plugin.manifest.updates != nil { PluginUpdateRow(plugin: plugin) }
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(plugin.manifest.permissions, id: \.self) { p in
                     Text("• " + PluginHost.title(p)).font(.system(size: 11)).foregroundColor(Tokens.muted)
@@ -488,6 +489,46 @@ enum ChromeInstallGuide {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString("chrome://extensions", forType: .string)
         default: break
+        }
+    }
+}
+
+/// Строка обновления плагина в его карточке: проверка, «Доступна версия X», загрузка.
+struct PluginUpdateRow: View {
+    @ObservedObject var updater = PluginUpdater.shared
+    let plugin: PluginHost.Plugin
+
+    var body: some View {
+        HStack(spacing: 8) {
+            switch updater.state(plugin.id) {
+            case .available(let release):
+                Text(String(format: L("Доступна версия %@"), release.version.description)).font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button("Обновить") { updater.install(release, plugin: plugin.id) }.buttonStyle(NotesButtonStyle())
+            case .needsApp(let release):
+                Text(String(format: L("Версии %@ нужна MindNotes %@ или новее — сначала обновите приложение."),
+                            release.version.description, release.minApp?.description ?? "?"))
+                    .font(.system(size: 11)).foregroundColor(Tokens.muted)
+                Spacer()
+            case .checking:
+                ProgressView().controlSize(.small)
+                Text("Проверка обновлений…").font(.system(size: 11)).foregroundColor(Tokens.muted)
+                Spacer()
+            case .downloading, .installing:
+                ProgressView().controlSize(.small)
+                Text("Загрузка и проверка обновления…").font(.system(size: 11)).foregroundColor(Tokens.muted)
+                Spacer()
+            case .failed(let message):
+                Text(message).font(.system(size: 11)).foregroundColor(Tokens.danger)
+                Spacer()
+                Button("Повторить") { Task { await updater.check(silent: false) } }.buttonStyle(NotesButtonStyle(kind: .plain))
+            case .upToDate:
+                Text("Установлена последняя версия").font(.system(size: 11)).foregroundColor(Tokens.muted)
+                Spacer()
+            case .idle:
+                Spacer()
+                Button("Проверить обновления") { Task { await updater.check(silent: false) } }.buttonStyle(NotesButtonStyle(kind: .plain))
+            }
         }
     }
 }

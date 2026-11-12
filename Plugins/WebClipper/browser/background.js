@@ -20,8 +20,23 @@ async function ensurePaired() {
   if (await autoPairOnce()) chrome.alarms.clear('mn-pair');
   else chrome.alarms.create('mn-pair', { periodInMinutes: 1 });
 }
-chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === 'mn-pair') ensurePaired(); });
-chrome.runtime.onStartup.addListener(ensurePaired);
+// Самообновление: установщик кладёт новые файлы на диск, а браузер держит в памяти старые. Расширение сравнивает
+// свою версию со сборкой на диске и перезапускается само — нажимать «Обновить» в браузере не нужно.
+async function reloadIfUpdated() {
+  try {
+    const response = await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' });
+    const onDisk = await response.json();
+    const running = chrome.runtime.getManifest();
+    if ((onDisk.version_name || onDisk.version) !== (running.version_name || running.version)) chrome.runtime.reload();
+  } catch (e) { /* файла нет — браузер сам сообщит об ошибке расширения */ }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'mn-pair') ensurePaired();
+  if (alarm.name === 'mn-update') reloadIfUpdated();
+});
+chrome.runtime.onStartup.addListener(() => { ensurePaired(); reloadIfUpdated(); });
+chrome.alarms.create('mn-update', { periodInMinutes: 15 });
 
 chrome.runtime.onInstalled.addListener(() => {
   ensurePaired();
@@ -46,6 +61,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (message?.type === 'checkUpdate') { reloadIfUpdated(); return false; }
   if (message?.type === 'autoPair') {
     autoPairOnce().then((ok) => reply({ ok })).catch(() => reply({ ok: false }));
     return true;

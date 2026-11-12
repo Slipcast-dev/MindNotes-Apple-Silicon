@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "kind": "plugin",
   "api": 1,
-  "author": "Minerva",
+  "author": "MindNotes",
   "description": "Сохраняет статьи, выделенный текст, закладки и скриншоты из Chrome и Safari в новые страницы MindNotes.",
   "permissions": [
     "pages.list",
@@ -15,5 +15,6 @@
   ],
   "components": {
     "chrome": "browser/chrome"
-  }
+  },
+  "updates": "webclipper-v"
 }
