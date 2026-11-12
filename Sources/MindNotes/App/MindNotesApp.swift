@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.apply()
         shell.loadKnownWorkspaces()
         shell.restoreLastWorkspace()
+        updater.prepareToQuit = { [shell] reply in shell.prepareToTerminate(reply: reply) }
         updater.start() // Фоновая проверка обновлений в автоматическом режиме (ADR-0014).
         PluginUpdater.shared.start(mode: updater.mode) // Обновления плагинов — в том же режиме (ADR-0019).
         let paths = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }

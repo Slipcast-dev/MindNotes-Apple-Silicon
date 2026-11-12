@@ -59,6 +59,8 @@ final class Updater: ObservableObject {
         return URLSession(configuration: config)
     }()
     private var progressObservation: NSKeyValueObservation?
+    /// Запись и закрытие пространства перед заменой программы; ответ — можно ли выходить. Задаёт AppDelegate.
+    var prepareToQuit: ((@escaping (Bool) -> Void) -> Void)?
 
     /// Запуск: в автоматическом режиме проверка сейчас (если не было сегодня) и раз в сутки.
     func start() {
@@ -123,8 +125,20 @@ final class Updater: ObservableObject {
                 let actual = try await Task.detached { try Self.sha256(of: image) }.value
                 guard actual == expected else { throw UpdateError(L("Образ повреждён: контрольная сумма не совпала. Установка отменена.")) }
                 let staged = try await Task.detached { try Self.stage(image: image) }.value
+                // Сначала записать и закрыть пространство: окно обновления не даёт обычному выходу завершиться,
+                // и сценарий замены ждал бы его бесконечно (1.3.0–1.5.0).
+                showsSheet = false
+                let saved = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
+                    (prepareToQuit ?? { $0(true) }) { done.resume(returning: $0) }
+                }
+                guard saved else {
+                    throw UpdateError(L("Правки не записались, поэтому обновление отложено. Сохраните работу и нажмите «Скачать и установить» ещё раз."))
+                }
                 try Self.relaunch(replacing: Bundle.main.bundleURL, with: staged)
-                NSApp.terminate(nil) // Пространство записывается обычным выходом, затем сценарий заменяет программу.
+                NSApp.terminate(nil)
+                // Пространство уже записано и закрыто: если выход всё же не произошёл, завершиться самим.
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                exit(0)
             } catch {
                 state = .failed((error as? UpdateError)?.message ?? L("Обновление не установилось: ") + error.localizedDescription)
             }

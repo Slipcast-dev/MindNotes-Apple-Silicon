@@ -1603,3 +1603,4 @@
 "В образе нет программы-установщика." = "The disk image has no installer app.";
 "Версии %@ нужна MindNotes %@ или новее — сначала обновите приложение." = "Version %@ needs MindNotes %@ or later — update the app first.";
 "Загрузка и проверка обновления…" = "Downloading and verifying the update…";
+"Правки не записались, поэтому обновление отложено. Сохраните работу и нажмите «Скачать и установить» ещё раз." = "Your edits could not be saved, so the update was postponed. Save your work and click “Download and Install” again.";
