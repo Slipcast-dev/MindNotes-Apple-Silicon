@@ -299,6 +299,15 @@ func runUpdateAndExtensionTests() async {
         check(ReleaseInfo.parse(release(host: "evil.example")) == nil, "образ только с github.com")
         check(ReleaseInfo.parse(release(tag: "latest")) == nil, "метка без версии")
         check(ReleaseInfo.parse(Data("не json".utf8)) == nil)
+        func os(_ a: Int, _ b: Int, _ c: Int = 0) -> OperatingSystemVersion { OperatingSystemVersion(majorVersion: a, minorVersion: b, patchVersion: c) }
+        let needs26: [String: Any] = ["LSMinimumSystemVersion": "26.0"]
+        checkEqual(SystemRequirement.unmet(infoPlist: needs26, system: os(15, 7, 1))?.description, "26.0", "сборка для 26 не ставится на 15")
+        check(SystemRequirement.unmet(infoPlist: needs26, system: os(26, 0)) == nil, "ровно минимальная система подходит")
+        check(SystemRequirement.unmet(infoPlist: needs26, system: os(27, 2)) == nil, "новее минимума подходит")
+        check(SystemRequirement.unmet(infoPlist: ["LSMinimumSystemVersion": "15.0"], system: os(15, 0)) == nil)
+        checkEqual(SystemRequirement.unmet(infoPlist: ["LSMinimumSystemVersion": "15.2"], system: os(15, 1, 9))?.description, "15.2", "сравнение по младшим частям")
+        check(SystemRequirement.unmet(infoPlist: [:], system: os(15, 0)) == nil, "без ключа не мешает")
+        check(SystemRequirement.unmet(infoPlist: ["LSMinimumSystemVersion": "мусор"], system: os(15, 0)) == nil, "неразборчивое значение не мешает")
         let sums = ReleaseInfo.checksums("""
         cff2291ea207c90423eaa5e18e1bd30970466cd17eee9ba27dd56b8853b675ec  MindNotes-1.3.0.dmg
         DA398A372AAC2066170EDAA08404EAB709CC02D875A4E6639918A838C62A16D7 *build/Demo.mindnotesbackup

@@ -71,6 +71,16 @@ struct ReleaseInfo: Equatable {
     }
 }
 
+/// Минимальная система новой программы (ADR-0020): `LSMinimumSystemVersion` из Info.plist в образе.
+/// Возвращает требуемую версию, только если текущая система старее; без ключа или с неразборчивым значением — nil.
+enum SystemRequirement {
+    static func unmet(infoPlist: [String: Any], system: OperatingSystemVersion) -> AppVersion? {
+        guard let raw = infoPlist["LSMinimumSystemVersion"] as? String, let required = AppVersion(raw) else { return nil }
+        let current = AppVersion("\(system.majorVersion).\(system.minorVersion).\(system.patchVersion)")!
+        return current < required ? required : nil
+    }
+}
+
 /// Режим обновлений в настройках.
 enum UpdateMode: String, CaseIterable {
     case automatic, manual

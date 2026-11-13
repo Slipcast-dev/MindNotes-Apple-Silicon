@@ -197,6 +197,11 @@ final class Updater: ObservableObject {
         defer { _ = try? run("/usr/bin/hdiutil", ["detach", mount.path, "-force"]) }
         let app = mount.appendingPathComponent("MindNotes.app")
         guard FileManager.default.fileExists(atPath: app.path) else { throw UpdateError(L("В образе нет MindNotes.app.")) }
+        // Не ставить сборку, которая не запустится на этой системе: старая программа остаётся рабочей.
+        if let plist = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) as? [String: Any],
+           let required = SystemRequirement.unmet(infoPlist: plist, system: ProcessInfo.processInfo.operatingSystemVersion) {
+            throw UpdateError(L("Новая версия требует macOS %@ или новее. Текущая версия MindNotes продолжит работать.", required.description))
+        }
         let target = Bundle.main.bundleURL.deletingLastPathComponent()
         guard FileManager.default.isWritableFile(atPath: target.path) else {
             throw UpdateError(L("Нет прав на запись в папку программы. Скачайте образ со страницы выпуска и установите вручную."))

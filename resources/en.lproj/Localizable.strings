@@ -1784,3 +1784,4 @@
 "Щелчок — свернуть или развернуть" = "Click to collapse or expand";
 "Раздел…" = "Section…";
 "Обновления: github.com/%@" = "Updates: github.com/%@";
+"Новая версия требует macOS %@ или новее. Текущая версия MindNotes продолжит работать." = "The new version requires macOS %@ or later. Your current version of MindNotes will keep working.";

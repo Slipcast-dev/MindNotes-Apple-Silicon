@@ -1,4 +1,5 @@
-# Только Apple Silicon: образ задан здесь, цель сборки в scripts/target.sh (ADR-0009).
+# Только Apple Silicon. Цель сборки в scripts/target.sh (ADR-0009, ADR-0020).
+# Сборка нужна на SDK 26+ (macos-26), а запуск проверяется и на минимальной системе (macos-15).
 name: CI
 
 on:
@@ -25,3 +26,31 @@ jobs:
         run: ./scripts/test.sh
       - name: Build app
         run: ./scripts/build-app.sh
+      - name: Launch on macOS 26
+        run: ./scripts/smoke-launch.sh
+      - name: Build tests for macOS 15
+        run: NOTES_BUILD_ONLY=build/ci ./scripts/test-notes.sh
+      # tar сохраняет права на запуск и подпись пакета, которые артефакт иначе теряет.
+      - name: Pack
+        run: tar -czf build/ci.tgz -C build MindNotes.app ci/notes-tests
+      - uses: actions/upload-artifact@v7
+        with:
+          name: build
+          path: build/ci.tgz
+          retention-days: 3
+
+  minimum-macos:
+    needs: tests
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7 # тестам нужны tests/fixtures
+      - uses: actions/download-artifact@v8
+        with:
+          name: build
+      - name: Unpack
+        run: mkdir -p build && tar -xzf ci.tgz -C build
+      - name: Tests on macOS 15
+        run: NOTES_BIN=build/ci/notes-tests ./scripts/test-notes.sh
+      - name: Launch on macOS 15
+        run: ./scripts/smoke-launch.sh

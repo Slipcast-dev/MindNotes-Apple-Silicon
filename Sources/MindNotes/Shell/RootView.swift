@@ -27,9 +27,9 @@ struct RootView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .padding(.horizontal, 4)
                 }
-                .sharedBackgroundVisibility(.hidden)
+                .hidingSharedBackground()
                 ToolbarItem(placement: .automatic) { Spacer() } // Прижимает переключатель темы к правому краю.
-                    .sharedBackgroundVisibility(.hidden)
+                    .hidingSharedBackground()
                 ToolbarItem(placement: .automatic) {
                     Button { prefs.isDark.toggle() } label: {
                         Image(systemName: "circle.lefthalf.filled")
@@ -41,7 +41,7 @@ struct RootView: View {
                     .help("Переключить тему")
                     .accessibilityLabel(Text("Переключить тему"))
                 }
-                .sharedBackgroundVisibility(.hidden)
+                .hidingSharedBackground()
             }
             .alert("Ошибка", isPresented: Binding(get: { shell.errorMessage != nil }, set: { if !$0 { shell.errorMessage = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -359,3 +359,15 @@ struct PeekOverlay: View {
     }
 }
 
+
+extension ToolbarContent {
+    /// Убирает общую подложку элемента панели (Liquid Glass, macOS 26+). На macOS 15 подложки нет, элемент остаётся как есть.
+    @ToolbarContentBuilder
+    func hidingSharedBackground() -> some ToolbarContent {
+        if #available(macOS 26, *) {
+            sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
+    }
+}

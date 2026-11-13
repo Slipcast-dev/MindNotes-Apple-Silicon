@@ -5,7 +5,7 @@ import PackageDescription
 // Манифест нужен редакторам. Цель та же: только Apple Silicon, см. scripts/target.sh.
 let package = Package(
     name: "MindNotes",
-    platforms: [.macOS(.v26)],
+    platforms: [.macOS(.v15)],
     targets: [
         .executableTarget(
             name: "MindNotes",
