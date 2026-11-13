@@ -43,8 +43,8 @@
 
 | Что | Где | SHA-256 |
 |---|---|---|
-| Приложение 1.6.0, не выпущено (исполняемый файл arm64) | `build/MindNotes.app` | `a5fee7241665de465b72c5ed5e717a146ac3fcd7f675d0f2ddbacf3a5c6a08d4` |
-| Образ для установки 1.6.0, не выпущено | `build/MindNotes-1.6.0.dmg` | `650d9e20e49f84ce783085d6f0c7667eba916d3667798e4cd1275f6d5f723b4e` |
+| Приложение 1.6.0 (исполняемый файл arm64) | `build/MindNotes.app` | `a5fee7241665de465b72c5ed5e717a146ac3fcd7f675d0f2ddbacf3a5c6a08d4` |
+| Образ для установки 1.6.0 (страница Releases) | `build/MindNotes-1.6.0.dmg` | `650d9e20e49f84ce783085d6f0c7667eba916d3667798e4cd1275f6d5f723b4e` |
 | Образ выпуска 1.5.2 (страница Releases) | `MindNotes-1.5.2.dmg` | `1107b52a3dd50e4c1acbfda2d9164aac7520a12401ba9c01ee42b1cdcd43c435` |
 | Образ выпуска 1.5.1 (страница Releases) | `MindNotes-1.5.1.dmg` | `809b6f0d3c80c5af7efa72c7044ac92b7e6dafb43277e4df19a43274c0ba77b9` |
 | Образ выпуска 1.5.0 (страница Releases) | `MindNotes-1.5.0.dmg` | `0509aa305c7bf310106b1188c9d2a7fa947ec8bdc31f471db0b21a95067d087b` |

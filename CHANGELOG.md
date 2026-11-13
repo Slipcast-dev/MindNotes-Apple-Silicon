@@ -4,7 +4,7 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
-## [1.6.0] - unreleased
+## [1.6.0] - 2026-11-13
 
 ### Added
 - **Calendar**: a Calendar section with day, week and month views in the style of Apple Calendar — a mini month, calendars and reminder lists in the sidebar, a current-time line, a day panel; scrolling with the wheel or a gesture moves exactly one step; right-click for “New Event…” and “New Reminder…”; edit, recolour, rename and delete calendars and lists.
