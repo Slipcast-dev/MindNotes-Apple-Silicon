@@ -536,6 +536,9 @@ struct PluginUpdateRow: View {
                 Text("Плагин не сообщает, где искать его обновления: обновляйте его вручную.").font(.system(size: 11)).foregroundColor(Tokens.muted)
             } else {
                 status
+                // Откуда берутся обновления — видно, особенно если плагин живёт в своём репозитории.
+                Text(String(format: L("Обновления: github.com/%@"), plugin.manifest.repository ?? PluginUpdater.appRepository))
+                    .font(.system(size: 11)).foregroundColor(Tokens.muted)
             }
             HStack(spacing: 10) {
                 Button("Проверить обновления") { Task { await updater.check(silent: false) } }

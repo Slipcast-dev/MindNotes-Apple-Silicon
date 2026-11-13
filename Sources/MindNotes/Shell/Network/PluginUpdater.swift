@@ -9,7 +9,8 @@ import Foundation
 @MainActor
 final class PluginUpdater: ObservableObject {
     static let shared = PluginUpdater()
-    static let releasesURL = URL(string: "https://api.github.com/repos/Slipcast-dev/MindNotes-Apple-Silicon/releases?per_page=50")!
+    /// Репозиторий приложения: здесь ищутся выпуски плагинов без своего поля `repository`.
+    static let appRepository = "Slipcast-dev/MindNotes-Apple-Silicon"
     static let interval: TimeInterval = 24 * 60 * 60
     private static let lastCheckKey = "pluginUpdateChecks", autoKey = "pluginAutoUpdate"
 
@@ -81,7 +82,8 @@ final class PluginUpdater: ObservableObject {
         if Date().timeIntervalSince(oldest) >= Self.interval { await check(silent: true) }
     }
 
-    /// Один запрос списка выпусков на все плагины, у которых указан источник обновлений.
+    /// Один запрос списка выпусков на каждый репозиторий: плагины без поля `repository` — из репозитория приложения,
+    /// остальные — из своего (ADR-0019, п. 10). Ошибка одного репозитория не мешает остальным.
     func check(silent: Bool) async {
         let plugins = PluginHost.shared.plugins.filter { $0.manifest.updateSource != nil }
         guard !plugins.isEmpty else { return }
@@ -90,16 +92,22 @@ final class PluginUpdater: ObservableObject {
             return
         }
         for p in plugins where !isBusy(p.id) { states[p.id] = .checking }
-        let data: Data
-        do {
-            let (body, response) = try await Self.session.data(from: Self.releasesURL)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
-            data = body
-        } catch {
-            for p in plugins where !isBusy(p.id) { states[p.id] = silent ? .idle : .failed(L("Не удалось проверить обновления: нет связи с GitHub.")) }
-            return
-        }
+        var lists: [URL: Data?] = [:]
         for p in plugins where !isBusy(p.id) {
+            guard let url = p.manifest.releasesURL(fallback: Self.appRepository) else { states[p.id] = .idle; continue }
+            if lists[url] == nil {
+                do {
+                    let (body, response) = try await Self.session.data(from: url)
+                    guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+                    lists[url] = .some(body)
+                } catch {
+                    lists[url] = .some(nil)
+                }
+            }
+            guard let data = lists[url] ?? nil else {
+                states[p.id] = silent ? .idle : .failed(L("Не удалось проверить обновления: нет связи с GitHub."))
+                continue
+            }
             lastCheck[p.id] = Date()
             guard let prefix = p.manifest.updateSource, let release = PluginRelease.newest(in: data, prefix: prefix),
                   let installed = AppVersion(p.manifest.version), installed < release.version else {

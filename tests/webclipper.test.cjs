@@ -143,3 +143,14 @@ test('установщик умеет тихое обновление для Min
   const app = read('Installer/InstallerApp.swift');
   assert.ok(/contains\("--update"\)/.test(app) && /syncChromeFolder/.test(app) && /exit\(/.test(app), 'без окна обновить файлы и выйти');
 });
+
+test('готовность к переезду плагина в свой репозиторий', () => {
+  const release = fs.readFileSync(path.join(root, 'scripts/release-webclipper.sh'), 'utf8');
+  assert.ok(/extract repository raw/.test(release), 'скрипт берёт репозиторий из описания плагина');
+  assert.ok(/MIRROR_TO_APP_REPO/.test(release), 'переходный период: копия выпуска в репозитории приложения');
+  assert.ok(/latest=\(--latest=false\)/.test(release), 'в репозитории приложения выпуск плагина не «последний»');
+  const updater = fs.readFileSync(path.join(root, 'Sources/MindNotes/Shell/Network/PluginUpdater.swift'), 'utf8');
+  assert.ok(/releasesURL\(fallback: Self\.appRepository\)/.test(updater), 'MindNotes ищет выпуски в репозитории плагина');
+  const plugin = json('manifest.json');
+  if (plugin.repository) assert.match(plugin.repository, /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/);
+});

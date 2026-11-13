@@ -4,6 +4,11 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- A plugin can live in its own repository: the `repository` field (“owner/name” on GitHub) in the plugin manifest tells MindNotes where to look for its updates; without it, nothing changes. The plugin card shows where updates come from. Groundwork for moving Web Clipper out (ADR-0019, item 10).
+
 ## [1.6.2] - 2026-11-13
 
 ### Changed

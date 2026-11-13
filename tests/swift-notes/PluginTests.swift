@@ -47,6 +47,23 @@ func runPluginTests() async {
         if case .success(let explicit) = PluginManifest.parse(Data(#"{"id":"a.b","name":"X","kind":"plugin","updates":"other-v"}"#.utf8)) {
             checkEqual(explicit.updateSource, "other-v", "явное поле важнее правила")
         } else { check(false) }
+        // Отдельный репозиторий плагина (ADR-0019, п. 10): только «владелец/имя» на GitHub.
+        for ok in ["Slipcast-dev/MindNotes-WebClipper", "a/b", "owner1/repo.name_2"] { check(PluginManifest.isValidRepository(ok), ok) }
+        for bad in ["", "a", "a/b/c", "/b", "a/", "-a/b", "a/..", "a/.", "https://github.com/a/b", "github.com/a/b", "a b/c",
+                    "evil.example/x", String(repeating: "a", count: 40) + "/b", "a/" + String(repeating: "b", count: 101), "аб/вг"] {
+            check(!PluginManifest.isValidRepository(bad), "отклонено: \(bad)")
+        }
+        if case .success(let moved) = PluginManifest.parse(Data(#"{"id":"minerva.webclipper","name":"W","kind":"plugin","updates":"webclipper-v","repository":"Slipcast-dev/MindNotes-WebClipper"}"#.utf8)) {
+            checkEqual(moved.releasesURL(fallback: "Slipcast-dev/MindNotes-Apple-Silicon")?.absoluteString,
+                       "https://api.github.com/repos/Slipcast-dev/MindNotes-WebClipper/releases?per_page=50", "выпуски — из репозитория плагина")
+        } else { check(false) }
+        if case .success(let local) = PluginManifest.parse(Data(#"{"id":"minerva.webclipper","name":"W","kind":"plugin"}"#.utf8)) {
+            checkEqual(local.releasesURL(fallback: "Slipcast-dev/MindNotes-Apple-Silicon")?.absoluteString,
+                       "https://api.github.com/repos/Slipcast-dev/MindNotes-Apple-Silicon/releases?per_page=50", "без поля — как раньше")
+        } else { check(false) }
+        if case .failure(let p) = PluginManifest.parse(Data(#"{"id":"x","name":"X","kind":"plugin","repository":"https://evil.example/x"}"#.utf8)) {
+            checkEqual(p, .badComponent("repository"), "адрес вместо имени не принимается")
+        } else { check(false) }
         if case .failure(let p) = PluginManifest.parse(Data(#"{"id":"x","name":"X","kind":"plugin","updates":"v"}"#.utf8)) {
             checkEqual(p, .badComponent("updates"))
         } else { check(false) }

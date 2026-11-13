@@ -27,8 +27,11 @@ struct PluginManifest: Equatable {
     /// Компоненты, которые ставятся вне приложения: имя → путь внутри пакета.
     var components: [String: String]
     var minApp: AppVersion?
-    /// Префикс тегов выпусков плагина в репозитории приложения (`webclipper-v`): по нему ищутся обновления.
+    /// Префикс тегов выпусков плагина (`webclipper-v`): по нему ищутся обновления.
     var updates: String?
+    /// Репозиторий выпусков плагина на GitHub (`владелец/имя`), если он живёт отдельно от приложения (ADR-0019, п. 10).
+    /// Нет поля — выпуски ищутся в репозитории приложения.
+    var repository: String?
 
     static func == (a: PluginManifest, b: PluginManifest) -> Bool {
         a.id == b.id && a.version == b.version && a.permissions == b.permissions && a.components == b.components
@@ -65,11 +68,16 @@ struct PluginManifest: Equatable {
             guard isSafeTagPrefix(prefix) else { return .failure(.badComponent("updates")) }
             updates = prefix
         }
+        var repository: String?
+        if let repo = o["repository"] as? String {
+            guard isValidRepository(repo) else { return .failure(.badComponent("repository")) }
+            repository = repo
+        }
         let manifest = PluginManifest(id: base.id, name: base.name, version: base.version, api: api,
                                       summary: (o["description"] as? String).map { String($0.prefix(300)) },
                                       author: (o["author"] as? String).map { String($0.prefix(80)) },
                                       permissions: known, unknownPermissions: unknown, components: components, minApp: base.minApp,
-                                      updates: updates)
+                                      updates: updates, repository: repository)
         return .success(manifest)
     }
 
@@ -96,6 +104,27 @@ struct PluginManifest: Equatable {
         guard id == installed.id, problem(app: app) == nil,
               let new = AppVersion(version), let old = AppVersion(installed.version), old < new else { return false }
         return Set(permissions).isSubset(of: Set(installed.permissions))
+    }
+
+    /// Репозиторий выпусков: `владелец/имя` по правилам GitHub — владелец до 39 символов (латиница, цифры, дефис,
+    /// не с дефиса), имя до 100 (ещё `.` и `_`, не `.`/`..`). Ни схем, ни хостов, ни путей: адрес строит само
+    /// приложение и только на api.github.com.
+    static func isValidRepository(_ value: String) -> Bool {
+        let parts = value.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return false }
+        let owner = parts[0], name = parts[1]
+        let ownerOK = (1...39).contains(owner.count) && owner.first != "-"
+            && owner.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
+        let nameOK = (1...100).contains(name.count) && name != "." && name != ".."
+            && name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-._".contains($0)) }
+        return ownerOK && nameOK
+    }
+
+    /// Список выпусков плагина: его репозиторий или, без поля, репозиторий приложения (`fallback`).
+    func releasesURL(fallback: String) -> URL? {
+        let repo = repository ?? fallback
+        guard Self.isValidRepository(repo) else { return nil }
+        return URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=50")
     }
 
     /// Префикс тега: строчные латинские буквы, цифры и дефис, оканчивается на `-v` — не совпадёт с тегами приложения `v1.2.3`.
