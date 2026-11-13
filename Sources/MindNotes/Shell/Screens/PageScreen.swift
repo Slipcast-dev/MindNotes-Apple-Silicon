@@ -125,7 +125,8 @@ struct PageScreen: View {
                 if let databaseID = page?.databaseID {
                     RecordPropertiesPanel(page: editor.pageID, databaseID: databaseID)
                 }
-                HStack(spacing: 9) {
+                // Теги и действия переносятся строкой ниже, а не сжимаются: сжатый тег превращался в пустую полоску.
+                WrappingRow(spacing: 9, lineSpacing: 6) {
                     ForEach(shell.tagsOf(page: editor.pageID)) { tag in
                         TagChip(tag: tag)
                             .contextMenu { Button("Снять тег") { shell.toggleTag(tag.id, on: editor.pageID) } }
@@ -190,6 +191,54 @@ struct PageScreen: View {
         .onAppear {
             title = page?.title ?? ""
             if let page { shell.loadCover(for: page) }
+        }
+    }
+}
+
+/// Ряд, который переносит элементы на следующую строку; каждый элемент сохраняет свой естественный размер.
+struct WrappingRow: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, line: CGFloat = 0, widest: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                y += line + lineSpacing
+                x = 0
+                line = 0
+            }
+            x += (x > 0 ? spacing : 0) + size.width
+            line = max(line, size.height)
+            widest = max(widest, x)
+        }
+        return CGSize(width: proposal.width ?? widest, height: y + line)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        // Строки выравниваются по центру по вертикали, как в HStack.
+        var rows: [[(LayoutSubview, CGSize)]] = [[]]
+        var x: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > bounds.width {
+                rows.append([])
+                x = 0
+            }
+            rows[rows.count - 1].append((view, size))
+            x += (x > 0 ? spacing : 0) + size.width
+        }
+        var y = bounds.minY
+        for row in rows where !row.isEmpty {
+            let height = row.map(\.1.height).max() ?? 0
+            var px = bounds.minX
+            for (view, size) in row {
+                view.place(at: CGPoint(x: px, y: y + (height - size.height) / 2), proposal: ProposedViewSize(size))
+                px += size.width + spacing
+            }
+            y += height + lineSpacing
         }
     }
 }
