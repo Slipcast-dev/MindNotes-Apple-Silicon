@@ -166,6 +166,14 @@ struct NotesSidebar: View {
     }
 
     @State private var sectionDrag: SectionDrag?
+
+    private var tagRows: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(shell.tags) { tag in
+                SidebarRow(title: tag.name, symbol: "tag", active: shell.section == .tag(tag.id), tint: Tokens.swatch(tag.color)?.fg) { shell.goTag(tag.id) }
+            }
+        }
+    }
     /// Свёрнут ли блок «Теги»: настройка этого Mac, не зависит от разделов страниц.
     @AppStorage("sidebar.tagsCollapsed") private var tagsCollapsed = false
 
@@ -349,6 +357,7 @@ struct NotesSidebar: View {
                         Button { shell.createPage() } label: { Label(L("Страница"), systemImage: "doc") }
                         Button { shell.createFolder() } label: { Label(L("Папка"), systemImage: "folder.badge.plus") }
                         Button { shell.createDatabase() } label: { Label(L("База данных"), systemImage: "tablecells.badge.ellipsis") }
+                        Button { shell.addSection() } label: { Label(L("Раздел…"), systemImage: "plus.rectangle.on.folder") }
                         Divider()
                         Button { shell.goFiles() } label: { Label(L("Импортировать…"), systemImage: "square.and.arrow.down") }
                     }
@@ -373,22 +382,6 @@ struct NotesSidebar: View {
                             sectionHeader(slot)
                             treeRows(in: slot.sectionID)
                         }
-                        SidebarRow(title: L("Новый раздел"), symbol: "plus.rectangle.on.folder") { shell.addSection() }
-                            .padding(.top, 4)
-
-                        // Теги — отдельный блок, не раздел страниц: не перетаскивается и сворачивается сам по себе.
-                        if !shell.tags.isEmpty {
-                            Divider().padding(.horizontal, 10).padding(.top, 12)
-                            SidebarGroup(title: L("Теги"), collapsed: tagsCollapsed, onToggle: { tagsCollapsed.toggle() })
-                                .contentShape(Rectangle())
-                                .onTapGesture { tagsCollapsed.toggle() }
-                                .help(L("Щелчок — свернуть или развернуть"))
-                            if !tagsCollapsed {
-                                ForEach(shell.tags) { tag in
-                                    SidebarRow(title: tag.name, symbol: "tag", active: shell.section == .tag(tag.id), tint: Tokens.swatch(tag.color)?.fg) { shell.goTag(tag.id) }
-                                }
-                            }
-                        }
                     }
 
                 }
@@ -402,6 +395,25 @@ struct NotesSidebar: View {
                             .background(RoundedRectangle(cornerRadius: 6).fill(Tokens.card).shadow(radius: 3))
                             .offset(x: drag.location.x + 12, y: drag.location.y - 10)
                             .allowsHitTesting(false)
+                    }
+                }
+            }
+
+            // Теги закреплены внизу, над корзиной: не листаются вместе с разделами и сворачиваются сами по себе.
+            if shell.isOpen, !shell.tags.isEmpty {
+                Rectangle().fill(Tokens.line).frame(height: 1).padding(.top, 8)
+                SidebarGroup(title: L("Теги"), collapsed: tagsCollapsed, onToggle: { tagsCollapsed.toggle() })
+                    .padding(.top, -10) // У заголовка раздела большой верхний отступ; здесь его даёт линия.
+                    .contentShape(Rectangle())
+                    .onTapGesture { tagsCollapsed.toggle() }
+                    .help(L("Щелчок — свернуть или развернуть"))
+                if !tagsCollapsed {
+                    // До пяти тегов — как есть; длиннее список листается внутри своего блока, не сдвигая остальную панель.
+                    if shell.tags.count <= 5 {
+                        tagRows
+                    } else {
+                        ScrollView(showsIndicators: true) { tagRows }
+                            .frame(height: Tokens.theme == .notion ? 150 : 170)
                     }
                 }
             }
