@@ -57,10 +57,16 @@ func runPluginTests() async {
             checkEqual(moved.releasesURL(fallback: "Slipcast-dev/MindNotes-Apple-Silicon")?.absoluteString,
                        "https://api.github.com/repos/Slipcast-dev/MindNotes-WebClipper/releases?per_page=50", "выпуски — из репозитория плагина")
         } else { check(false) }
-        if case .success(let local) = PluginManifest.parse(Data(#"{"id":"minerva.webclipper","name":"W","kind":"plugin"}"#.utf8)) {
-            checkEqual(local.releasesURL(fallback: "Slipcast-dev/MindNotes-Apple-Silicon")?.absoluteString,
-                       "https://api.github.com/repos/Slipcast-dev/MindNotes-Apple-Silicon/releases?per_page=50", "без поля — как раньше")
+        if case .success(let early) = PluginManifest.parse(Data(#"{"id":"minerva.webclipper","name":"W","kind":"plugin"}"#.utf8)) {
+            checkEqual(early.releasesURL(fallback: "Slipcast-dev/MindNotes-Apple-Silicon")?.absoluteString,
+                       "https://api.github.com/repos/Slipcast-dev/MindNotes-WebClipper/releases?per_page=50",
+                       "Web Clipper, поставленный до переезда (без поля), — сразу из своего репозитория")
         } else { check(false) }
+        if case .success(let local) = PluginManifest.parse(Data(#"{"id":"x.other","name":"W","kind":"plugin"}"#.utf8)) {
+            checkEqual(local.releasesURL(fallback: "Slipcast-dev/MindNotes-Apple-Silicon")?.absoluteString,
+                       "https://api.github.com/repos/Slipcast-dev/MindNotes-Apple-Silicon/releases?per_page=50", "другой плагин без поля — как раньше")
+        } else { check(false) }
+        for (id, repo) in PluginManifest.knownRepositories { check(PluginManifest.isValidRepository(repo), id) }
         if case .failure(let p) = PluginManifest.parse(Data(#"{"id":"x","name":"X","kind":"plugin","repository":"https://evil.example/x"}"#.utf8)) {
             checkEqual(p, .badComponent("repository"), "адрес вместо имени не принимается")
         } else { check(false) }

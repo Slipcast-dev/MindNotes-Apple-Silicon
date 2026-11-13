@@ -120,9 +120,18 @@ struct PluginManifest: Equatable {
         return ownerOK && nameOK
     }
 
-    /// Список выпусков плагина: его репозиторий или, без поля, репозиторий приложения (`fallback`).
+    /// Плагины, переехавшие в свои репозитории (договор `contracts/plugin-api.json`). Нужно для копий, установленных
+    /// до переезда: в их описании ещё нет `repository`, а выпуски уже ищутся там.
+    static let knownRepositories = ["minerva.webclipper": "Slipcast-dev/MindNotes-WebClipper"]
+
+    /// Откуда брать выпуски: поле `repository`, известный репозиторий плагина или репозиторий приложения (`fallback`).
+    func releaseRepository(fallback: String) -> String {
+        repository ?? Self.knownRepositories[id] ?? fallback
+    }
+
+    /// Список выпусков плагина (см. `releaseRepository`).
     func releasesURL(fallback: String) -> URL? {
-        let repo = repository ?? fallback
+        let repo = releaseRepository(fallback: fallback)
         guard Self.isValidRepository(repo) else { return nil }
         return URL(string: "https://api.github.com/repos/\(repo)/releases?per_page=50")
     }

@@ -9,7 +9,7 @@ All notable changes to MindNotes. The format follows [Keep a Changelog](https://
 ### Changed
 - MindNotes runs on macOS 15 Sequoia and later, not only on macOS 26 (ADR-0020). macOS 15 has no Liquid Glass look; everything else is the same. Workspaces and backups are compatible.
 - Updates no longer install a version that needs a newer macOS: the current app keeps working, and the update window says which system is required.
-- Web Clipper moved to its own repository, [`Slipcast-dev/MindNotes-WebClipper`](https://github.com/Slipcast-dev/MindNotes-WebClipper), with its history, build and releases (ADR-0019, item 10). The installed plugin keeps working and updating: copies of its releases still appear here, and from this version MindNotes looks for them in the plugin's repository after the plugin's next update.
+- Web Clipper moved to its own repository, [`Slipcast-dev/MindNotes-WebClipper`](https://github.com/Slipcast-dev/MindNotes-WebClipper), with its history, build and releases (ADR-0019, item 10). The installed plugin keeps working and updating: copies of its releases still appear here, and from this version MindNotes looks for them in the plugin's repository right away, even for a plugin installed before the move.
 
 ### Added
 - A plugin can live in its own repository: the `repository` field (“owner/name” on GitHub) in the plugin manifest tells MindNotes where to look for its updates; without it, nothing changes. The plugin card shows where updates come from.

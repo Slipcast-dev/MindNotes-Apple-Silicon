@@ -537,7 +537,7 @@ struct PluginUpdateRow: View {
             } else {
                 status
                 // Откуда берутся обновления — видно, особенно если плагин живёт в своём репозитории.
-                Text(String(format: L("Обновления: github.com/%@"), plugin.manifest.repository ?? PluginUpdater.appRepository))
+                Text(String(format: L("Обновления: github.com/%@"), plugin.manifest.releaseRepository(fallback: PluginUpdater.appRepository)))
                     .font(.system(size: 11)).foregroundColor(Tokens.muted)
             }
             HStack(spacing: 10) {

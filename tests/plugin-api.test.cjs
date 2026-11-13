@@ -52,6 +52,13 @@ test('идентификаторы приложения, типа пакета �
   assert.ok(/releasesURL\(fallback: Self\.appRepository\)/.test(updater), 'выпуски — из репозитория плагина, без поля — отсюда');
 });
 
+test('известные репозитории плагинов в коде совпадают с договором', () => {
+  const map = /static let knownRepositories = \[([^\]]*)\]/.exec(plugins)[1];
+  const known = Object.fromEntries([...map.matchAll(/"([^"]+)": "([^"]+)"/g)].map((m) => [m[1], m[2]]));
+  const expected = Object.fromEntries(Object.entries(contract.plugins).map(([id, p]) => [id, p.repository]));
+  assert.deepStrictEqual(known, expected, 'плагин, поставленный до переезда, ищет выпуски в своём репозитории');
+});
+
 test('репозитории плагинов проходят ту же проверку, что в MindNotes', () => {
   const rule = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
   assert.match(contract.app.repository, rule);
