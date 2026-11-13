@@ -58,7 +58,7 @@ Install: double-click the package or Settings → Extensions → “Install Plug
 | `assets.create` | add images as attachments |
 | `tags.write` | tag the pages it creates |
 
-Plugin updates are looked up in releases tagged `<updates><version>` (for example, `webclipper-v1.0.1`). If a plugin lives in its own repository, set `"repository": "owner/name"` — a GitHub name only, not a URL; without it, releases are looked up in the MindNotes repository (plugins that have already moved, such as Web Clipper, are known to MindNotes and looked up in their own repository).
+Plugin updates are looked up in releases tagged `<updates><version>` (for example, `webclipper-v1.0.4`). If a plugin lives in its own repository, set `"repository": "owner/name"` — a GitHub name only, not a URL; without it, releases are looked up in the MindNotes repository (plugins that have already moved, such as Web Clipper, are known to MindNotes and looked up in their own repository).
 
 A client connects with `POST /v1/pair {"plugin": "<id>"}`: MindNotes asks “Connect?” and returns a token on consent. Every later request carries `Authorization: Bearer <token>`. From a browser only extension pages are accepted; ordinary websites cannot reach the API.
 
