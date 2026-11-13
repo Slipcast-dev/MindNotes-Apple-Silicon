@@ -26,7 +26,7 @@ A personal, local knowledge base for Mac: pages, a block editor, search, links a
 - Collapsible sidebar with custom sections you can drag to reorder, Peek, light/dark and black-and-white themes
 - Password lock for a page, record, database or folder (password, Touch ID or Mac password)
 - Automatic or manual updates; extensions for custom themes and app icons
-- Plugins with permissions, released separately; the first one is [Web Clipper](Plugins/WebClipper/README.md) for Chrome and Safari ([latest release](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/releases/tag/webclipper-v1.0.0))
+- Plugins with permissions, released separately; the first one is [Web Clipper](https://github.com/Slipcast-dev/MindNotes-WebClipper) for Chrome and Safari, in its own repository ([latest release](https://github.com/Slipcast-dev/MindNotes-WebClipper/releases/latest))
 - Optional AI (off by default): Ask AI on a selection, chat with an agent that proposes changes before applying them, AI-filled database properties; Claude, OpenAI, OpenRouter, Gemini, DeepSeek, Mistral, xAI, Groq or a local model via Ollama or LM Studio
 
 The interface is available in English and Russian.

@@ -1,0 +1,30 @@
+{
+  "about": "MindNotes plugin API contract (ADR-0019). The original lives in Slipcast-dev/MindNotes-Apple-Silicon; plugin repositories keep a copy and check themselves against it. Договор об API плагинов MindNotes: оригинал — в репозитории приложения, у плагинов копия.",
+  "contract": 1,
+  "api": 1,
+  "host": "127.0.0.1",
+  "port": 27183,
+  "allowedOrigins": ["chrome-extension://", "safari-web-extension://", "moz-extension://"],
+  "routes": [
+    { "method": "GET", "path": "/v1/status", "permission": null },
+    { "method": "POST", "path": "/v1/pair", "permission": null },
+    { "method": "GET", "path": "/v1/targets", "permission": "pages.list" },
+    { "method": "POST", "path": "/v1/clips", "permission": "pages.create" },
+    { "method": "POST", "path": "/v1/pages/{id}/open", "permission": "pages.open" }
+  ],
+  "permissions": ["pages.list", "pages.create", "pages.open", "assets.create", "tags.write"],
+  "features": ["clips", "targets", "openPage", "remoteImages"],
+  "app": {
+    "bundleID": "local.personal.MindNotes",
+    "pluginTypeIdentifier": "local.personal.mindnotes.plugin",
+    "pluginClientsDefaultsKey": "plugins.clients",
+    "repository": "Slipcast-dev/MindNotes-Apple-Silicon"
+  },
+  "plugins": {
+    "minerva.webclipper": {
+      "installerBundleID": "local.personal.MindNotes.WebClipper",
+      "updates": "webclipper-v",
+      "repository": "Slipcast-dev/MindNotes-WebClipper"
+    }
+  }
+}

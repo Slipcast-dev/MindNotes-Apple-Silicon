@@ -26,7 +26,7 @@
 - Сворачиваемая боковая панель со своими разделами, которые перетаскиваются, Peek, светлая, тёмная и чёрно-белая темы
 - Пароль на страницу, запись, базу или папку (пароль, Touch ID или пароль Mac)
 - Обновления автоматически или вручную; расширения для своих тем и иконок приложения
-- Плагины с разрешениями, выпускаются отдельно; первый — [Web Clipper](Plugins/WebClipper/README.md) для Chrome и Safari ([последний выпуск](https://github.com/Slipcast-dev/MindNotes-Apple-Silicon/releases/tag/webclipper-v1.0.0))
+- Плагины с разрешениями, выпускаются отдельно; первый — [Web Clipper](https://github.com/Slipcast-dev/MindNotes-WebClipper) для Chrome и Safari, в своём репозитории ([последний выпуск](https://github.com/Slipcast-dev/MindNotes-WebClipper/releases/latest))
 - Необязательный ИИ (выключен по умолчанию): «Спросить ИИ» над выделением, чат с агентом, который предлагает изменения до их применения, ИИ-свойства баз; Claude, OpenAI, OpenRouter, Gemini, DeepSeek, Mistral, xAI, Groq или локальная модель через Ollama и LM Studio
 
 Интерфейс — на русском и английском.

@@ -16,7 +16,7 @@
 |---|---|---|---|
 | `Sources/MindNotes/Shell/RootView.swift` | 30, 32, 44 | `ToolbarItem.sharedBackgroundVisibility(.hidden)` | macOS 26 |
 
-Установщик Web Clipper (`Plugins/WebClipper/Installer`) собирается для macOS 15 без ошибок. Остальные API (прокрутка таймлайна, `Color.mix`, Writing Tools, `@Observable`, `onChange` с двумя параметрами, полный доступ EventKit) есть в macOS 14–15.
+Установщик Web Clipper (тогда `Plugins/WebClipper/Installer`, теперь — репозиторий `Slipcast-dev/MindNotes-WebClipper`) собирается для macOS 15 без ошибок. Остальные API (прокрутка таймлайна, `Color.mix`, Writing Tools, `@Observable`, `onChange` с двумя параметрами, полный доступ EventKit) есть в macOS 14–15.
 
 ## Шаги
 
@@ -27,7 +27,7 @@
 ### 2. Цель сборки
 - `scripts/target.sh`: `MIN_MACOS=15.0`.
 - `Package.swift`: `platforms: [.macOS(.v15)]`.
-- `LSMinimumSystemVersion` в `build-app.sh` возьмётся из `$MIN_MACOS` сам. У Web Clipper свой минимум — `PLUGIN_MIN_MACOS=15.0` в `build-webclipper.sh` (ADR-0019, п. 11, коммит `fdbbd8f`), от `MIN_MACOS` он не зависит. Проверить готовые `Info.plist` приложения, установщика и `.appex`.
+- `LSMinimumSystemVersion` в `build-app.sh` возьмётся из `$MIN_MACOS` сам. У Web Clipper свой минимум — `PLUGIN_MIN_MACOS=15.0` в его `scripts/build.sh` (тогда `scripts/build-webclipper.sh`) (ADR-0019, п. 11, коммит `fdbbd8f`), от `MIN_MACOS` он не зависит. Проверить готовые `Info.plist` приложения, установщика и `.appex`.
 - `tests/edition.test.cjs`: при желании добавить проверку, что `MIN_MACOS` и `Package.swift` совпадают.
 
 ### 3. Защита от новых API
