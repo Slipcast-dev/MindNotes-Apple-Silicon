@@ -43,7 +43,8 @@ struct HomeScreen: View {
                     sectionTitle(L("Быстрый доступ"))
                     HStack(alignment: .top, spacing: 13) {
                         ForEach(Array(top)) { page in
-                            QuickCard(page: page, kids: shell.children(of: page.id).count) { shell.openPage(page.id) }
+                            QuickCard(page: page, kids: shell.children(of: page.id).count, cover: shell.image(for: page.coverAssetID)) { shell.openPage(page.id) }
+                                .onAppear { if let asset = page.coverAssetID { shell.loadImage(asset: asset) } }
                         }
                         ForEach(0..<(3 - top.count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
                     }
@@ -71,11 +72,22 @@ struct HomeScreen: View {
 struct QuickCard: View {
     let page: Page
     let kids: Int
+    /// Обложка страницы: полоса сверху карточки, как в Notion. Нет обложки — карточка без полосы.
+    var cover: NSImage? = nil
     let action: () -> Void
     @State private var hover = false
 
     var body: some View {
         Button(action: action) {
+            VStack(alignment: .leading, spacing: 0) {
+                if let cover {
+                    Image(nsImage: cover)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 64)
+                        .clipped()
+                }
             VStack(alignment: .leading, spacing: 5) {
                 Image(systemName: "doc.text")
                     .font(.system(size: 11))
@@ -91,8 +103,10 @@ struct QuickCard: View {
                     .foregroundColor(Tokens.muted)
             }
             .padding(16)
+            }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12).fill(hover ? Tokens.soft : Tokens.card))
+            .background(hover ? Tokens.soft : Tokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Tokens.line))
             .contentShape(Rectangle())
         }
