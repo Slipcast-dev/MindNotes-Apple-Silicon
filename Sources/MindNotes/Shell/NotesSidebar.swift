@@ -166,6 +166,8 @@ struct NotesSidebar: View {
     }
 
     @State private var sectionDrag: SectionDrag?
+    /// Свёрнут ли блок «Теги»: настройка этого Mac, не зависит от разделов страниц.
+    @AppStorage("sidebar.tagsCollapsed") private var tagsCollapsed = false
 
     /// Заголовок стандартного раздела в кадрах строк: свой ID, не совпадающий со страницами.
     static let defaultSection = UUID(uuidString: "00000000-0000-0000-0000-00000000D5EC")!
@@ -374,10 +376,17 @@ struct NotesSidebar: View {
                         SidebarRow(title: L("Новый раздел"), symbol: "plus.rectangle.on.folder") { shell.addSection() }
                             .padding(.top, 4)
 
+                        // Теги — отдельный блок, не раздел страниц: не перетаскивается и сворачивается сам по себе.
                         if !shell.tags.isEmpty {
-                            SidebarGroup(title: L("Теги"))
-                            ForEach(shell.tags) { tag in
-                                SidebarRow(title: tag.name, symbol: "tag", active: shell.section == .tag(tag.id), tint: Tokens.swatch(tag.color)?.fg) { shell.goTag(tag.id) }
+                            Divider().padding(.horizontal, 10).padding(.top, 12)
+                            SidebarGroup(title: L("Теги"), collapsed: tagsCollapsed, onToggle: { tagsCollapsed.toggle() })
+                                .contentShape(Rectangle())
+                                .onTapGesture { tagsCollapsed.toggle() }
+                                .help(L("Щелчок — свернуть или развернуть"))
+                            if !tagsCollapsed {
+                                ForEach(shell.tags) { tag in
+                                    SidebarRow(title: tag.name, symbol: "tag", active: shell.section == .tag(tag.id), tint: Tokens.swatch(tag.color)?.fg) { shell.goTag(tag.id) }
+                                }
                             }
                         }
                     }
