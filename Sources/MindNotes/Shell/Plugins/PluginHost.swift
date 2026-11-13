@@ -454,7 +454,7 @@ struct PluginsSettings: View {
                 }
             }
             if let summary = plugin.manifest.summary { Text(summary).font(.system(size: 12)).foregroundColor(Tokens.muted) }
-            if plugin.manifest.updates != nil { PluginUpdateRow(plugin: plugin) }
+            PluginUpdateRow(plugin: plugin) // кнопка проверки видна всегда
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(plugin.manifest.permissions, id: \.self) { p in
                     Text("• " + PluginHost.title(p)).font(.system(size: 11)).foregroundColor(Tokens.muted)
@@ -529,11 +529,15 @@ struct PluginUpdateRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            status
+            if plugin.manifest.updateSource == nil {
+                Text("Плагин не сообщает, где искать его обновления: обновляйте его вручную.").font(.system(size: 11)).foregroundColor(Tokens.muted)
+            } else {
+                status
+            }
             HStack(spacing: 10) {
                 Button("Проверить обновления") { Task { await updater.check(silent: false) } }
                     .buttonStyle(NotesButtonStyle(kind: .plain))
-                    .disabled(busy)
+                    .disabled(busy || plugin.manifest.updateSource == nil)
                 Toggle("Обновлять автоматически", isOn: Binding(get: { updater.isAuto(plugin.id) }, set: { updater.setAuto(plugin.id, $0) }))
                     .toggleStyle(.checkbox).font(.system(size: 12))
                 Spacer()

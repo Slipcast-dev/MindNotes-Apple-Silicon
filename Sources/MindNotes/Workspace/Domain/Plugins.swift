@@ -81,6 +81,15 @@ struct PluginManifest: Equatable {
         return nil
     }
 
+    /// Где искать обновления: поле `updates`, а если его нет — префикс по правилу `<последняя часть id>-v`
+    /// (`minerva.webclipper` → `webclipper-v`). Так плагин из ранней сборки без поля тоже находит свои выпуски.
+    var updateSource: String? {
+        if let updates { return updates }
+        guard let last = id.split(separator: ".").last else { return nil }
+        let prefix = last.lowercased() + "-v"
+        return Self.isSafeTagPrefix(prefix) ? prefix : nil
+    }
+
     /// Обновление без вопроса пользователю (ADR-0019, п. 9): тот же плагин, версия новее, понятен этой MindNotes
     /// и просит не больше разрешений, чем уже подтверждено. Новые разрешения — только с согласия.
     func isTrustedUpdate(of installed: PluginManifest, app: AppVersion?) -> Bool {

@@ -1610,3 +1610,4 @@
 "ещё не проверялось" = "not checked yet";
 "последняя проверка: %@" = "last checked: %@";
 "Новой версии нужны новые разрешения — MindNotes покажет их перед установкой." = "The new version needs new permissions — MindNotes will show them before installing.";
+"Плагин не сообщает, где искать его обновления: обновляйте его вручную." = "The plugin does not say where to find its updates: update it manually.";

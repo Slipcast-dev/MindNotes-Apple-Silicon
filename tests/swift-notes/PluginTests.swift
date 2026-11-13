@@ -41,6 +41,12 @@ func runPluginTests() async {
         if case .success(let m) = PluginManifest.parse(Data(#"{"id":"x","name":"X","kind":"plugin","updates":"webclipper-v"}"#.utf8)) {
             checkEqual(m.updates, "webclipper-v")
         } else { check(false) }
+        if case .success(let early) = PluginManifest.parse(Data(#"{"id":"minerva.webclipper","name":"Web Clipper","kind":"plugin"}"#.utf8)) {
+            checkEqual(early.updateSource, "webclipper-v", "ранняя сборка без поля updates находит выпуски по id")
+        } else { check(false) }
+        if case .success(let explicit) = PluginManifest.parse(Data(#"{"id":"a.b","name":"X","kind":"plugin","updates":"other-v"}"#.utf8)) {
+            checkEqual(explicit.updateSource, "other-v", "явное поле важнее правила")
+        } else { check(false) }
         if case .failure(let p) = PluginManifest.parse(Data(#"{"id":"x","name":"X","kind":"plugin","updates":"v"}"#.utf8)) {
             checkEqual(p, .badComponent("updates"))
         } else { check(false) }

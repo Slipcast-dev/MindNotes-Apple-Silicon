@@ -76,14 +76,14 @@ final class PluginUpdater: ObservableObject {
     }
 
     private func checkIfDue() async {
-        let ids = PluginHost.shared.plugins.filter { $0.manifest.updates != nil }.map(\.id)
+        let ids = PluginHost.shared.plugins.filter { $0.manifest.updateSource != nil }.map(\.id)
         let oldest = ids.map { lastCheck[$0] ?? .distantPast }.min() ?? .distantFuture
         if Date().timeIntervalSince(oldest) >= Self.interval { await check(silent: true) }
     }
 
     /// Один запрос списка выпусков на все плагины, у которых указан источник обновлений.
     func check(silent: Bool) async {
-        let plugins = PluginHost.shared.plugins.filter { $0.manifest.updates != nil }
+        let plugins = PluginHost.shared.plugins.filter { $0.manifest.updateSource != nil }
         guard !plugins.isEmpty else { return }
         guard canCheck else {
             if !silent { for p in plugins { states[p.id] = .failed(L("Обновления доступны только в установленном приложении MindNotes.")) } }
@@ -101,7 +101,7 @@ final class PluginUpdater: ObservableObject {
         }
         for p in plugins where !isBusy(p.id) {
             lastCheck[p.id] = Date()
-            guard let prefix = p.manifest.updates, let release = PluginRelease.newest(in: data, prefix: prefix),
+            guard let prefix = p.manifest.updateSource, let release = PluginRelease.newest(in: data, prefix: prefix),
                   let installed = AppVersion(p.manifest.version), installed < release.version else {
                 states[p.id] = .upToDate
                 continue
