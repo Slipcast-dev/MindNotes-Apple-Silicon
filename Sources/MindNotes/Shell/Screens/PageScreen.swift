@@ -125,12 +125,8 @@ struct PageScreen: View {
                 if let databaseID = page?.databaseID {
                     RecordPropertiesPanel(page: editor.pageID, databaseID: databaseID)
                 }
-                // Теги и действия переносятся строкой ниже, а не сжимаются: сжатый тег превращался в пустую полоску.
+                // Действия стоят на месте, теги — строкой под ними: новые теги не сдвигают кнопки вбок.
                 WrappingRow(spacing: 9, lineSpacing: 6) {
-                    ForEach(shell.tagsOf(page: editor.pageID)) { tag in
-                        TagChip(tag: tag)
-                            .contextMenu { Button("Снять тег") { shell.toggleTag(tag.id, on: editor.pageID) } }
-                    }
                     TagPickerButton(page: editor.pageID)
                     if page?.coverAssetID == nil {
                         Button { shell.pickPageCover(editor.pageID) } label: { Label("Обложка", systemImage: "photo") }
@@ -158,6 +154,16 @@ struct PageScreen: View {
                     .fixedSize()
                     Button { shell.createPage(parent: editor.pageID) } label: { Label("Подстраница", systemImage: "doc.badge.plus") }
                         .buttonStyle(NotesButtonStyle(kind: .plain))
+                }
+                let tags = shell.tagsOf(page: editor.pageID)
+                if !tags.isEmpty {
+                    WrappingRow(spacing: 6, lineSpacing: 6) {
+                        ForEach(tags) { tag in
+                            TagChip(tag: tag)
+                                .contextMenu { Button("Снять тег") { shell.toggleTag(tag.id, on: editor.pageID) } }
+                        }
+                    }
+                    .padding(.top, 10)
                 }
                 Rectangle().fill(Tokens.line).frame(height: 1).padding(.vertical, 18)
                 NativeBlockEditor(editor: editor)
