@@ -182,6 +182,37 @@ func runPluginTests() async {
         } else { check(false) }
     }
 
+    await test("Локальный API: чтение страниц (pages.read) и папка вложений") {
+        func request(_ line: String) -> LocalAPI.Request? {
+            if case .request(let r) = LocalAPI.parse(Data("\(line) HTTP/1.1\r\n\r\n".utf8)) { return r }
+            return nil
+        }
+        let id = UUID(), asset = UUID()
+        let page = id.uuidString.lowercased()
+        checkEqual(request("GET /v1/pages").flatMap(LocalAPI.route), .pages)
+        checkEqual(request("GET /v1/pages/\(page)/markdown").flatMap(LocalAPI.route), .pageMarkdown(id))
+        checkEqual(request("GET /v1/pages/\(page)/assets/\(asset.uuidString)").flatMap(LocalAPI.route), .pageAsset(page: id, asset: asset))
+        check(request("POST /v1/pages").flatMap(LocalAPI.route) == nil, "список — только GET")
+        check(request("PUT /v1/pages/\(page)/markdown").flatMap(LocalAPI.route) == nil, "запись — не в этой версии")
+        check(request("GET /v1/pages/\(page)/assets/../../x").flatMap(LocalAPI.route) == nil, "id вложения — только UUID")
+        for route in [LocalAPI.Route.pages, .pageMarkdown(id), .pageAsset(page: id, asset: asset)] {
+            checkEqual(LocalAPI.permission(for: route), .pagesRead)
+        }
+        check(LocalAPI.features.contains("pagesRead"))
+
+        checkEqual(request("GET /v1/pages/\(page)/markdown").flatMap(LocalAPI.assetFolder), "files", "без параметра — files")
+        checkEqual(request("GET /v1/pages/\(page)/markdown?assets=notes/My%20page_files").flatMap(LocalAPI.assetFolder), "notes/My page_files")
+        for bad in ["..%2Fx", "%2Fetc", "a/../b", "a//b", "~x", "a%5Cb", "a%0Ab"] {
+            check(request("GET /v1/pages/\(page)/markdown?assets=\(bad)").flatMap(LocalAPI.assetFolder) == nil, "отклонено: \(bad)")
+        }
+
+        let readJSON = #"{"id":"x.github","name":"GitHub","kind":"plugin","api":1,"permissions":["pages.list","pages.read"]}"#
+        if case .success(let m) = PluginManifest.parse(Data(readJSON.utf8)) {
+            checkEqual(m.permissions, [.pagesList, .pagesRead])
+            check(m.problem(app: AppVersion("1.7.1")) == nil, "новое разрешение понятно этой версии")
+        } else { check(false, "описание с pages.read не разобрано") }
+    }
+
     await test("Локальный API: только расширения браузера, CORS только для них") {
         check(LocalAPI.isAllowedOrigin("chrome-extension://abcdef"))
         check(LocalAPI.isAllowedOrigin("safari-web-extension://1234-5678"))

@@ -9,7 +9,9 @@ enum LocalAPI {
     static let maxBody = 40 * 1024 * 1024
     /// Что умеет это приложение (ADR-0019, п. 9). Клиент подстраивается под список, а не под номер версии MindNotes:
     /// так плагин обновляется независимо. Новая возможность — новое слово; `api` растёт только при несовместимости.
-    static let features = ["clips", "targets", "openPage", "remoteImages"]
+    static let features = ["clips", "targets", "openPage", "remoteImages", "pagesRead"]
+    /// Вложение отдаётся целиком; больше — не отдаётся (у GitHub предел файла — 100 МБ).
+    static let maxAssetBytes = 50 * 1024 * 1024
 
     struct Request: Equatable {
         var method: String
@@ -111,6 +113,9 @@ enum LocalAPI {
         case targets
         case clips
         case openPage(UUID)
+        case pages
+        case pageMarkdown(UUID)
+        case pageAsset(page: UUID, asset: UUID)
     }
 
     static func route(_ request: Request) -> Route? {
@@ -120,13 +125,30 @@ enum LocalAPI {
         case ("POST", "/v1/pair"): return .pair
         case ("GET", "/v1/targets"): return .targets
         case ("POST", "/v1/clips"): return .clips
+        case ("GET", "/v1/pages"): return .pages
         default: break
         }
         let parts = request.path.split(separator: "/")
         if request.method == "POST", parts.count == 4, parts[0] == "v1", parts[1] == "pages", parts[3] == "open", let id = UUID(uuidString: String(parts[2])) {
             return .openPage(id)
         }
+        if request.method == "GET", parts.count == 4, parts[0] == "v1", parts[1] == "pages", parts[3] == "markdown", let id = UUID(uuidString: String(parts[2])) {
+            return .pageMarkdown(id)
+        }
+        if request.method == "GET", parts.count == 5, parts[0] == "v1", parts[1] == "pages", parts[3] == "assets",
+           let id = UUID(uuidString: String(parts[2])), let asset = UUID(uuidString: String(parts[4])) {
+            return .pageAsset(page: id, asset: asset)
+        }
         return nil
+    }
+
+    /// Папка вложений в Markdown страницы: её выбирает плагин (путь в репозитории), приложение проверяет.
+    /// Только относительный путь без `..`, до 200 символов; нет параметра — `files`.
+    static func assetFolder(_ request: Request) -> String? {
+        guard let raw = request.query["assets"] else { return "files" }
+        guard (1...200).contains(raw.count), PluginManifest.isSafeRelativePath(raw), !raw.contains("\\"),
+              raw.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else { return nil }
+        return raw
     }
 
     /// Какое разрешение нужно маршруту; nil — без токена.
@@ -136,6 +158,7 @@ enum LocalAPI {
         case .targets: return .pagesList
         case .clips: return .pagesCreate
         case .openPage: return .pagesOpen
+        case .pages, .pageMarkdown, .pageAsset: return .pagesRead
         }
     }
 

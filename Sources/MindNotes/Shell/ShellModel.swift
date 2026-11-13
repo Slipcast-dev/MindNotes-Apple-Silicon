@@ -2128,6 +2128,11 @@ final class ShellModel: ObservableObject {
         try? await store?.setMeta("import." + fingerprint, f.string(from: Date()))
     }
 
+    /// Чтение плагином (ADR-0019): сначала в базу записываются все подтверждённые правки открытой страницы.
+    func flushForPlugin() async throws {
+        try await session?.coordinator.flush()
+    }
+
     /// Запись извне (плагин, ADR-0019): пространство уже изменено через хранилище, оболочка перечитывает страницы и теги.
     func refreshAfterExternalWrite() async throws {
         guard let session, let store else { return }

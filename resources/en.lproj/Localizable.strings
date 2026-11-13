@@ -1790,3 +1790,10 @@
 "Установить и запустить" = "Install and run";
 "Программа в образе не совпадает с установленной. Обновление отменено." = "The program in the image does not match the installed one. The update was cancelled.";
 "Обновление стороннего издателя: MindNotes спросит перед запуском его программы." = "Update from a third-party publisher: MindNotes will ask before running its program.";
+"Неверная папка вложений." = "Invalid attachments folder.";
+"Страница не найдена или закрыта паролем." = "The page was not found or is password-locked.";
+"Вложение больше 50 МБ." = "The attachment is larger than 50 MB.";
+"Подключить программу плагина «%@»?" = "Connect the “%@” plugin program?";
+"Программа сможет:" = "The program will be able to:";
+"Если вы не нажимали «Подключить» в программе плагина, откажитесь." = "If you did not click Connect in the plugin program, deny.";
+"читать текст страниц и их вложения (кроме закрытых паролем)" = "read the text of pages and their attachments (except password-locked ones)";

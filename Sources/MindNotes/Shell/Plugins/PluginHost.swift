@@ -334,8 +334,41 @@ final class PluginHost: ObservableObject {
             NSApp.windows.first { $0.isVisible && $0.canBecomeMain }?.makeKeyAndOrderFront(nil)
             shell.openPage(id)
             return .json(200, ["ok": true])
+        case .pages:
+            let list = shell.readablePages().prefix(10_000).map(Self.json)
+            return .json(200, ["pages": Array(list)])
+        case .pageMarkdown(let id):
+            guard let folder = LocalAPI.assetFolder(request) else { return .error(400, "bad_assets", L("Неверная папка вложений.")) }
+            switch await shell.pluginMarkdown(id, assetFolder: folder) {
+            case .success(let page):
+                return .json(200, ["page": Self.json(page.page), "markdown": page.markdown,
+                                   "assets": page.assets.map { ["id": $0.id.uuidString.lowercased(), "path": $0.path] },
+                                   "report": page.report.map { ["reason": $0.reason, "count": $0.count] as [String: Any] }])
+            case .failure(let failure): return Self.response(failure)
+            }
+        case .pageAsset(let id, let asset):
+            switch await shell.pluginAsset(page: id, asset: asset) {
+            case .success(let data): return LocalAPI.Response(status: 200, body: data, contentType: "application/octet-stream")
+            case .failure(let failure): return Self.response(failure)
+            }
         default:
             return .error(404, "not_found", L("Нет такого метода API."))
+        }
+    }
+
+    private static func json(_ page: ShellModel.ReadablePage) -> [String: Any] {
+        var out: [String: Any] = ["id": page.id.uuidString.lowercased(), "title": page.title, "path": page.path, "folder": page.isFolder,
+                                  "updatedAt": page.updatedAt, "rev": page.contentRev]
+        if let parent = page.parentID { out["parent"] = parent.uuidString.lowercased() }
+        return out
+    }
+
+    private static func response(_ failure: ShellModel.PageReadFailure) -> LocalAPI.Response {
+        switch failure {
+        case .noWorkspace: return .error(409, "no_workspace", L("В MindNotes не открыто пространство."))
+        case .notFound: return .error(404, "no_page", L("Страница не найдена или закрыта паролем."))
+        case .tooLarge: return .error(413, "too_large", L("Вложение больше 50 МБ."))
+        case .failed(let message): return .error(500, "read_failed", message)
         }
     }
 
@@ -350,10 +383,17 @@ final class PluginHost: ObservableObject {
                 guard let plugin = self.plugin(id) else { return false }
                 NSApp.activate(ignoringOtherApps: true)
                 let ask = NSAlert()
-                ask.messageText = String(format: L("Подключить «%@» в %@?"), plugin.manifest.name, browser)
-                var text = L("Расширение сможет:") + "\n" + plugin.manifest.permissions.map { "• " + Self.title($0) }.joined(separator: "\n")
-                if let origin = request.origin { text += "\n\n" + String(format: L("Источник запроса: %@"), origin) }
-                ask.informativeText = text + "\n\n" + L("Если вы не нажимали «Подключить» в браузере, откажитесь.")
+                let permissions = plugin.manifest.permissions.map { "• " + Self.title($0) }.joined(separator: "\n")
+                if let origin = request.origin {
+                    ask.messageText = String(format: L("Подключить «%@» в %@?"), plugin.manifest.name, browser)
+                    let text = L("Расширение сможет:") + "\n" + permissions + "\n\n" + String(format: L("Источник запроса: %@"), origin)
+                    ask.informativeText = text + "\n\n" + L("Если вы не нажимали «Подключить» в браузере, откажитесь.")
+                } else {
+                    // Без Origin запрос пришёл от программы на этом Mac (например, «GitHub для MindNotes»).
+                    ask.messageText = String(format: L("Подключить программу плагина «%@»?"), plugin.manifest.name)
+                    ask.informativeText = L("Программа сможет:") + "\n" + permissions + "\n\n"
+                        + L("Если вы не нажимали «Подключить» в программе плагина, откажитесь.")
+                }
                 ask.addButton(withTitle: L("Подключить"))
                 ask.addButton(withTitle: L("Отказать"))
                 return ask.runModal() == .alertFirstButtonReturn
@@ -387,6 +427,7 @@ final class PluginHost: ObservableObject {
         case .pagesOpen: return L("показывать страницу в MindNotes")
         case .assetsCreate: return L("добавлять картинки во вложения")
         case .tagsWrite: return L("ставить теги на созданные страницы")
+        case .pagesRead: return L("читать текст страниц и их вложения (кроме закрытых паролем)")
         }
     }
 

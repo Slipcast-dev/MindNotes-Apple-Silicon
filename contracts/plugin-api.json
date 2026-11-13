@@ -10,10 +10,13 @@
     { "method": "POST", "path": "/v1/pair", "permission": null },
     { "method": "GET", "path": "/v1/targets", "permission": "pages.list" },
     { "method": "POST", "path": "/v1/clips", "permission": "pages.create" },
-    { "method": "POST", "path": "/v1/pages/{id}/open", "permission": "pages.open" }
+    { "method": "POST", "path": "/v1/pages/{id}/open", "permission": "pages.open" },
+    { "method": "GET", "path": "/v1/pages", "permission": "pages.read" },
+    { "method": "GET", "path": "/v1/pages/{id}/markdown", "permission": "pages.read" },
+    { "method": "GET", "path": "/v1/pages/{id}/assets/{asset}", "permission": "pages.read" }
   ],
-  "permissions": ["pages.list", "pages.create", "pages.open", "assets.create", "tags.write"],
-  "features": ["clips", "targets", "openPage", "remoteImages"],
+  "permissions": ["pages.list", "pages.create", "pages.open", "assets.create", "tags.write", "pages.read"],
+  "features": ["clips", "targets", "openPage", "remoteImages", "pagesRead"],
   "app": {
     "bundleID": "local.personal.MindNotes",
     "pluginTypeIdentifier": "local.personal.mindnotes.plugin",
