@@ -1,6 +1,6 @@
 # План: минимум macOS 15 вместо 26
 
-Составлен 13.11.2026. Статус: **шаги 1–4 сделаны 13.11.2026** (не закоммичено): `hidingSharedBackground()` в `RootView.swift`, `MIN_MACOS=15.0`, `.macOS(.v15)`, проверка `SystemRequirement` в `Updater.stage(image:)` с тестом. Все автотесты проходят, сборки приложения и Web Clipper имеют `minos 15.0`. Шаг 5 сделан локально: `ci.yml` с задачами `tests` (macos-26) и `minimum-macos` (macos-15), `test-notes.sh` с `NOTES_BUILD_ONLY`/`NOTES_BIN`, новый `scripts/smoke-launch.sh`. В GitHub ещё не запускался. Шаг 7 (документы, ADR-0020, CHANGELOG) сделан 13.11.2026. Впереди шаг 6 — ручная проверка в ВМ с macOS 15 — и выпуск 1.7.0.
+Составлен 13.11.2026. Статус: **шаги 1–5 и 7 сделаны 13.11.2026**, закоммичены (`03be8d1`, `852815a`) и отправлены в GitHub: `hidingSharedBackground()` в `RootView.swift`, `MIN_MACOS=15.0`, `.macOS(.v15)`, проверка `SystemRequirement` в `Updater.stage(image:)` с тестом; `ci.yml` с задачами `tests` (macos-26) и `minimum-macos` (macos-15), `test-notes.sh` с `NOTES_BUILD_ONLY`/`NOTES_BIN`, `scripts/smoke-launch.sh`; документы, ADR-0020, CHANGELOG. CI в GitHub прошёл на обеих задачах. Сборки приложения и Web Clipper имеют `minos 15.0`. Впереди шаг 6 — ручная проверка в ВМ с macOS 15 — и выпуск 1.7.0.
 
 ## Цель
 
@@ -27,7 +27,7 @@
 ### 2. Цель сборки
 - `scripts/target.sh`: `MIN_MACOS=15.0`.
 - `Package.swift`: `platforms: [.macOS(.v15)]`.
-- `LSMinimumSystemVersion` в `build-app.sh` и `build-webclipper.sh` возьмётся из `$MIN_MACOS` сам. Проверить готовые `Info.plist` приложения, установщика и `.appex`.
+- `LSMinimumSystemVersion` в `build-app.sh` возьмётся из `$MIN_MACOS` сам. У Web Clipper свой минимум — `PLUGIN_MIN_MACOS=15.0` в `build-webclipper.sh` (ADR-0019, п. 11, коммит `fdbbd8f`), от `MIN_MACOS` он не зависит. Проверить готовые `Info.plist` приложения, установщика и `.appex`.
 - `tests/edition.test.cjs`: при желании добавить проверку, что `MIN_MACOS` и `Package.swift` совпадают.
 
 ### 3. Защита от новых API
