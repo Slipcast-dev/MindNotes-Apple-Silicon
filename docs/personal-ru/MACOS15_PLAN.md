@@ -1,6 +1,6 @@
 # План: минимум macOS 15 вместо 26
 
-Составлен 13.11.2026. Статус: **шаги 1–5 и 7 сделаны 13.11.2026**, закоммичены (`03be8d1`, `852815a`) и отправлены в GitHub: `hidingSharedBackground()` в `RootView.swift`, `MIN_MACOS=15.0`, `.macOS(.v15)`, проверка `SystemRequirement` в `Updater.stage(image:)` с тестом; `ci.yml` с задачами `tests` (macos-26) и `minimum-macos` (macos-15), `test-notes.sh` с `NOTES_BUILD_ONLY`/`NOTES_BIN`, `scripts/smoke-launch.sh`; документы, ADR-0020, CHANGELOG. CI в GitHub прошёл на обеих задачах. Сборки приложения и Web Clipper имеют `minos 15.0`. Впереди шаг 6 — ручная проверка в ВМ с macOS 15 — и выпуск 1.7.0.
+Составлен 13.11.2026. Статус: **шаги 1–5 и 7 сделаны 13.11.2026**, закоммичены (`03be8d1`, `852815a`) и отправлены в GitHub: `hidingSharedBackground()` в `RootView.swift`, `MIN_MACOS=15.0`, `.macOS(.v15)`, проверка `SystemRequirement` в `Updater.stage(image:)` с тестом; `ci.yml` с задачами `tests` (macos-26) и `minimum-macos` (macos-15), `test-notes.sh` с `NOTES_BUILD_ONLY`/`NOTES_BIN`, `scripts/smoke-launch.sh`; документы, ADR-0020, CHANGELOG. CI в GitHub прошёл на обеих задачах. Сборки приложения и Web Clipper имеют `minos 15.0`. Выпуск 1.7.0 — 13.11.2026, по решению заказчика до шага 6: ручная проверка в ВМ с macOS 15 ещё впереди, найденное — в следующих выпусках.
 
 ## Цель
 
