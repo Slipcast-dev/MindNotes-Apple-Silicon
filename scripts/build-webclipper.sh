@@ -8,6 +8,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/target.sh
+# Плагин поддерживает macOS 15 Sequoia и новее независимо от минимума самой MindNotes (ADR-0019, п. 11):
+# установщик, расширение Safari (Safari 18+) и расширение для Chromium. Только Apple Silicon, как и приложение.
+PLUGIN_MIN_MACOS=15.0
+PLUGIN_TARGET="arm64-apple-macos$PLUGIN_MIN_MACOS"
 
 SRC=Plugins/WebClipper
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
@@ -48,7 +52,7 @@ done
 # 2. Программа-установщик.
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/PlugIns"
-swiftc ${=SWIFT_OPT:--O} -parse-as-library -target "$TARGET" -o "$APP/Contents/MacOS/WebClipperInstaller" "$SRC"/Installer/*.swift
+swiftc ${=SWIFT_OPT:--O} -parse-as-library -target "$PLUGIN_TARGET" -o "$APP/Contents/MacOS/WebClipperInstaller" "$SRC"/Installer/*.swift
 cp resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 ditto "$PKG" "$APP/Contents/Resources/WebClipper.mnplugin"
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -66,7 +70,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleLocalizations</key><array><string>ru</string><string>en</string></array>
-  <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
+  <key>LSMinimumSystemVersion</key><string>$PLUGIN_MIN_MACOS</string>
   <key>LSMultipleInstancesProhibited</key><true/>
   <key>NSHighResolutionCapable</key><true/>
 </dict>
@@ -84,7 +88,8 @@ if [[ "${SKIP_SAFARI:-0}" != 1 ]] && xcodebuild -version >/dev/null 2>&1; then
         sed -i '' 's/local\.personal\.MindNotes\.MindNotes-Web-Clipper/local.personal.MindNotes.WebClipper/g' "$f"
     done
     xcodebuild -project "$PROJECT" -scheme "$APP_NAME" -configuration Release -derivedDataPath "$WORK/dd" \
-        MARKETING_VERSION="$version" CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+        MARKETING_VERSION="$version" MACOSX_DEPLOYMENT_TARGET="$PLUGIN_MIN_MACOS" ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+        CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
         ENABLE_USER_SCRIPT_SANDBOXING=NO -quiet build 2>&1 | grep -vE 'IDERunDestination|Using the first of multiple|platform:macOS|^\}?$|^\{' || true
     APPEX=$(find "$WORK/dd/Build/Products/Release/$APP_NAME.app/Contents/PlugIns" -maxdepth 1 -name '*.appex' | head -1)
     [[ -n "$APPEX" ]] || { echo "Расширение Safari не собрано"; exit 1; }

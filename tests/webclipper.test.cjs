@@ -154,3 +154,17 @@ test('готовность к переезду плагина в свой реп
   const plugin = json('manifest.json');
   if (plugin.repository) assert.match(plugin.repository, /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/);
 });
+
+test('плагин поддерживает macOS 15 и новее независимо от минимума MindNotes', () => {
+  const build = fs.readFileSync(path.join(root, 'scripts/build-webclipper.sh'), 'utf8');
+  assert.ok(/PLUGIN_MIN_MACOS=15\.0/.test(build), 'минимум плагина — macOS 15');
+  assert.ok(/-target "\$PLUGIN_TARGET"/.test(build), 'установщик собирается для минимума плагина, а не приложения');
+  assert.ok(/<string>\$PLUGIN_MIN_MACOS<\/string>/.test(build), 'LSMinimumSystemVersion установщика');
+  assert.ok(/MACOSX_DEPLOYMENT_TARGET="\$PLUGIN_MIN_MACOS"/.test(build) && /ARCHS=arm64/.test(build), 'расширение Safari — macOS 15, только Apple Silicon');
+  const browsers = read('Installer/Browsers.swift');
+  assert.ok(/static func runsHere/.test(browsers) && /LSMinimumSystemVersion/.test(browsers), 'установщик видит, что MindNotes требует более новую macOS');
+  // Safari 18 (macOS 15): новые возможности браузера — только с проверкой наличия.
+  const extract = read('browser/extract.js');
+  assert.ok(/typeof el\.checkVisibility === 'function'/.test(extract));
+  assert.ok(/typeof OffscreenCanvas === 'undefined'/.test(read('browser/background.js')));
+});

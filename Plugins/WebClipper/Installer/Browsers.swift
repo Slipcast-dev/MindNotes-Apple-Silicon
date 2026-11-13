@@ -20,6 +20,25 @@ enum Paths {
     static var installedPlugin: URL { support.appendingPathComponent("MindNotes/Extensions/\(pluginID).mnplugin", isDirectory: true) }
 
     /// Понимает ли эта сборка MindNotes плагины: она объявляет тип пакета .mnplugin (ADR-0019).
+    /// Какую macOS требует программа (`LSMinimumSystemVersion`); nil — не указано.
+    static func requiredMacOS(_ app: URL) -> String? {
+        NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist"))?["LSMinimumSystemVersion"] as? String
+    }
+
+    /// Запустится ли программа на этой macOS: сравнение `LSMinimumSystemVersion` с версией системы.
+    static func runsHere(_ app: URL) -> Bool {
+        guard let required = requiredMacOS(app) else { return true }
+        return isAtLeast(ProcessInfo.processInfo.operatingSystemVersion, required)
+    }
+
+    /// `15.7.1` против `15.0`, `26.0`, `27.2`: недостающие части считаются нулями.
+    static func isAtLeast(_ system: OperatingSystemVersion, _ required: String) -> Bool {
+        let need = required.split(separator: ".").map { Int($0) ?? 0 } + [0, 0, 0]
+        let have = [system.majorVersion, system.minorVersion, system.patchVersion]
+        for i in 0..<3 where have[i] != need[i] { return have[i] > need[i] }
+        return true
+    }
+
     static func supportsPlugins(_ app: URL) -> Bool {
         guard let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")),
               let types = info["UTExportedTypeDeclarations"] as? [[String: Any]] else { return false }

@@ -10,7 +10,12 @@ final class InstallerModel: ObservableObject {
     @Published var mindNotesURL: URL? = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Paths.mindNotesBundleID)
     /// MindNotes есть, но старая: плагины не поддерживает.
     var mindNotesOutdated: Bool { mindNotesURL.map { !Paths.supportsPlugins($0) } ?? false }
-    var canInstall: Bool { mindNotesURL != nil && !mindNotesOutdated }
+    /// MindNotes есть, но требует более новую macOS, чем на этом Mac: плагин некуда ставить.
+    var mindNotesNeedsNewerMacOS: String? {
+        guard let app = mindNotesURL, !Paths.runsHere(app) else { return nil }
+        return Paths.requiredMacOS(app)
+    }
+    var canInstall: Bool { mindNotesURL != nil && !mindNotesOutdated && mindNotesNeedsNewerMacOS == nil }
     @Published var pluginReady = false
     @Published var safariEnabled = false
     @Published var chromeInstalled: Set<String> = []
@@ -152,7 +157,7 @@ final class InstallerModel: ObservableObject {
     static func report() async -> String {
         var lines = ["payload \(Paths.payloadVersion), safari appex: \(FileManager.default.fileExists(atPath: Bundle.main.builtInPlugInsURL!.appendingPathComponent("MindNotes Web Clipper Extension.appex").path))"]
         let mindNotes = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Paths.mindNotesBundleID)
-        lines.append("MindNotes: \(mindNotes?.path ?? "нет"), plugins supported: \(mindNotes.map(Paths.supportsPlugins) ?? false), plugin: \(Paths.version(of: Paths.installedPlugin.appendingPathComponent("manifest.json")) ?? "нет")")
+        lines.append("MindNotes: \(mindNotes?.path ?? "нет"), plugins supported: \(mindNotes.map(Paths.supportsPlugins) ?? false), runs here: \(mindNotes.map(Paths.runsHere) ?? false), plugin: \(Paths.version(of: Paths.installedPlugin.appendingPathComponent("manifest.json")) ?? "нет")")
         for b in Browser.installed() {
             let state = b.isSafari ? "enabled=\(await SafariExtension.isEnabled())" : "extension=\(b.hasChromeExtension())"
                 + " connected=\(Browser.connectedClientNames().contains(b.clientName))"

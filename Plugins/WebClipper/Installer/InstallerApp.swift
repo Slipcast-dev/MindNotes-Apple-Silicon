@@ -101,8 +101,9 @@ struct InstallerView: View {
         row(icon: model.mindNotesURL.map { NSWorkspace.shared.icon(forFile: $0.path) }, name: "MindNotes",
             done: model.pluginReady,
             status: model.mindNotesURL == nil ? tr("MindNotes не найден — сначала установите приложение", "MindNotes not found — install the app first")
-                : model.mindNotesOutdated ? tr("Эта версия MindNotes не поддерживает плагины — обновите приложение", "This MindNotes version does not support plugins — update the app")
-                : model.pluginReady ? tr("Плагин установлен", "Plugin installed") : tr("Плагин ещё не добавлен", "Plugin not added yet")) {
+                : model.mindNotesNeedsNewerMacOS.map { String(format: tr("Эта MindNotes требует macOS %@ — на этом Mac старее. Обновите macOS или поставьте MindNotes для вашей системы", "This MindNotes requires macOS %@ — this Mac runs an older one. Update macOS or install a MindNotes build for your system"), $0) }
+                    ?? (model.mindNotesOutdated ? tr("Эта версия MindNotes не поддерживает плагины — обновите приложение", "This MindNotes version does not support plugins — update the app")
+                : model.pluginReady ? tr("Плагин установлен", "Plugin installed") : tr("Плагин ещё не добавлен", "Plugin not added yet"))) {
             if model.canInstall, !model.pluginReady {
                 Button(tr("Добавить", "Add")) { model.addToMindNotes() }
             }
