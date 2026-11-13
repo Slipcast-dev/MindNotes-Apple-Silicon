@@ -14,6 +14,8 @@ enum ShellSection: Equatable {
     case settings
     case trash
     case templates
+    /// Календарь: события и задачи из Календаря и Напоминаний macOS.
+    case calendar
     case tag(UUID)
     /// Страница под паролем (ADR-0017): вместо содержимого — окно ввода пароля.
     case locked(UUID)
@@ -120,6 +122,8 @@ final class ShellModel: ObservableObject {
 
     private var session: WorkspaceSession?
     private(set) var store: SQLiteWorkspace?
+    /// Синхронизация с Календарём и Напоминаниями открытого пространства.
+    @Published private(set) var calendarSync: CalendarSyncHost?
     private var navigation: Task<Void, Never>?
     private let lastWorkspaceKey = "lastWorkspacePath"
     private let lastPageKey = "lastPageID"
@@ -474,6 +478,10 @@ final class ShellModel: ObservableObject {
             let loadedDatabases = try await store.databaseIndex()
             try await closeSession()
             self.store = store
+            // Синхронизация с Календарём и Напоминаниями: связки баз и связи записей у каждого пространства свои.
+            self.calendarSync = CalendarSyncHost(source: store, workspaceID: try await store.workspaceID(),
+                                                 supportDir: self.supportDirectory, gateway: EventKitGateway())
+            Task { [weak self] in await self?.calendarSync?.engine.syncNow() }
             AIWorkspace.shared.attach(store)
             AIPropertyFiller.shared.resume(store: store, shell: self)
             dailyFormulas?.invalidate()
@@ -698,6 +706,7 @@ final class ShellModel: ObservableObject {
         editor = nil
         session = nil
         store = nil
+        calendarSync = nil
         // Чат и панель ИИ относятся к закрытому пространству.
         AIAssist.shared.close()
         AIChatModel.shared.reset()
@@ -759,6 +768,7 @@ final class ShellModel: ObservableObject {
                                       self.pages = session.pages
                                       try await self.reloadTrash()
                                   }, report: { [weak self] in self?.errorMessage = $0 })
+        model.onChange = { [weak self] in self?.calendarSync?.recordsChanged() }
         databaseModel = model
         pages = session.pages
         section = .database(page)
@@ -1393,6 +1403,10 @@ final class ShellModel: ObservableObject {
 
     func goSettings() {
         leavePage { self.section = .settings }
+    }
+
+    func goCalendar() {
+        leavePage { self.section = .calendar }
     }
 
     func goTrash() {
@@ -2354,6 +2368,8 @@ final class ShellModel: ObservableObject {
             try await session.refreshPages()
             self.pages = session.pages
             self.databaseModel?.reload()
+            // Правки записей от ИИ тоже уходят в Календарь.
+            self.calendarSync?.recordsChanged()
         }
     }
 

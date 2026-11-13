@@ -123,6 +123,11 @@ struct SettingsScreen: View {
                 CollapsibleSettingsSection(title: L("Сочетания клавиш"), key: "settings.expanded.shortcuts") { ShortcutsSettings() }
                 if shell.isOpen { PeopleSettings() }
                 CollapsibleSettingsSection(title: L("Расширения"), key: "settings.expanded.extensions") { ExtensionsSettings() }
+                if let host = shell.calendarSync {
+                    CollapsibleSettingsSection(title: L("Календарь и Напоминания"), key: "settings.expanded.calendar") {
+                        CalendarSyncSettingsView(engine: host.engine, extra: AnyView(CalendarBindingsView(host: host)))
+                    }
+                }
 
                 Text("Пространства").font(.system(size: 17, weight: .semibold)).padding(.top, 24).padding(.bottom, 10)
                 VStack(spacing: 0) {

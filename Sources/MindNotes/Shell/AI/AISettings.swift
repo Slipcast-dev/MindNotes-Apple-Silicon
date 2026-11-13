@@ -48,6 +48,9 @@ final class AISettings: ObservableObject {
     @Published var chatEffort: AIEffort { didSet { UserDefaults.standard.set(chatEffort.rawValue, forKey: Self.effortKey) } }
     /// Спрашивать перед созданием страниц и добавлением текста. Правка существующего и корзина — всегда с вопросом.
     @Published var confirmCreation: Bool { didSet { UserDefaults.standard.set(confirmCreation, forKey: Self.confirmKey) } }
+    /// Доступ Notes AI к Календарю и Напоминаниям: названия и время событий уходят провайдеру ИИ. По умолчанию выключен.
+    @Published var calendarAccess: Bool { didSet { UserDefaults.standard.set(calendarAccess, forKey: Self.calendarKey) } }
+    static let calendarKey = "ai.calendarAccess"
     @Published private(set) var hasKey: Bool
     /// Модели из `GET /v1/models` после проверки ключа.
     @Published var availableModels: [String] = []
@@ -65,6 +68,7 @@ final class AISettings: ObservableObject {
         model = d.string(forKey: Self.modelKey(providerID)) ?? AIProvider.find(providerID, customURL: "").defaultModel
         chatEffort = AIEffort(rawValue: d.string(forKey: Self.effortKey) ?? "") ?? .medium
         confirmCreation = d.object(forKey: Self.confirmKey) as? Bool ?? true
+        calendarAccess = d.bool(forKey: Self.calendarKey)
         // Keychain читается только при включённом ИИ: выключенный ИИ не трогает даже ключ.
         let found = AIProvider.find(providerID, customURL: "")
         hasKey = d.bool(forKey: Self.enabledKey) && (!found.needsKey || AIKeychain.hasKey(provider: providerID))

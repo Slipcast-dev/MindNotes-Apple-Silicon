@@ -298,6 +298,9 @@ struct NotesSidebar: View {
                     SidebarRow(title: "Notes AI", symbol: "sparkles", active: chat.isOpen, tint: AIStyle.tint, badge: shortcuts.display("ai.chat")) { chat.toggle() }
                 }
                 SidebarRow(title: L("Главная"), symbol: "house", active: shell.section == .home) { shell.goHome() }
+                if shell.isOpen {
+                    SidebarRow(title: L("Календарь"), symbol: "calendar", active: shell.section == .calendar) { shell.goCalendar() }
+                }
                 SidebarRow(title: L("Импорт"), symbol: "square.and.arrow.down", active: shell.section == .files) { shell.goFiles() }
 
                 if shell.isOpen {
