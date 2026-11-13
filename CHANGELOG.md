@@ -6,6 +6,9 @@ All notable changes to MindNotes. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+### Changed
+- Web Clipper releases are no longer copied to this repository; the copies here were removed. MindNotes 1.7.0 and later gets the plugin from its own repository; an older MindNotes gets it after updating to 1.7.0.
+
 ## [1.7.0] - 2026-11-13
 
 ### Changed
