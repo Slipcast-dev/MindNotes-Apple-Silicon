@@ -4,6 +4,16 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] - 2026-11-13
+
+### Changed
+- **Sidebar:** navigation at the top (Home, Calendar, Templates), then a single “Create” menu — Section, Folder, Database, Page and “Import…”. The “New section” button is gone from the page list.
+- **Tags in the sidebar** are pinned at the bottom above the trash: they no longer scroll with the sections and collapse with a click on the title; a long list scrolls inside its own block.
+- **Page action buttons** (“Tag”, “Cover”, “Backlinks”, “Comments”, “Block”, “Subpage”) always stay in one tighter row; on a narrow window only icons remain, with names in tooltips. Page tags sit in their own row below the buttons, so new tags no longer push the buttons aside.
+
+### Fixed
+- A page tag no longer shrinks into an empty strip when the row under the title does not fit.
+
 ## [1.6.0] - 2026-11-13
 
 ### Added
