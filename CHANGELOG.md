@@ -4,6 +4,19 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - unreleased
+
+### Added
+- **Calendar**: a Calendar section with day, week and month views in the style of Apple Calendar — a mini month, calendars and reminder lists in the sidebar, a current-time line, a day panel; scrolling with the wheel or a gesture moves exactly one step; right-click for “New Event…” and “New Reminder…”; edit, recolour, rename and delete calendars and lists.
+- **Sync with macOS Calendar and Reminders**: database records with a date become events or reminders and back; “Calendar & Reminders” settings and a sync log. A deleted sync calendar is no longer recreated — sync for that view turns off and the reason is logged.
+- **AI and the calendar**: with “Calendar & Reminders access” on, the agent reads events and free time and proposes creating or moving an event or completing a reminder — with confirmation and undo. Dates in database records accept a time and ranges.
+
+### Changed
+- Plugins without an `updates` field find their releases by the rule “last part of the id + `-v`”; “Check for Updates” is shown for every plugin.
+
+### Fixed
+- From the audit: the ZIP index rejects links and special files before extraction; invalid attachment paths are not opened, exported or restored; extreme history snapshot dates and out-of-range numbers in AI replies no longer crash; the plugin auto-pairing window does not hand out a key without consent; a hidden or password-locked instructions page is not sent to AI.
+
 ## [1.5.2] - 2026-11-13
 
 ### Added
