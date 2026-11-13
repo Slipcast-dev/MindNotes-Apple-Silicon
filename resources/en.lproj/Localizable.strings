@@ -1722,3 +1722,17 @@
 "Скопировать" = "Copy";
 "События появятся в Календаре на всех устройствах Apple" = "Events will appear in Calendar on all your Apple devices";
 "Что делать, если элемент изменили и здесь, и в Календаре" = "What to do if an item changed both here and in Calendar";
+
+/* Синхронизация с Календарём и Напоминаниями */
+"Весь день, без уведомления" = "All day, no alert";
+"Время" = "Time";
+"Выберите список" = "Choose a list";
+"Высокий" = "High";
+"Низкий" = "Low";
+"Новое напоминание" = "New reminder";
+"Новое напоминание…" = "New Reminder…";
+"Новое событие…" = "New Event…";
+"Открыть день" = "Open day";
+"Приоритет" = "Priority";
+"Средний" = "Medium";
+"Уведомление придёт в это время" = "You'll get an alert at this time";

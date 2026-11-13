@@ -73,6 +73,10 @@ final class FakeGateway: CalendarGateway {
     func saveEvent(_ draft: EventDraft, span: EditSpan) throws -> String { draft.externalID ?? "" }
     func deleteEvent(externalID: String, occurrenceStart: Date?, span: EditSpan) throws {}
     func setReminderCompleted(externalID: String, _ done: Bool) throws {}
+    func saveReminder(_ draft: ReminderDraft) throws -> String {
+        userCreate(.reminder, container: draft.listID, title: draft.title, start: draft.due)
+    }
+    func defaultReminderListID() -> String? { containersByKind[.reminder]?.first?.id }
 
     /// Календарь «потерял» url элемента.
     func wipeURL(_ ext: String) { items[ext]?.appID = nil }

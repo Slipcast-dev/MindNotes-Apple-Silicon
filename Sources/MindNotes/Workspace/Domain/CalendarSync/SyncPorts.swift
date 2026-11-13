@@ -54,6 +54,17 @@ struct EventDraft: Equatable, Sendable {
     var alarmMinutes: Int?
 }
 
+/// Новое напоминание из календаря (правый щелчок по дню).
+struct ReminderDraft: Equatable, Sendable {
+    var listID: String
+    var title: String
+    var notes: String?
+    var due: Date
+    /// `false` — напоминание на весь день, без времени.
+    var hasTime: Bool
+    var priority: Int = 0
+}
+
 /// Какие экземпляры серии затрагивает правка.
 enum EditSpan: Sendable { case thisOnly, future }
 
@@ -85,6 +96,10 @@ protocol CalendarGateway: AnyObject {
     func saveEvent(_ draft: EventDraft, span: EditSpan) throws -> String
     func deleteEvent(externalID: String, occurrenceStart: Date?, span: EditSpan) throws
     func setReminderCompleted(externalID: String, _ done: Bool) throws
+    @discardableResult
+    func saveReminder(_ draft: ReminderDraft) throws -> String
+    /// Список напоминаний по умолчанию (из настроек Напоминаний).
+    func defaultReminderListID() -> String?
     /// Вызывается при любом изменении в базе Календаря (в том числе после собственных записей).
     var onChange: (() -> Void)? { get set }
 }

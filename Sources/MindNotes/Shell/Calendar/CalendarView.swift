@@ -14,6 +14,7 @@ struct CalendarView: View {
     @State private var pendingMove: PendingMove?
     @State private var error: String?
     @State private var reloadTick = 0
+    @State private var reminderDraft: ReminderEditorSheet.Draft?
 
     struct PendingMove: Identifiable {
         let id = UUID()
@@ -52,16 +53,21 @@ struct CalendarView: View {
                     case .month:
                         MonthGridView(date: date, entries: entries,
                                       openDay: { date = $0; modeRaw = CalendarMath.Mode.day.rawValue },
-                                      open: open, create: { create(day: $0, minutes: 9 * 60) })
+                                      open: open, create: { create(day: $0, minutes: 9 * 60) },
+                                      remind: { newReminder(day: $0, minutes: nil) })
+                            .modifier(ScrollPager(vertical: true) { date = CalendarMath.step(.month, from: date, by: $0) })
                     case .week:
                         TimeGridView(days: CalendarMath.weekDays(date), entries: entries, open: open,
                                      create: { create(day: $0, minutes: $1) }, move: requestMove, toggle: toggle,
-                                     selectDay: { date = $0; modeRaw = CalendarMath.Mode.day.rawValue })
+                                     selectDay: { date = $0; modeRaw = CalendarMath.Mode.day.rawValue },
+                                     remind: { newReminder(day: $0, minutes: $1) })
+                            .modifier(ScrollPager(vertical: false) { date = CalendarMath.step(.week, from: date, by: $0) })
                     case .day:
                         HStack(spacing: 0) {
                             TimeGridView(days: [Calendar.current.startOfDay(for: date)], entries: entries, open: open,
                                          create: { create(day: $0, minutes: $1) }, move: requestMove, toggle: toggle,
-                                         selectDay: { _ in })
+                                         selectDay: { _ in }, remind: { newReminder(day: $0, minutes: $1) })
+                                .modifier(ScrollPager(vertical: false) { date = CalendarMath.step(.day, from: date, by: $0) })
                             Rectangle().fill(CalStyle.line).frame(width: 1)
                             DaySummaryView(date: date, entries: entries, open: open, toggle: toggle)
                                 .frame(width: 260)
@@ -78,6 +84,9 @@ struct CalendarView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             engine.refreshAccess()
             reloadTick += 1
+        }
+        .sheet(item: $reminderDraft) { d in
+            ReminderEditorSheet(draft: d, lists: engine.gateway.containers(.reminder).filter(\.isEditable)) { saveReminder($0) }
         }
         .sheet(item: $draft) { d in
             EventEditorSheet(draft: d, calendars: engine.gateway.containers(.event).filter(\.isEditable)) { apply($0) }
@@ -163,12 +172,37 @@ struct CalendarView: View {
 
     private func load() async {
         guard hasAccess || engine.status(.reminder) == .granted else { entries = []; return }
-        let lists = [engine.settings.reminderListID].compactMap { $0 }
+        let visible = engine.settings.visibleCalendarIDs
+        let lists = engine.gateway.containers(.reminder).map(\.id).filter { visible?.contains($0) ?? true }
         entries = await engine.gateway.agenda(CalendarMath.interval(mode, around: date),
                                               calendarIDs: engine.settings.visibleCalendarIDs, reminderListIDs: lists)
     }
 
     // MARK: Действия
+
+    /// Правый щелчок «Новое напоминание»: при необходимости сначала спрашивается доступ к Напоминаниям.
+    private func newReminder(day: Date, minutes: Int?) {
+        Task {
+            if engine.status(.reminder) != .granted {
+                _ = await engine.gateway.requestAccess(.reminder)
+                engine.refreshAccess()
+            }
+            guard engine.status(.reminder) == .granted else { error = L("Нет доступа к Напоминаниям"); return }
+            let lists = engine.gateway.containers(.reminder).filter(\.isEditable)
+            let preferred = [engine.settings.reminderListID, engine.gateway.defaultReminderListID()].compactMap { $0 }
+            let list = preferred.first { id in lists.contains { $0.id == id } } ?? lists.first?.id ?? ""
+            let due = CalendarMath.moment(day, minutes: minutes ?? 9 * 60)
+            reminderDraft = .init(listID: list, due: due, hasTime: minutes != nil)
+        }
+    }
+
+    private func saveReminder(_ d: ReminderEditorSheet.Draft) {
+        do {
+            try engine.gateway.saveReminder(ReminderDraft(listID: d.listID, title: d.title, notes: d.notes.isEmpty ? nil : d.notes,
+                                                          due: d.due, hasTime: d.hasTime, priority: d.priority))
+        } catch { self.error = "\(error)" }
+        reloadTick += 1
+    }
 
     private func create(day: Date, minutes: Int) {
         let start = CalendarMath.moment(day, minutes: minutes)
@@ -263,6 +297,7 @@ struct CalendarSidebar: View {
     @Binding var date: Date
     @State private var shown = Date()
     @State private var calendars: [CalendarInfo] = []
+    @State private var lists: [CalendarInfo] = []
 
     var body: some View {
         ScrollView {
@@ -275,11 +310,21 @@ struct CalendarSidebar: View {
                         ForEach(cals) { c in row(c) }
                     }
                 }
+                if !lists.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L("Напоминания")).font(.system(size: 11, weight: .semibold)).foregroundStyle(CalStyle.muted)
+                        ForEach(lists) { c in row(c) }
+                    }
+                }
             }
             .padding(14)
         }
         .background(CalStyle.side)
-        .onAppear { calendars = engine.gateway.containers(.event); shown = date }
+        .onAppear {
+            calendars = engine.gateway.containers(.event)
+            lists = engine.gateway.containers(.reminder)
+            shown = date
+        }
         .onChange(of: date) { _, d in shown = d }
     }
 
@@ -291,9 +336,10 @@ struct CalendarSidebar: View {
 
     private func row(_ c: CalendarInfo) -> some View {
         Button {
-            var ids = engine.settings.visibleCalendarIDs ?? Set(calendars.map(\.id))
+            let all = Set((calendars + lists).map(\.id))
+            var ids = engine.settings.visibleCalendarIDs ?? all
             if ids.contains(c.id) { ids.remove(c.id) } else { ids.insert(c.id) }
-            engine.setVisibleCalendars(ids.count == calendars.count ? nil : ids)
+            engine.setVisibleCalendars(ids.isSuperset(of: all) ? nil : ids)
         } label: {
             HStack(spacing: 8) {
                 RoundedRectangle(cornerRadius: 3)
@@ -361,6 +407,7 @@ struct MonthGridView: View {
     let openDay: (Date) -> Void
     let open: (AgendaEntry) -> Void
     let create: (Date) -> Void
+    let remind: (Date) -> Void
 
     var body: some View {
         let days = CalendarMath.monthGrid(date)
@@ -421,12 +468,19 @@ struct MonthGridView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(weekend || !inMonth ? CalStyle.soft.opacity(0.35) : Color.clear)
+        // Будни светлые, выходные темнее — и в этом месяце, и в соседних.
+        .background(weekend ? CalStyle.soft.opacity(0.55) : CalStyle.paper)
         .overlay(alignment: .trailing) { Rectangle().fill(CalStyle.line).frame(width: 0.5) }
         .overlay(alignment: .bottom) { Rectangle().fill(CalStyle.line).frame(height: 0.5) }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { create(day) }
         .onTapGesture { openDay(day) }
+        .contextMenu {
+            Button { remind(day) } label: { Label(L("Новое напоминание…"), systemImage: "checklist") }
+            Button { create(day) } label: { Label(L("Новое событие…"), systemImage: "calendar.badge.plus") }
+            Divider()
+            Button { openDay(day) } label: { Label(L("Открыть день"), systemImage: "calendar.day.timeline.left") }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
     }
@@ -471,8 +525,12 @@ struct TimeGridView: View {
     let move: (AgendaEntry, Date, Date) -> Void
     let toggle: (AgendaEntry) -> Void
     let selectDay: (Date) -> Void
+    let remind: (Date, Int) -> Void
 
     private let hourHeight: CGFloat = 52
+    /// Где курсор: правый щелчок создаёт напоминание или событие на это время. Класс — чтобы движение мыши не перерисовывало сетку.
+    @State private var pointer = Pointer()
+    final class Pointer { var minutes = 9 * 60 }
     private let gutter: CGFloat = 56
     @State private var drag: DragState?
     @State private var now = Date()
@@ -594,6 +652,15 @@ struct TimeGridView: View {
                     .offset(x: gutter + CGFloat(i) * colW)
                     .onTapGesture(count: 2, coordinateSpace: .local) { p in
                         create(days[i], CalendarMath.snap(minutes: Double(p.y / hourHeight * 60) - 30))
+                    }
+                    .onContinuousHover(coordinateSpace: .local) { phase in
+                        if case .active(let p) = phase {
+                            pointer.minutes = min(CalendarMath.snap(minutes: Double(p.y / hourHeight * 60) - 15), 24 * 60 - 15)
+                        }
+                    }
+                    .contextMenu {
+                        Button { remind(days[i], pointer.minutes) } label: { Label(L("Новое напоминание…"), systemImage: "checklist") }
+                        Button { create(days[i], pointer.minutes) } label: { Label(L("Новое событие…"), systemImage: "calendar.badge.plus") }
                     }
             }
             ForEach(days.indices, id: \.self) { i in

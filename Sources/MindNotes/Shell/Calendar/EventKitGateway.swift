@@ -343,6 +343,26 @@ final class EventKitGateway: CalendarGateway {
         do { try store.save(r, commit: true) } catch { throw SyncError.eventKit(error.localizedDescription) }
     }
 
+    @discardableResult
+    func saveReminder(_ d: ReminderDraft) throws -> String {
+        guard let list = store.calendar(withIdentifier: d.listID) ?? store.defaultCalendarForNewReminders() else { throw SyncError.notFound }
+        let r = EKReminder(eventStore: store)
+        r.calendar = list
+        r.title = d.title
+        r.notes = d.notes
+        r.priority = d.priority
+        let parts: Set<Calendar.Component> = d.hasTime ? [.year, .month, .day, .hour, .minute] : [.year, .month, .day]
+        r.dueDateComponents = Calendar.current.dateComponents(parts, from: d.due)
+        // С временем — уведомление в срок, как у Напоминаний.
+        if d.hasTime { r.addAlarm(EKAlarm(absoluteDate: d.due)) }
+        do { try store.save(r, commit: true) } catch { throw SyncError.eventKit(error.localizedDescription) }
+        return r.calendarItemIdentifier
+    }
+
+    func defaultReminderListID() -> String? {
+        status(.reminder) == .granted ? store.defaultCalendarForNewReminders()?.calendarIdentifier : nil
+    }
+
     nonisolated private static func rgb(_ c: CGColor?) -> UInt32 {
         guard let c, let ns = NSColor(cgColor: c)?.usingColorSpace(.sRGB) else { return 0x888780 }
         let r = UInt32((ns.redComponent * 255).rounded()), g = UInt32((ns.greenComponent * 255).rounded()),
