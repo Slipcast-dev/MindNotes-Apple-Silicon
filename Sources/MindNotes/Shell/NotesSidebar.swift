@@ -42,6 +42,42 @@ struct SidebarRow: View {
     }
 }
 
+/// Строка панели, открывающая меню: выглядит как `SidebarRow`, справа — шеврон.
+struct SidebarMenuRow<Content: View>: View {
+    let title: String
+    let symbol: String
+    var active = false
+    @ViewBuilder let content: () -> Content
+    @State private var hover = false
+
+    var body: some View {
+        Menu(content: content) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.system(size: 11))
+                    .frame(width: 16)
+                    .foregroundColor(active ? Tokens.accent : Tokens.muted)
+                Text(title)
+                    .font(.system(size: Tokens.theme == .notion ? 14 : 13, weight: active ? (Tokens.theme == .notion ? .medium : .semibold) : .regular))
+                    .foregroundColor(active ? Tokens.accent : Tokens.ink)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(Tokens.muted)
+            }
+            .padding(.vertical, Tokens.theme == .notion ? 5 : 8)
+            .padding(.horizontal, 10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(active || hover ? Tokens.soft : .clear))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .onHover { hover = $0 }
+    }
+}
+
 struct SidebarGroup: View {
     let title: String
     /// Раздел сворачивается: стрелка перед названием. nil — заголовок без стрелки.
@@ -297,17 +333,26 @@ struct NotesSidebar: View {
                 if shell.isOpen, ai.enabled {
                     SidebarRow(title: "Notes AI", symbol: "sparkles", active: chat.isOpen, tint: AIStyle.tint, badge: shortcuts.display("ai.chat")) { chat.toggle() }
                 }
+                // Отступ отделяет «Поиск» и «Notes AI» от разделов.
                 SidebarRow(title: L("Главная"), symbol: "house", active: shell.section == .home) { shell.goHome() }
+                    .padding(.top, 10)
                 if shell.isOpen {
                     SidebarRow(title: L("Календарь"), symbol: "calendar", active: shell.section == .calendar) { shell.goCalendar() }
-                }
-                SidebarRow(title: L("Импорт"), symbol: "square.and.arrow.down", active: shell.section == .files) { shell.goFiles() }
-
-                if shell.isOpen {
-                    SidebarRow(title: L("Новая страница"), symbol: "plus") { shell.createPage() }
-                    SidebarRow(title: L("Новая папка"), symbol: "folder.badge.plus") { shell.createFolder() }
-                    SidebarRow(title: L("Новая база данных"), symbol: "tablecells.badge.ellipsis") { shell.createDatabase() }
                     SidebarRow(title: L("Шаблоны"), symbol: "square.on.square", active: shell.section == .templates) { shell.goTemplates() }
+
+                    Divider().padding(.horizontal, 10).padding(.vertical, 4)
+
+                    // Всё создание — в одном меню: навигация сверху, действие снизу.
+                    SidebarMenuRow(title: L("Создать"), symbol: "plus", active: shell.section == .files) {
+                        Button { shell.createPage() } label: { Label(L("Страница"), systemImage: "doc") }
+                        Button { shell.createFolder() } label: { Label(L("Папка"), systemImage: "folder.badge.plus") }
+                        Button { shell.createDatabase() } label: { Label(L("База данных"), systemImage: "tablecells.badge.ellipsis") }
+                        Divider()
+                        Button { shell.goFiles() } label: { Label(L("Импортировать…"), systemImage: "square.and.arrow.down") }
+                    }
+                } else {
+                    // Без открытого пространства создавать некуда — остаётся только импорт.
+                    SidebarRow(title: L("Импорт"), symbol: "square.and.arrow.down", active: shell.section == .files) { shell.goFiles() }
                 }
             }
 
