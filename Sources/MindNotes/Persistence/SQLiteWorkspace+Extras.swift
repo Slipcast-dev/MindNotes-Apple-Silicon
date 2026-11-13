@@ -163,14 +163,15 @@ extension SQLiteWorkspace {
     }
 
     /// Синхронный путь для отрисовки изображений. Вызывается редко: результат кэшируется в редакторе.
+    /// Путь проверяется общим `AssetPath.resolve`: недопустимая строка из базы даёт ошибку, а не URL вне пространства.
     func assetFileURLSync(_ id: UUID) throws -> URL? {
         guard let rel = try reader.sync({ try $0.scalarText("SELECT rel_path FROM assets WHERE id=?", [SQLValue(id)]) }) else { return nil }
-        return layout.root.appendingPathComponent(rel)
+        return try AssetPath.resolve(rel, id: id, in: layout.root)
     }
 
     func assetURL(_ id: UUID) async throws -> URL? {
         guard let rel = try await reader.run({ try $0.scalarText("SELECT rel_path FROM assets WHERE id=?", [SQLValue(id)]) }) else { return nil }
-        return layout.root.appendingPathComponent(rel)
+        return try AssetPath.resolve(rel, id: id, in: layout.root)
     }
 }
 

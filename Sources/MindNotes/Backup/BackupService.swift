@@ -64,11 +64,10 @@ enum BackupService {
 
         // Вложения по списку из снимка: файлы неизменяемы, уборка на время копирования не выполняется.
         for asset in info.assets.sorted(by: { $0.relPath < $1.relPath }) {
-            guard RestoreService.isAllowedAssetPath(asset.relPath) else {
-                missing.append(asset.relPath)
-                continue
-            }
-            let file = workspaceRoot.appendingPathComponent(asset.relPath)
+            // Недопустимый путь или ссылка наружу — ошибка, а не «отсутствующее вложение»: чужой файл не попадает в копию.
+            let file: URL
+            do { file = try AssetPath.resolve(asset.relPath, id: asset.id, in: workspaceRoot) }
+            catch { throw WorkspaceError.backupInvalid("недопустимый путь вложения: \(asset.relPath)") }
             guard fm.fileExists(atPath: file.path), let actual = try? sha256(of: file), actual == asset.sha256 else {
                 missing.append(asset.relPath)
                 continue

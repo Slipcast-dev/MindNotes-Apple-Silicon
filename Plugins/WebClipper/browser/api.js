@@ -47,7 +47,7 @@ async function mnFeatures() {
 const mnAPI = {
   status: () => mnRequest('GET', '/v1/status'),
   features: mnFeatures,
-  /// silent — фоновая попытка: MindNotes ответит без вопроса, только если открыто окно автоподключения.
+  /// silent — фоновая попытка: MindNotes спросит пользователя, только если открыто окно автоподключения.
   async pair(silent = false) {
     const data = await mnRequest('POST', '/v1/pair', { plugin: MN_PLUGIN, silent });
     await chrome.storage.local.set({ token: data.token });

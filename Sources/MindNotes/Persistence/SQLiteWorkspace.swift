@@ -81,6 +81,11 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
             if version > supported { throw WorkspaceError.schemaTooNew(found: version, supported: supported) }
             let check = try ro.scalarText("PRAGMA quick_check(1)") ?? ""
             guard check == "ok" else { throw WorkspaceError.corrupted(check) }
+            // Пути вложений проверяются до первой записи: чужое пространство не должно указывать на файлы вне себя.
+            if let bad = try ro.query("SELECT id, rel_path FROM assets", [], { r in (r.uuid(0), r.text(1)) })
+                .first(where: { id, rel in id.map { !AssetPath.isValid(rel, for: $0) } ?? true }) {
+                throw WorkspaceError.corrupted("недопустимый путь вложения: \(bad.1)")
+            }
             if version < supported, let backup = options.beforeMigration {
                 try backup(ConnectionSnapshotter(connection: ro), dir)
             }
@@ -537,10 +542,13 @@ struct SQLiteSnapshotInspector: SnapshotInspector {
         guard let id = try db.scalarText("SELECT value FROM workspace_meta WHERE key='workspace_id'").flatMap(UUID.init(uuidString:)) else {
             throw WorkspaceError.backupInvalid("нет идентификатора пространства")
         }
-        let assets = try db.query("SELECT id, rel_path, original_name, mime, byte_size, sha256, created_at FROM assets") { r -> AssetRecord? in
-            guard let aid = r.uuid(0) else { return nil }
+        // Запись с непригодным идентификатором или путём не пропускается молча: такой снимок отклоняется целиком.
+        let assets = try db.query("SELECT id, rel_path, original_name, mime, byte_size, sha256, created_at FROM assets") { r -> AssetRecord in
+            guard let aid = r.uuid(0), AssetPath.isValid(r.text(1), for: aid) else {
+                throw WorkspaceError.backupInvalid("недопустимый путь вложения: \(r.text(1))")
+            }
             return AssetRecord(id: aid, relPath: r.text(1), originalName: r.text(2), mime: r.optText(3), byteSize: r.int(4), sha256: r.text(5), createdAt: r.int(6))
-        }.compactMap { $0 }
+        }
         return SnapshotInfo(workspaceID: id, schemaVersion: Int(try db.scalarInt("PRAGMA user_version") ?? 0), assets: assets)
     }
 

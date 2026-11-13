@@ -45,7 +45,7 @@ final class AIWorkspace: ObservableObject {
 
     func isExcluded(_ page: UUID, shell: ShellModel) -> Bool {
         // Страница под паролем (ADR-0017) никогда не уходит ИИ сама, даже открытая.
-        shell.isProtected(page) || AIExclusion.isExcluded(page, excluded: excluded) { id in shell.pages.first { $0.id == id }?.parentID }
+        AIExclusion.isHidden(page, excluded: excluded, locked: Set(shell.pageLocks.keys)) { id in shell.pages.first { $0.id == id }?.parentID }
     }
 
     /// Отмечена сама страница (а не её предок): от этого зависит подпись пункта меню.
@@ -74,10 +74,11 @@ final class AIWorkspace: ObservableObject {
         }
     }
 
-    /// Текст инструкций для системного промпта; пусто, если страницы нет.
+    /// Текст инструкций для системного промпта чата и панели помощи; пусто, если страницы нет или она скрыта от ИИ
+    /// (сама, через предка или паролем) — та же политика, что для контекста и инструментов.
     func instructions(shell: ShellModel) async -> String {
-        guard let id = instructionsPage, shell.pages.contains(where: { $0.id == id }), let blocks = try? await shell.aiBlocks(of: id) else { return "" }
-        return blocks.filter { $0.content != nil }.map(\.plainText).joined(separator: "\n")
+        await AIExclusion.instructions(page: instructionsPage, exists: { id in shell.pages.contains { $0.id == id } },
+                                       hidden: { self.isExcluded($0, shell: shell) }, blocks: { try await shell.aiBlocks(of: $0) })
     }
 
     // MARK: История

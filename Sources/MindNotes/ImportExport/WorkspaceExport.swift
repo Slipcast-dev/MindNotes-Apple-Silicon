@@ -69,7 +69,8 @@ enum WorkspaceExport {
             }
             let result = MarkdownExport.export(title: page.title.isEmpty ? untitled : page.title, card: card, blocks: blocks, assetFolder: folder) { tree.page($0)?.title }
             for asset in result.assets + propertyFiles {
-                guard let from = try await source.assetURL(asset.id), fm.fileExists(atPath: from.path) else { summary.missingAssets += 1; continue }
+                // Недопустимый путь вложения (ссылка наружу и т. п.) считается отсутствующим файлом: чужой файл не копируется.
+                guard let from = (try? await source.assetURL(asset.id)) ?? nil, fm.fileExists(atPath: from.path) else { summary.missingAssets += 1; continue }
                 try fm.createDirectory(at: dir.appendingPathComponent(asset.path).deletingLastPathComponent(), withIntermediateDirectories: true)
                 try fm.copyItem(at: from, to: dir.appendingPathComponent(asset.path))
                 summary.assets += 1

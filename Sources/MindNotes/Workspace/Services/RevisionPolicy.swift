@@ -5,10 +5,13 @@ struct RevisionPolicy {
     static let minInterval: Int64 = 10 * 60 * 1000
 
     /// Снимок нужен, если есть изменения с прошлого снимка и прошло достаточно времени.
+    /// Дата из базы может быть любой (чужое пространство): дата в будущем или такая, что разность не помещается
+    /// в Int64, считается недостоверной — снимок нужен, история не удаляется.
     func isDue(dirty: Bool, lastSnapshotAt: Int64?, now: Int64) -> Bool {
         guard dirty else { return false }
         guard let last = lastSnapshotAt else { return true }
-        return now - last >= Self.minInterval
+        let (elapsed, overflow) = now.subtractingReportingOverflow(last)
+        return overflow || elapsed < 0 || elapsed >= Self.minInterval
     }
 }
 
@@ -22,7 +25,9 @@ enum RevisionRetention {
         var kept: Set<UUID> = []
         var buckets: [String: Revision] = [:]
         for revision in revisions {
-            let age = now - revision.createdAt
+            // Без переполнения: недостижимо старая дата — самый старый разряд, дата в будущем — «за сутки».
+            let (difference, overflow) = now.subtractingReportingOverflow(revision.createdAt)
+            let age = overflow ? (revision.createdAt < 0 ? Int64.max : Int64.min) : difference
             let bucket: String
             if age < day { kept.insert(revision.id); continue }
             else if age < 7 * day { bucket = "h\(revision.createdAt / hour)" }

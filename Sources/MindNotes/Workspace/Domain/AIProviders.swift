@@ -245,15 +245,20 @@ struct AIOpenAIAccumulator {
     mutating func apply(chunk json: JSONValue) {
         if let message = json["error"]?["message"]?.stringValue { streamError = message }
         if let usage = json["usage"], usage != .null {
-            turn.usage.input = usage["prompt_tokens"]?.intValue ?? turn.usage.input
-            turn.usage.output = usage["completion_tokens"]?.intValue ?? turn.usage.output
-            turn.usage.cacheRead = usage["prompt_tokens_details"]?["cached_tokens"]?.intValue ?? turn.usage.cacheRead
+            turn.usage.input = AIUsage.tokens(usage["prompt_tokens"]) ?? turn.usage.input
+            turn.usage.output = AIUsage.tokens(usage["completion_tokens"]) ?? turn.usage.output
+            turn.usage.cacheRead = AIUsage.tokens(usage["prompt_tokens_details"]?["cached_tokens"]) ?? turn.usage.cacheRead
         }
         guard let choice = json["choices"]?.arrayValue?.first else { return }
         let delta = choice["delta"] ?? choice["message"]
         if let piece = delta?["content"]?.stringValue { text += piece }
         for call in delta?["tool_calls"]?.arrayValue ?? [] {
-            let index = call["index"]?.intValue ?? calls.count
+            // Недопустимый номер вызова (дробный, огромный, отрицательный) — вызов пропускается.
+            let index: Int
+            if let raw = call["index"] {
+                guard let valid = raw.int(in: 0...AIStreamParser.maxIndex) else { continue }
+                index = valid
+            } else { index = calls.count }
             var current = calls[index] ?? (id: "", name: "", arguments: "")
             if let id = call["id"]?.stringValue, !id.isEmpty { current.id = id }
             if let name = call["function"]?["name"]?.stringValue { current.name += name }

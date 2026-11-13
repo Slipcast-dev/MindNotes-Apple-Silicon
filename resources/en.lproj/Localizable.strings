@@ -860,6 +860,7 @@
 "не удалось прочитать оглавление" = "its table of contents could not be read";
 "в архиве есть символическая ссылка" = "it contains a symbolic link";
 "в архиве есть особый файл" = "it contains a special file";
+"в частях архива файл и папка с одним именем" = "its parts contain a file and a folder with the same name";
 "путь выходит за пределы папки" = "a path leads outside the folder";
 "архив повреждён или не поддерживается (%d)" = "it is damaged or not supported (%d)";
 "Автоматический снимок" = "Automatic snapshot";
@@ -886,6 +887,7 @@
 "контрольная сумма не совпала" = "checksum mismatch";
 "версия схемы не совпадает с манифестом" = "the schema version does not match the manifest";
 "нет вложения" = "missing attachment";
+"недопустимый путь вложения" = "invalid attachment path";
 "слишком длинный путь" = "path too long";
 "обрезанный заголовок" = "truncated header";
 "неверная контрольная сумма заголовка" = "wrong header checksum";
@@ -1588,11 +1590,14 @@
 "Свои темы, иконки приложения и плагины. Код плагинов не исполняется внутри MindNotes: они работают в браузере или своей программе и обращаются к приложению только с вашего разрешения." = "Custom themes, app icons and plugins. Plugin code never runs inside MindNotes: plugins run in the browser or their own app and reach MindNotes only with your permission.";
 "Установить плагин…" = "Install Plugin…";
 "Программа" = "App";
-"Плагин «%@» уже установлен. Браузеры подключатся сами в течение 10 минут." = "The “%@” plugin is already installed. Browsers will connect by themselves within 10 minutes.";
 "%@ подключён к MindNotes." = "%@ is connected to MindNotes.";
 "Подключите расширение кнопкой «Подключить»." = "Connect the extension with the Connect button.";
 "Установить в браузеры…" = "Install in Browsers…";
-"Браузеры подключатся сами" = "Browsers will connect by themselves";
+"Плагин «%@» уже установлен. Чтобы подключить браузер, нажмите «Подключить» в расширении." = "The “%@” plugin is already installed. To connect a browser, click “Connect” in the extension.";
+"Плагин «%@» уже установлен, но выключен. Включите его в разделе «Расширения»." = "The “%@” plugin is already installed but turned off. Turn it on in Extensions.";
+"Источник запроса: %@" = "Request source: %@";
+"Браузер спросит разрешение на подключение" = "The browser will ask for permission to connect";
+"Подключение недавно отклонено. Повторите позже." = "Connection was recently declined. Try again later.";
 "Подключить браузеры" = "Connect Browsers";
 "Развёрнуто" = "Expanded";
 "Свёрнуто" = "Collapsed";

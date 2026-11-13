@@ -18,8 +18,9 @@ final class PluginHost: ObservableObject {
     @Published private(set) var serverRunning = false
 
     private var server: LocalAPIServer?
-    private var pairing = false
-    /// Окно автоподключения (ADR-0019): после установки плагина браузеры подключаются без вопроса.
+    private let pairing = PluginPairing()
+    /// Окно автоподключения (ADR-0019): после установки плагина фоновый запрос браузера может показать вопрос
+    /// о подключении. Ключ без согласия пользователя не выдаётся.
     @Published private(set) var autoPairUntil: [String: Date] = [:]
     static let autoPairWindow: TimeInterval = 10 * 60
     /// Программа-установщик расширений Web Clipper (находится по идентификатору).
@@ -129,11 +130,12 @@ final class PluginHost: ObservableObject {
         let registry = ExtensionRegistry.shared
         let destination = registry.folder.appendingPathComponent("\(manifest.id).\(PluginManifest.packageExtension)", isDirectory: true)
         let existing = registry.items.first { $0.id == manifest.id }
-        // Та же версия уже стоит (установщик открывает пакет при каждом запуске): без вопроса, только окно подключения.
+        // Та же версия уже стоит (установщик открывает пакет при каждом запуске). Повторное открытие пакета —
+        // не решение пользователя: выключенный плагин не включается, окно подключения не открывается.
         if let existing, existing.manifest.version == manifest.version, existing.problem == nil {
-            if !isEnabled(manifest.id) { setEnabled(manifest.id, true) }
-            openAutoPair(manifest.id)
-            shell?.notice = String(format: L("Плагин «%@» уже установлен. Браузеры подключатся сами в течение 10 минут."), manifest.name)
+            shell?.notice = isEnabled(manifest.id)
+                ? String(format: L("Плагин «%@» уже установлен. Чтобы подключить браузер, нажмите «Подключить» в расширении."), manifest.name)
+                : String(format: L("Плагин «%@» уже установлен, но выключен. Включите его в разделе «Расширения»."), manifest.name)
             return
         }
         let confirm = NSAlert()
@@ -219,8 +221,10 @@ final class PluginHost: ObservableObject {
 
     // MARK: Клиенты
 
+    /// Окно открывает только действие пользователя: установка после согласия или кнопка в настройках.
     func openAutoPair(_ id: String) {
         autoPairUntil[id] = Date().addingTimeInterval(Self.autoPairWindow)
+        pairing.windowOpened(id)
     }
 
     func isAutoPairOpen(_ id: String) -> Bool { (autoPairUntil[id] ?? .distantPast) > Date() }
@@ -335,35 +339,34 @@ final class PluginHost: ObservableObject {
         }
     }
 
-    /// Привязка клиента: только с согласия пользователя, один вопрос за раз.
+    /// Привязка клиента: только с согласия пользователя, один вопрос за раз (правила — в `PluginPairing`).
     private func pair(_ request: LocalAPI.Request) async -> LocalAPI.Response {
-        guard let body = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any], let id = body["plugin"] as? String else {
-            return .error(400, "bad_request", L("Нужно поле plugin."))
-        }
-        guard let plugin = plugin(id) else { return .error(404, "no_plugin", L("Плагин не установлен в MindNotes.")) }
-        guard isActive(plugin.id) else { return .error(403, "plugin_disabled", L("Плагин выключен в MindNotes.")) }
         let browser = L(LocalAPI.browserName(origin: request.origin, userAgent: request.headers["user-agent"]))
-        // Сразу после установки — без вопроса: пользователь только что сам поставил плагин и расширение.
-        if isAutoPairOpen(plugin.id), request.origin != nil {
-            let reply = issueToken(plugin: plugin, browser: browser, origin: request.origin)
-            if reply.status == 200 { shell?.notice = String(format: L("%@ подключён к MindNotes."), browser) }
-            return reply
-        }
-        // Фоновая попытка расширения вне окна: вопрос не показывается.
-        if body["silent"] as? Bool == true { return .error(403, "pairing_closed", L("Подключите расширение кнопкой «Подключить».")) }
-        guard !pairing else { return .error(429, "busy", L("MindNotes уже ждёт ответа на другой запрос подключения.")) }
-        pairing = true
-        defer { pairing = false }
-
-        NSApp.activate(ignoringOtherApps: true)
-        let ask = NSAlert()
-        ask.messageText = String(format: L("Подключить «%@» в %@?"), plugin.manifest.name, browser)
-        ask.informativeText = L("Расширение сможет:") + "\n" + plugin.manifest.permissions.map { "• " + Self.title($0) }.joined(separator: "\n")
-            + "\n\n" + L("Если вы не нажимали «Подключить» в браузере, откажитесь.")
-        ask.addButton(withTitle: L("Подключить"))
-        ask.addButton(withTitle: L("Отказать"))
-        guard ask.runModal() == .alertFirstButtonReturn else { return .error(403, "denied", L("Подключение отклонено в MindNotes.")) }
-        return issueToken(plugin: plugin, browser: browser, origin: request.origin)
+        return await pairing.pair(request, now: Date(),
+            isActive: { id in self.plugin(id).map { _ in self.isActive(id) } },
+            isWindowOpen: { self.isAutoPairOpen($0) },
+            closeWindow: { self.autoPairUntil[$0] = nil },
+            ask: { id in
+                guard let plugin = self.plugin(id) else { return false }
+                NSApp.activate(ignoringOtherApps: true)
+                let ask = NSAlert()
+                ask.messageText = String(format: L("Подключить «%@» в %@?"), plugin.manifest.name, browser)
+                var text = L("Расширение сможет:") + "\n" + plugin.manifest.permissions.map { "• " + Self.title($0) }.joined(separator: "\n")
+                if let origin = request.origin { text += "\n\n" + String(format: L("Источник запроса: %@"), origin) }
+                ask.informativeText = text + "\n\n" + L("Если вы не нажимали «Подключить» в браузере, откажитесь.")
+                ask.addButton(withTitle: L("Подключить"))
+                ask.addButton(withTitle: L("Отказать"))
+                return ask.runModal() == .alertFirstButtonReturn
+            },
+            issue: { id in
+                // Пока шёл вопрос, плагин могли выключить или удалить.
+                guard let plugin = self.plugin(id), self.isActive(id) else {
+                    return .error(403, "plugin_disabled", L("Плагин выключен в MindNotes."))
+                }
+                let reply = self.issueToken(plugin: plugin, browser: browser, origin: request.origin)
+                if reply.status == 200 { self.shell?.notice = String(format: L("%@ подключён к MindNotes."), browser) }
+                return reply
+            })
     }
 
     private func issueToken(plugin: Plugin, browser: String, origin: String?) -> LocalAPI.Response {
@@ -468,7 +471,7 @@ struct PluginsSettings: View {
                 }
                 if host.isActive(plugin.id) {
                     if host.isAutoPairOpen(plugin.id) {
-                        Text("Браузеры подключатся сами").font(.system(size: 11)).foregroundColor(Tokens.muted)
+                        Text("Браузер спросит разрешение на подключение").font(.system(size: 11)).foregroundColor(Tokens.muted)
                     } else {
                         Button("Подключить браузеры") { host.openAutoPair(plugin.id) }.buttonStyle(NotesButtonStyle(kind: .plain))
                     }

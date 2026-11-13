@@ -2003,7 +2003,8 @@ final class ShellModel: ObservableObject {
                 }
                 for asset in allAssets {
                     let target = url.deletingLastPathComponent().appendingPathComponent(asset.path)
-                    guard let source = try await store.assetURL(asset.id), fm.fileExists(atPath: source.path) else { missing += 1; continue }
+                    // Недопустимый путь вложения считается отсутствующим файлом: чужой файл не копируется.
+                    guard let source = (try? await store.assetURL(asset.id)) ?? nil, fm.fileExists(atPath: source.path) else { missing += 1; continue }
                     try fm.copyItem(at: source, to: target)
                 }
             }

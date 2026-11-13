@@ -69,7 +69,10 @@ final class EditorSession {
         let session = EditorSession(document: BlockDocument(pageID: pageID, blocks: blocks), store: store, coordinator: coordinator, clock: clock, ids: ids)
         for b in blocks { session.savedPage[b.id] = b.pageID }
         try await session.loadSyncedSources()
-        session.lastSnapshotAt = try await store.revisions(ofPage: pageID).first?.createdAt
+        // Недостоверная дата снимка из базы (отрицательная или в будущем) не мешает: следующий снимок будет по первой правке.
+        let now = clock.nowMillis()
+        let last = try await store.revisions(ofPage: pageID).first?.createdAt
+        session.lastSnapshotAt = last.flatMap { $0 >= 0 && $0 <= now ? $0 : nil }
         return session
     }
 
