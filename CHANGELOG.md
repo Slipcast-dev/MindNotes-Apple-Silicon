@@ -4,6 +4,14 @@
 
 All notable changes to MindNotes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.6.2] - 2026-11-13
+
+### Changed
+- **Home: new Quick Access cards.** The page cover sits at the top of the card with the page icon (emoji or symbol) on its edge, as in Notion; without a cover there is a soft background of the same height. Rounded corners, a light shadow, and the card lifts on hover.
+
+### Fixed
+- Page covers were not shown in Quick Access on the Home screen.
+
 ## [1.6.1] - 2026-11-13
 
 ### Changed
