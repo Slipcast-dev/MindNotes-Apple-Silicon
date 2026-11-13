@@ -11,6 +11,7 @@ struct TagChip: View {
 struct TagPickerButton: View {
     @EnvironmentObject private var shell: ShellModel
     let page: UUID
+    var compact = false
     @State private var open = false
     @State private var query = ""
 
@@ -25,8 +26,8 @@ struct TagPickerButton: View {
     }
 
     var body: some View {
-        Button { open = true } label: { Label("Тег", systemImage: "tag") }
-            .buttonStyle(NotesButtonStyle(kind: .plain))
+        Button { open = true } label: { PageActionLabel(title: L("Тег"), symbol: "tag", compact: compact) }
+            .buttonStyle(PageActionStyle())
             .popover(isPresented: $open, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 6) {
                     TextField(L("Найти или создать тег"), text: $query)

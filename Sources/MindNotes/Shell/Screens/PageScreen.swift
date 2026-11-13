@@ -63,6 +63,40 @@ struct PageScreen: View {
         showsIcon = false
     }
 
+    /// Кнопки действий страницы одной строкой; `compact` — только значки, название в подсказке.
+    @ViewBuilder private func pageActions(_ editor: PageEditorModel, page: Page?, compact: Bool) -> some View {
+        HStack(spacing: 2) {
+            TagPickerButton(page: editor.pageID, compact: compact)
+            if page?.coverAssetID == nil {
+                Button { shell.pickPageCover(editor.pageID) } label: { PageActionLabel(title: L("Обложка"), symbol: "photo", compact: compact) }
+                    .buttonStyle(PageActionStyle())
+            }
+            Button {
+                shell.reloadBacklinks(for: editor.pageID)
+                showsBacklinks = true
+            } label: { PageActionLabel(title: L("Обратные ссылки"), symbol: "arrow.up.right", compact: compact) }
+            .buttonStyle(PageActionStyle())
+            .popover(isPresented: $showsBacklinks, arrowEdge: .bottom) { backlinksPopover }
+            Button { shell.focusedThread = nil; shell.showsComments = true } label: {
+                let open = shell.commentThreads.filter { !$0.root.resolved }.count
+                PageActionLabel(title: open > 0 ? L("Комментарии: %d", open) : L("Комментарии"), symbol: "text.bubble", compact: compact)
+            }
+            .buttonStyle(PageActionStyle())
+            .popover(isPresented: $shell.showsComments, arrowEdge: .bottom) { CommentsPanel(page: editor.pageID) }
+            Menu {
+                ForEach(Array(EditorAction.slashItems.enumerated()), id: \.offset) { _, item in
+                    Button(item.title) { editor.controller.run(item.action) }
+                }
+            } label: { PageActionLabel(title: L("Блок"), symbol: "plus", compact: compact) }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            Button { shell.createPage(parent: editor.pageID) } label: { PageActionLabel(title: L("Подстраница"), symbol: "doc.badge.plus", compact: compact) }
+                .buttonStyle(PageActionStyle())
+        }
+        .fixedSize()
+    }
+
     private var backlinksPopover: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Обратные ссылки").font(.system(size: 13, weight: .semibold)).padding(.bottom, 4)
@@ -125,35 +159,10 @@ struct PageScreen: View {
                 if let databaseID = page?.databaseID {
                     RecordPropertiesPanel(page: editor.pageID, databaseID: databaseID)
                 }
-                // Действия стоят на месте, теги — строкой под ними: новые теги не сдвигают кнопки вбок.
-                WrappingRow(spacing: 9, lineSpacing: 6) {
-                    TagPickerButton(page: editor.pageID)
-                    if page?.coverAssetID == nil {
-                        Button { shell.pickPageCover(editor.pageID) } label: { Label("Обложка", systemImage: "photo") }
-                            .buttonStyle(NotesButtonStyle(kind: .plain))
-                    }
-                    Button {
-                        shell.reloadBacklinks(for: editor.pageID)
-                        showsBacklinks = true
-                    } label: { Label("Обратные ссылки", systemImage: "arrow.up.right") }
-                    .buttonStyle(NotesButtonStyle(kind: .plain))
-                    .popover(isPresented: $showsBacklinks, arrowEdge: .bottom) { backlinksPopover }
-                    Button { shell.focusedThread = nil; shell.showsComments = true } label: {
-                        let open = shell.commentThreads.filter { !$0.root.resolved }.count
-                        Label(open > 0 ? L("Комментарии: %d", open) : L("Комментарии"), systemImage: "text.bubble")
-                    }
-                    .buttonStyle(NotesButtonStyle(kind: .plain))
-                    .popover(isPresented: $shell.showsComments, arrowEdge: .bottom) { CommentsPanel(page: editor.pageID) }
-            Menu {
-                        ForEach(Array(EditorAction.slashItems.enumerated()), id: \.offset) { _, item in
-                            Button(item.title) { editor.controller.run(item.action) }
-                        }
-                    } label: { Label("Блок", systemImage: "plus") }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    Button { shell.createPage(parent: editor.pageID) } label: { Label("Подстраница", systemImage: "doc.badge.plus") }
-                        .buttonStyle(NotesButtonStyle(kind: .plain))
+                // Действия — всегда одной строкой: на узком окне остаются значки с подсказкой. Теги — строкой ниже.
+                ViewThatFits(in: .horizontal) {
+                    pageActions(editor, page: page, compact: false)
+                    pageActions(editor, page: page, compact: true)
                 }
                 let tags = shell.tagsOf(page: editor.pageID)
                 if !tags.isEmpty {
@@ -246,5 +255,38 @@ struct WrappingRow: Layout {
             }
             y += height + lineSpacing
         }
+    }
+}
+
+/// Подпись кнопки действия страницы: значок и название; в узком окне — только значок, название в подсказке.
+struct PageActionLabel: View {
+    let title: String
+    let symbol: String
+    var compact = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol).font(.system(size: 12))
+            if !compact { Text(title) }
+        }
+        .help(compact ? title : "")
+        .accessibilityLabel(Text(title))
+    }
+}
+
+/// Кнопка действия страницы: тише и плотнее обычной, чтобы ряд помещался в одну строку.
+struct PageActionStyle: ButtonStyle {
+    @State private var hover = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13))
+            .fixedSize()
+            .foregroundColor(Tokens.muted)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 6).fill(hover || configuration.isPressed ? Tokens.soft : .clear))
+            .contentShape(Rectangle())
+            .onHover { hover = $0 }
     }
 }
