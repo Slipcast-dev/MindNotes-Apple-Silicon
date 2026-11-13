@@ -354,10 +354,10 @@ struct NotesSidebar: View {
 
                     // Всё создание — в одном меню: навигация сверху, действие снизу.
                     SidebarMenuRow(title: L("Создать"), symbol: "plus", active: shell.section == .files) {
-                        Button { shell.createPage() } label: { Label(L("Страница"), systemImage: "doc") }
+                        Button { shell.addSection() } label: { Label(L("Раздел…"), systemImage: "plus.rectangle.on.folder") }
                         Button { shell.createFolder() } label: { Label(L("Папка"), systemImage: "folder.badge.plus") }
                         Button { shell.createDatabase() } label: { Label(L("База данных"), systemImage: "tablecells.badge.ellipsis") }
-                        Button { shell.addSection() } label: { Label(L("Раздел…"), systemImage: "plus.rectangle.on.folder") }
+                        Button { shell.createPage() } label: { Label(L("Страница"), systemImage: "doc") }
                         Divider()
                         Button { shell.goFiles() } label: { Label(L("Импортировать…"), systemImage: "square.and.arrow.down") }
                     }
