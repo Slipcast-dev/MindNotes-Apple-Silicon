@@ -1736,3 +1736,20 @@
 "Приоритет" = "Priority";
 "Средний" = "Medium";
 "Уведомление придёт в это время" = "You'll get an alert at this time";
+
+/* Синхронизация с Календарём и Напоминаниями */
+"Все элементы удалятся на всех устройствах. Действие нельзя отменить." = "All items will be deleted on all devices. This can't be undone.";
+"Голубой" = "Teal";
+"Графит" = "Graphite";
+"Двойной щелчок — переименовать, правый щелчок — цвет и удаление" = "Double-click to rename, right-click for color and delete";
+"На Mac" = "On My Mac";
+"Напоминания · %@" = "Reminders · %@";
+"Не удалось изменить календарь" = "Couldn't change the calendar";
+"Новый календарь" = "New calendar";
+"Новый список" = "New list";
+"Подписки" = "Subscriptions";
+"Показан" = "Shown";
+"Показать только этот" = "Show only this";
+"Скрыт" = "Hidden";
+"Удалить «%@»?" = "Delete “%@”?";
+"Это календарь синхронизации: все его элементы удалятся на всех устройствах, а при следующей синхронизации он будет создан заново." = "This is the sync calendar: all its items will be deleted on all devices, and it will be recreated on the next sync.";

@@ -40,6 +40,24 @@ final class FakeGateway: CalendarGateway {
 
     func containers(_ kind: SyncKind) -> [CalendarInfo] { containersByKind[kind] ?? [] }
 
+    func updateContainer(_ id: String, title: String?, color: UInt32?) throws {
+        for k in SyncKind.allCases {
+            guard let i = containersByKind[k]!.firstIndex(where: { $0.id == id }) else { continue }
+            if let title { containersByKind[k]![i].title = title }
+            if let color { containersByKind[k]![i].color = color }
+            return
+        }
+        throw SyncError.notFound
+    }
+
+    func createContainer(_ kind: SyncKind, title: String, color: UInt32, sourceID: String) throws -> String {
+        counter += 1
+        let c = CalendarInfo(id: "\(kind.rawValue)-cal-\(counter)", title: title, source: "iCloud", color: color, isEditable: true,
+                             canEditCalendar: true)
+        containersByKind[kind]!.append(c)
+        return c.id
+    }
+
     func fetch(_ kind: SyncKind, container: String, window: DateInterval?) async throws -> [RemoteItem] {
         items.values.filter { $0.kind == kind && itemContainer[$0.externalID] == container }
             .filter { r in

@@ -298,65 +298,190 @@ struct CalendarSidebar: View {
     @State private var shown = Date()
     @State private var calendars: [CalendarInfo] = []
     @State private var lists: [CalendarInfo] = []
+    /// Календарь, который сейчас переименовывается прямо в списке (как в Календаре).
+    @State private var renaming: String?
+    @State private var newName = ""
+    @State private var deleting: CalendarInfo?
+    @State private var error: String?
+    @FocusState private var nameFocused: Bool
+
+    /// Цвета Календаря macOS.
+    static let palette: [(String, UInt32)] = [
+        (L("Красный"), 0xFF3B30), (L("Оранжевый"), 0xFF9500), (L("Жёлтый"), 0xFFCC00), (L("Зелёный"), 0x34C759),
+        (L("Голубой"), 0x5AC8FA), (L("Синий"), 0x007AFF), (L("Фиолетовый"), 0xAF52DE), (L("Розовый"), 0xFF2D55),
+        (L("Коричневый"), 0xA2845E), (L("Графит"), 0x8E8E93),
+    ]
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 MiniMonth(date: $date, shown: $shown)
-                ForEach(groups, id: \.0) { source, cals in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(source.isEmpty ? L("Другие") : source)
-                            .font(.system(size: 11, weight: .semibold)).foregroundStyle(CalStyle.muted)
-                        ForEach(cals) { c in row(c) }
-                    }
+                ForEach(groups(calendars), id: \.0) { source, cals in
+                    section(source.isEmpty ? L("Другие") : source, cals, kind: .event)
                 }
-                if !lists.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L("Напоминания")).font(.system(size: 11, weight: .semibold)).foregroundStyle(CalStyle.muted)
-                        ForEach(lists) { c in row(c) }
-                    }
+                ForEach(groups(lists), id: \.0) { source, cals in
+                    section(lists.count == cals.count ? L("Напоминания") : L("Напоминания · %@", source), cals, kind: .reminder)
                 }
             }
             .padding(14)
         }
         .background(CalStyle.side)
-        .onAppear {
-            calendars = engine.gateway.containers(.event)
-            lists = engine.gateway.containers(.reminder)
-            shown = date
-        }
+        .onAppear { reload(); shown = date }
         .onChange(of: date) { _, d in shown = d }
+        .onChange(of: engine.settings.lastSyncAt) { _, _ in reload() }
+        .confirmationDialog(L("Удалить «%@»?", deleting?.title ?? ""), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                            presenting: deleting) { c in
+            Button(L("Удалить"), role: .destructive) { remove(c) }
+            Button(L("Отмена"), role: .cancel) { deleting = nil }
+        } message: { c in
+            Text(c.id == engine.settings.containerID(.event) || c.id == engine.settings.containerID(.reminder)
+                 ? L("Это календарь синхронизации: все его элементы удалятся на всех устройствах, а при следующей синхронизации он будет создан заново.")
+                 : L("Все элементы удалятся на всех устройствах. Действие нельзя отменить."))
+        }
+        .alert(L("Не удалось изменить календарь"), isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+            Button("OK") { error = nil }
+        } message: { Text(error ?? "") }
     }
 
-    private var groups: [(String, [CalendarInfo])] {
-        Dictionary(grouping: calendars, by: \.source).sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+    private func reload() {
+        calendars = engine.gateway.containers(.event)
+        lists = engine.gateway.containers(.reminder)
+    }
+
+    private func groups(_ items: [CalendarInfo]) -> [(String, [CalendarInfo])] {
+        Dictionary(grouping: items, by: \.source).sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+    }
+
+    private func section(_ title: String, _ cals: [CalendarInfo], kind: SyncKind) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(CalStyle.muted).lineLimit(1)
+                Spacer()
+                // «+» — новый календарь или список в этом источнике, сразу с полем для названия.
+                if let source = cals.first(where: \.canEditCalendar)?.sourceID {
+                    Button { create(kind, sourceID: source) } label: { Image(systemName: "plus").font(.system(size: 10, weight: .semibold)) }
+                        .buttonStyle(.plain).foregroundStyle(CalStyle.muted)
+                        .help(kind == .event ? L("Новый календарь") : L("Новый список"))
+                }
+            }
+            ForEach(cals) { c in row(c) }
+        }
     }
 
     private func visible(_ id: String) -> Bool { engine.settings.visibleCalendarIDs?.contains(id) ?? true }
 
+    private func setVisible(_ id: String, _ on: Bool) {
+        let all = Set((calendars + lists).map(\.id))
+        var ids = engine.settings.visibleCalendarIDs ?? all
+        if on { ids.insert(id) } else { ids.remove(id) }
+        engine.setVisibleCalendars(ids.isSuperset(of: all) ? nil : ids)
+    }
+
     private func row(_ c: CalendarInfo) -> some View {
-        Button {
-            let all = Set((calendars + lists).map(\.id))
-            var ids = engine.settings.visibleCalendarIDs ?? all
-            if ids.contains(c.id) { ids.remove(c.id) } else { ids.insert(c.id) }
-            engine.setVisibleCalendars(ids.isSuperset(of: all) ? nil : ids)
-        } label: {
-            HStack(spacing: 8) {
+        HStack(spacing: 8) {
+            // Флажок — отдельная кнопка: щелчок по названию его не переключает.
+            Button { setVisible(c.id, !visible(c.id)) } label: {
                 RoundedRectangle(cornerRadius: 3)
                     .fill(visible(c.id) ? Color(rgb: c.color) : .clear)
                     .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color(rgb: c.color), lineWidth: 1.5))
                     .overlay(Image(systemName: "checkmark").font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
                         .opacity(visible(c.id) ? 1 : 0))
                     .frame(width: 13, height: 13)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(c.title))
+            .accessibilityValue(Text(visible(c.id) ? L("Показан") : L("Скрыт")))
+
+            if renaming == c.id {
+                TextField("", text: $newName)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(CalStyle.card))
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(CalStyle.accent))
+                    .focused($nameFocused)
+                    .onSubmit { commitRename(c) }
+                    .onExitCommand { renaming = nil }
+                    .onChange(of: nameFocused) { _, f in if !f && renaming == c.id { commitRename(c) } }
+            } else {
                 Text(c.title).font(.system(size: 13)).foregroundStyle(CalStyle.ink).lineLimit(1)
+                    .onTapGesture(count: 2) { if c.canEditCalendar { startRename(c) } }
                 if !c.isEditable { Image(systemName: "lock").font(.system(size: 9)).foregroundStyle(CalStyle.muted) }
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .help(c.isEditable ? c.title : L("Только для чтения"))
+        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button(L("Показать только этот")) { engine.setVisibleCalendars([c.id]) }
+            Button(L("Показать все")) { engine.setVisibleCalendars(nil) }
+            if c.canEditCalendar {
+                Divider()
+                Button(L("Переименовать…")) { startRename(c) }
+                Menu(L("Цвет")) {
+                    ForEach(Self.palette, id: \.1) { name, rgb in
+                        Button { recolor(c, rgb) } label: {
+                            Label { Text(name) } icon: { Image(nsImage: Self.swatch(rgb)) }
+                        }
+                    }
+                }
+                Divider()
+                Button(L("Удалить…"), role: .destructive) { deleting = c }
+            }
+        }
+        .help(c.canEditCalendar ? L("Двойной щелчок — переименовать, правый щелчок — цвет и удаление")
+              : (c.isEditable ? c.title : L("Только для чтения")))
+    }
+
+    // MARK: Правка календарей
+
+    private func startRename(_ c: CalendarInfo) {
+        newName = c.title
+        renaming = c.id
+        DispatchQueue.main.async { nameFocused = true }
+    }
+
+    private func commitRename(_ c: CalendarInfo) {
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        renaming = nil
+        guard !name.isEmpty, name != c.title else { return }
+        do { try engine.gateway.updateContainer(c.id, title: name, color: nil) } catch { self.error = "\(error)" }
+        reload()
+    }
+
+    private func recolor(_ c: CalendarInfo, _ rgb: UInt32) {
+        do { try engine.gateway.updateContainer(c.id, title: nil, color: rgb) } catch { self.error = "\(error)" }
+        reload()
+        engine.scheduleSync()   // виды календаря перечитают цвета
+    }
+
+    private func create(_ kind: SyncKind, sourceID: String) {
+        do {
+            let title = kind == .event ? L("Новый календарь") : L("Новый список")
+            let id = try engine.gateway.createContainer(kind, title: title, color: Self.palette[5].1, sourceID: sourceID)
+            reload()
+            if let c = (calendars + lists).first(where: { $0.id == id }) { startRename(c) }
+        } catch { self.error = "\(error)" }
+    }
+
+    private func remove(_ c: CalendarInfo) {
+        deleting = nil
+        do { try engine.gateway.removeContainer(c.id) } catch { self.error = "\(error)" }
+        reload()
+        engine.scheduleSync()
+    }
+
+    /// Кружок цвета для меню (в меню macOS цвет SwiftUI-иконки не сохраняется, поэтому картинка).
+    static func swatch(_ rgb: UInt32) -> NSImage {
+        let img = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { r in
+            NSColor(srgbRed: CGFloat((rgb >> 16) & 0xFF) / 255, green: CGFloat((rgb >> 8) & 0xFF) / 255,
+                    blue: CGFloat(rgb & 0xFF) / 255, alpha: 1).setFill()
+            NSBezierPath(ovalIn: r.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
+        img.isTemplate = false
+        return img
     }
 }
 

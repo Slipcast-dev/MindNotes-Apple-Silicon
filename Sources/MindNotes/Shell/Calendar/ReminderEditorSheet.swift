@@ -89,6 +89,8 @@ struct ReminderEditorSheet: View {
 }
 
 /// Листание календаря колесом мыши или жестом трекпада: месяц — по вертикали, неделя и день — по горизонтали.
+/// Один жест — ровно один шаг: инерция трекпада («докатка») игнорируется, у колеса мыши шаги идут не чаще
+/// раза в 0,35 с, поэтому быстрая прокрутка не проскакивает несколько месяцев.
 /// Работает, только пока курсор над календарём; вертикальная прокрутка часов в неделе не перехватывается.
 struct ScrollPager: ViewModifier {
     let vertical: Bool
@@ -99,7 +101,11 @@ struct ScrollPager: ViewModifier {
         var hovering = false
         var monitor: Any?
         var accumulated: CGFloat = 0
-        var last = Date.distantPast
+        /// Жест трекпада уже дал свой шаг: до конца жеста больше не листаем.
+        var fired = false
+        var lastWheel = Date.distantPast
+        /// Текущий жест — горизонтальный (в неделе и дне): его докатку тоже глотаем.
+        var paging = false
     }
 
     func body(content: Content) -> some View {
@@ -114,15 +120,31 @@ struct ScrollPager: ViewModifier {
                     let dy = e.scrollingDeltaY, dx = e.scrollingDeltaX
                     // В неделе вертикальная прокрутка — это часы; листаем только горизонтальным жестом.
                     let along = vertical ? (abs(dy) >= abs(dx) ? dy : dx) : (abs(dx) > abs(dy) ? dx : 0)
+                    let isMomentum = !e.momentumPhase.isEmpty
+                    if e.phase == .began || e.phase == .mayBegin { box.paging = false }
+                    // Докатка после жеста листания глотается, чтобы календарь не листался дальше;
+                    // докатка прокрутки часов в неделе проходит как обычно.
+                    if isMomentum { return vertical || box.paging ? nil : e }
                     if !vertical && along == 0 { return e }
-                    if e.phase == .began { box.accumulated = 0 }
-                    // Колесо мыши даёт строки, трекпад — точки.
-                    box.accumulated += e.hasPreciseScrollingDeltas ? along : along * 12
-                    let threshold: CGFloat = e.hasPreciseScrollingDeltas ? 70 : 10
-                    if abs(box.accumulated) >= threshold, Date().timeIntervalSince(box.last) > 0.35 {
-                        step(box.accumulated > 0 ? -1 : 1)
-                        box.accumulated = 0
-                        box.last = Date()
+                    box.paging = true
+
+                    if e.hasPreciseScrollingDeltas {
+                        // Трекпад: начало жеста сбрасывает счётчик, конец — разрешает следующий шаг.
+                        if e.phase == .began || e.phase == .mayBegin { box.accumulated = 0; box.fired = false }
+                        if !box.fired {
+                            box.accumulated += along
+                            if abs(box.accumulated) >= 40 {
+                                step(box.accumulated > 0 ? -1 : 1)
+                                box.fired = true
+                            }
+                        }
+                        if e.phase == .ended || e.phase == .cancelled { box.accumulated = 0; box.fired = false }
+                    } else {
+                        // Колесо мыши: одно деление — один шаг.
+                        if along != 0, Date().timeIntervalSince(box.lastWheel) > 0.35 {
+                            step(along > 0 ? -1 : 1)
+                            box.lastWheel = Date()
+                        }
                     }
                     return nil
                 }

@@ -15,7 +15,12 @@ struct CalendarInfo: Identifiable, Equatable, Hashable, Sendable {
     var source: String
     /// 0xRRGGBB.
     var color: UInt32
+    /// Можно добавлять и менять элементы.
     var isEditable: Bool
+    /// Можно переименовать, перекрасить и удалить сам календарь (не подписка и не «Дни рождения»).
+    var canEditCalendar = false
+    /// Тип источника: iCloud, Exchange, «На Mac»… — для группировки и создания новых календарей.
+    var sourceID: String = ""
 }
 
 /// Элемент для видов календаря: экземпляр события любого видимого календаря или задача со сроком.
@@ -82,6 +87,11 @@ protocol CalendarGateway: AnyObject {
     /// Возвращает id календаря приложения, создавая его при необходимости.
     func ensureContainer(_ kind: SyncKind, preferredID: String?, title: String) throws -> String
     func removeContainer(_ id: String) throws
+    /// Переименовать или перекрасить календарь либо список.
+    func updateContainer(_ id: String, title: String?, color: UInt32?) throws
+    /// Новый календарь или список в источнике `sourceID` (пусто — источник по умолчанию).
+    @discardableResult
+    func createContainer(_ kind: SyncKind, title: String, color: UInt32, sourceID: String) throws -> String
     func containers(_ kind: SyncKind) -> [CalendarInfo]
     func fetch(_ kind: SyncKind, container: String, window: DateInterval?) async throws -> [RemoteItem]
     /// Элементы по идентификаторам EventKit в любом календаре; ненайденные пропускаются.

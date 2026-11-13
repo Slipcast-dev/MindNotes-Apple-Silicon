@@ -78,6 +78,42 @@ final class EventKitGateway: CalendarGateway {
             ?? store.sources.first { $0.sourceType == .local }
     }
 
+    /// «Other» и «On My Mac» EventKit отдаёт по-английски — подписываем по-русски.
+    private static func sourceTitle(_ s: EKSource?) -> String {
+        guard let s else { return "" }
+        switch s.sourceType {
+        case .local: return L("На Mac")
+        case .subscribed: return L("Подписки")
+        case .birthdays: return L("Другие")
+        default: return s.title == "Other" ? L("Другие") : s.title
+        }
+    }
+
+    func updateContainer(_ id: String, title: String?, color: UInt32?) throws {
+        guard let cal = store.calendar(withIdentifier: id) else { throw SyncError.notFound }
+        if let title { cal.title = title }
+        if let color { cal.cgColor = Self.cgColor(color) }
+        do { try store.saveCalendar(cal, commit: true) } catch { throw SyncError.eventKit(error.localizedDescription) }
+    }
+
+    @discardableResult
+    func createContainer(_ kind: SyncKind, title: String, color: UInt32, sourceID: String) throws -> String {
+        guard status(kind) == .granted else { throw SyncError.accessDenied(kind) }
+        let cal = EKCalendar(for: entity(kind), eventStore: store)
+        cal.title = title
+        cal.cgColor = Self.cgColor(color)
+        guard let source = store.sources.first(where: { $0.sourceIdentifier == sourceID }) ?? preferredSource(kind) else {
+            throw SyncError.noSource
+        }
+        cal.source = source
+        do { try store.saveCalendar(cal, commit: true) } catch { throw SyncError.eventKit(error.localizedDescription) }
+        return cal.calendarIdentifier
+    }
+
+    private static func cgColor(_ v: UInt32) -> CGColor {
+        CGColor(srgbRed: CGFloat((v >> 16) & 0xFF) / 255, green: CGFloat((v >> 8) & 0xFF) / 255, blue: CGFloat(v & 0xFF) / 255, alpha: 1)
+    }
+
     func removeContainer(_ id: String) throws {
         guard let cal = store.calendar(withIdentifier: id) else { return }
         do { try store.removeCalendar(cal, commit: true) } catch { throw SyncError.eventKit(error.localizedDescription) }
@@ -86,8 +122,10 @@ final class EventKitGateway: CalendarGateway {
     func containers(_ kind: SyncKind) -> [CalendarInfo] {
         guard status(kind) == .granted else { return [] }
         return store.calendars(for: entity(kind)).map {
-            CalendarInfo(id: $0.calendarIdentifier, title: $0.title, source: $0.source?.title ?? "",
-                         color: Self.rgb($0.cgColor), isEditable: $0.allowsContentModifications)
+            CalendarInfo(id: $0.calendarIdentifier, title: $0.title, source: Self.sourceTitle($0.source),
+                         color: Self.rgb($0.cgColor), isEditable: $0.allowsContentModifications,
+                         canEditCalendar: !$0.isImmutable && !$0.isSubscribed && $0.type != .birthday,
+                         sourceID: $0.source?.sourceIdentifier ?? "")
         }.sorted { ($0.source, $0.title) < ($1.source, $1.title) }
     }
 
