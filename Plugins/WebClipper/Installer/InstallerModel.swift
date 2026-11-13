@@ -2,8 +2,8 @@ import AppKit
 import Foundation
 
 /// Установка Web Clipper по шагам: плагин в MindNotes, затем каждый найденный браузер.
-/// Подключение браузера к MindNotes настраивается само: после установки плагина MindNotes 10 минут
-/// принимает расширение без вопроса (ADR-0019), а расширение раз в минуту пробует подключиться.
+/// Подключение браузера к MindNotes: после установки плагина MindNotes 10 минут держит окно автоподключения,
+/// расширение само просит ключ, а MindNotes один раз спрашивает пользователя «Подключить?» (ADR-0019).
 @MainActor
 final class InstallerModel: ObservableObject {
     @Published var browsers: [Browser] = Browser.installed()
@@ -95,7 +95,7 @@ final class InstallerModel: ObservableObject {
     // MARK: Шаги
 
     /// MindNotes показывает разрешения плагина и ставит его; повторное открытие той же версии только
-    /// открывает окно автоподключения браузеров — без вопросов.
+    /// ничего не меняет (окно подключения открывает только установка с согласия или кнопка в настройках).
     func addToMindNotes(activate: Bool = true) {
         guard let app = mindNotesURL, canInstall else { return }
         let config = NSWorkspace.OpenConfiguration()

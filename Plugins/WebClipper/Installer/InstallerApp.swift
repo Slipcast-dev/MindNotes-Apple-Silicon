@@ -78,7 +78,7 @@ struct InstallerView: View {
             }
 
             HStack {
-                Text(tr("Подключение к MindNotes настраивается само.", "The connection to MindNotes sets itself up."))
+                Text(tr("Браузер подключится сам — MindNotes один раз спросит разрешение.", "The browser connects by itself — MindNotes asks for permission once."))
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 if model.allDone {
