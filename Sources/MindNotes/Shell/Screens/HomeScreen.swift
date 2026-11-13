@@ -72,46 +72,78 @@ struct HomeScreen: View {
 struct QuickCard: View {
     let page: Page
     let kids: Int
-    /// Обложка страницы: полоса сверху карточки, как в Notion. Нет обложки — карточка без полосы.
+    /// Обложка страницы сверху карточки; без обложки — мягкий фон темы той же высоты, чтобы карточки стояли ровно.
     var cover: NSImage? = nil
     let action: () -> Void
     @State private var hover = false
 
+    private static let coverHeight: CGFloat = 96
+    private static let iconSize: CGFloat = 40
+
     var body: some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 0) {
-                if let cover {
-                    Image(nsImage: cover)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 64)
-                        .clipped()
+                header
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(page.title.isEmpty ? L("Без названия") : page.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Tokens.ink)
+                        .lineLimit(1)
+                    Text(kids == 0 ? L("Страница") : String(format: L("Подстраниц: %d"), kids))
+                        .font(.system(size: 12))
+                        .foregroundColor(Tokens.muted)
                 }
-            VStack(alignment: .leading, spacing: 5) {
-                Image(systemName: "doc.text")
-                    .font(.system(size: 11))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Tokens.soft))
-                    .padding(.bottom, 2)
-                Text(page.title.isEmpty ? L("Без названия") : page.title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .lineLimit(1)
-                Text(kids == 0 ? L("Страница") : String(format: L("Подстраниц: %d"), kids))
-                    .font(.system(size: 12))
-                    .foregroundColor(Tokens.muted)
-            }
-            .padding(16)
+                .padding(.horizontal, 16)
+                .padding(.top, Self.iconSize / 2 + 10) // Место под значок, наполовину заходящий на обложку.
+                .padding(.bottom, 16)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(hover ? Tokens.soft : Tokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Tokens.line))
-            .contentShape(Rectangle())
+            .overlay(alignment: .topLeading) { icon.padding(.leading, 16).padding(.top, Self.coverHeight - Self.iconSize / 2) }
+            .background(Tokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Tokens.line.opacity(hover ? 0.4 : 1)))
+            .shadow(color: .black.opacity(hover ? 0.12 : 0.04), radius: hover ? 14 : 4, y: hover ? 6 : 1)
+            .scaleEffect(hover ? 1.012 : 1)
+            .animation(.easeOut(duration: 0.18), value: hover)
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+        .accessibilityLabel(Text(page.title.isEmpty ? L("Без названия") : page.title))
+    }
+
+    @ViewBuilder private var header: some View {
+        ZStack {
+            if let cover {
+                Image(nsImage: cover)
+                    .resizable()
+                    .scaledToFill()
+                    .scaleEffect(hover ? 1.04 : 1)
+                    .animation(.easeOut(duration: 0.3), value: hover)
+            } else {
+                LinearGradient(colors: [Tokens.soft, Tokens.soft.opacity(0.45)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: Self.coverHeight)
+        .clipped()
+    }
+
+    /// Значок страницы на границе обложки: emoji страницы или символ документа.
+    private var icon: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Tokens.card)
+                .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+            if let emoji = page.emoji {
+                Text(emoji).font(.system(size: 20))
+            } else {
+                Image(systemName: page.isFolder ? "folder" : "doc.text")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(Tokens.muted)
+            }
+        }
+        .frame(width: Self.iconSize, height: Self.iconSize)
     }
 }
 
