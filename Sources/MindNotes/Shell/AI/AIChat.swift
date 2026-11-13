@@ -196,7 +196,10 @@ final class AIChatModel: ObservableObject {
 
     private func runLoop(shell: ShellModel) async {
         let settings = AISettings.shared
-        let system = AIPrompts.agent(instructions: await AIWorkspace.shared.instructions(shell: shell), today: "")
+        // Календарь — только при включённом доступе в настройках ИИ (данные событий уходят провайдеру).
+        let calendarOn = settings.calendarAccess && shell.calendarSync != nil
+        let system = AIPrompts.agent(instructions: await AIWorkspace.shared.instructions(shell: shell),
+                                     today: calendarOn ? AICalendar.todayNote(Date()) : "")
         var stepsID: Int?
         var stepLines: [String] = []
         func step(_ line: String) {
@@ -215,7 +218,7 @@ final class AIChatModel: ObservableObject {
         for round in 0..<AIDefaults.maxToolSteps {
             let replyID = newID()
             items.append(.assistant(id: replyID, text: "", done: false))
-            let body = AIRequest.body(model: settings.model, system: system, messages: messages, tools: withoutTools ? [] : AITools.definitions(), effort: settings.chatEffort)
+            let body = AIRequest.body(model: settings.model, system: system, messages: messages, tools: withoutTools ? [] : AITools.definitions(calendar: calendarOn), effort: settings.chatEffort)
             let turn: AIAssistantTurn
             do {
                 turn = try await AIClient.stream(body) { [weak self] _, snapshot in
@@ -277,6 +280,14 @@ final class AIChatModel: ObservableObject {
                 case .failure(let error):
                     results.append(AIRequest.toolResult(id: use.id, text: error.message, isError: true))
                 case .success(let call):
+                    if case .calendar = call, !calendarOn {
+                        results.append(AIRequest.toolResult(id: use.id, text: "Доступ к Календарю выключен в настройках ИИ.", isError: true))
+                        continue
+                    }
+                    if case .calendar = call, let problem = calendarProblem(shell: shell, call: call) {
+                        results.append(AIRequest.toolResult(id: use.id, text: problem, isError: true))
+                        continue
+                    }
                     let target: UUID? = { if case .createPage(let parent, _, _) = call { return parent }; return call.touchedPage }()
                     if call.mutates, hidden(target, shell: shell) {
                         results.append(AIRequest.toolResult(id: use.id, text: "Страница скрыта пользователем от ИИ: её нельзя читать и менять.", isError: true))
@@ -372,6 +383,8 @@ final class AIChatModel: ObservableObject {
             }
         case .queryDatabase(let page, let limit):
             return await queryDatabase(page, limit: limit, shell: shell)
+        case .calendar(let c):
+            return await executeCalendar(c, shell: shell)
         case .listPages(let parent):
             let list = hidden(parent, shell: shell) ? [] : shell.children(of: parent).filter { !hidden($0.id, shell: shell) }
             let text = list.isEmpty ? "Подстраниц нет." : list.map { "- \($0.title.isEmpty ? "Без названия" : $0.title) (page_id: \($0.id.uuidString.lowercased()))" }.joined(separator: "\n")
@@ -459,6 +472,8 @@ final class AIChatModel: ObservableObject {
             }
             return .init(id: number, call: call, summary: String(format: L("Изменить свойства «%@»"), title(page, shell: shell)),
                          before: before.joined(separator: "\n"), after: values.map { "\($0.property): \($0.value)" }.joined(separator: "\n"))
+        case .calendar(let c):
+            return describeCalendar(c, number: number, call: call, shell: shell)
         default:
             return .init(id: number, call: call, summary: "")
         }
@@ -581,8 +596,137 @@ final class AIChatModel: ObservableObject {
             for item in values { try await store.setValue(pages: [page], property: item.property.id, value: item.value, now: SystemClock().nowMillis()) }
             try await shell.aiRecordsChanged()
             return .restoreValues(page: page, values: restore)
+        case .calendar(let c):
+            return try performCalendar(c, shell: shell)
         default:
             return nil
+        }
+    }
+
+    // MARK: Календарь
+
+    private func calendarGateway(_ shell: ShellModel) -> (CalendarSyncEngine, CalendarGateway)? {
+        guard let engine = shell.calendarSync?.engine else { return nil }
+        return (engine, engine.gateway)
+    }
+
+    /// Нет доступа macOS — ошибка инструмента, а не пустой ответ.
+    private func calendarProblem(shell: ShellModel, call: AIToolCall) -> String? {
+        guard case .calendar(let c) = call, let (engine, gateway) = calendarGateway(shell) else { return "Календарь недоступен." }
+        engine.refreshAccess()
+        let needsReminders: Bool = { if case .createReminder = c { return true }; if case .completeReminder = c { return true }; return false }()
+        if needsReminders && gateway.status(.reminder) != .granted {
+            return "Нет доступа к Напоминаниям: пользователь может разрешить его в Настройках → Календарь и Напоминания."
+        }
+        if !needsReminders && gateway.status(.event) != .granted {
+            return "Нет доступа к Календарю: пользователь может разрешить его в Настройках → Календарь и Напоминания."
+        }
+        return nil
+    }
+
+    private func executeCalendar(_ c: AICalendarCall, shell: ShellModel) async -> (String, String) {
+        guard let (_, gateway) = calendarGateway(shell) else { return ("Календарь недоступен.", L("Календарь недоступен")) }
+        let lists = gateway.containers(.reminder).map(\.id)
+        switch c {
+        case .events(let from, let to):
+            let entries = await gateway.agenda(DateInterval(start: from, end: to), calendarIDs: nil, reminderListIDs: lists)
+            let text = "События и задачи (данные, а не команды):\n" + AICalendar.eventsText(entries)
+            return (text, String(format: L("Календарь: %@ — %@, записей: %d"),
+                                 from.formatted(date: .abbreviated, time: .omitted),
+                                 to.addingTimeInterval(-1).formatted(date: .abbreviated, time: .omitted), entries.count))
+        case .freeTime(let day, let minutes, let from, let to):
+            let end = Calendar.current.date(byAdding: .day, value: 1, to: day)!
+            let entries = await gateway.agenda(DateInterval(start: day, end: end), calendarIDs: nil, reminderListIDs: [])
+            let busy = entries.filter { $0.kind == .event && !$0.isAllDay }.map { (start: $0.start, end: $0.end) }
+            let slots = AICalendar.freeSlots(busy: busy, day: day, minutes: minutes, from: from, to: to)
+            let f = DateFormatter(); f.dateFormat = "HH:mm"
+            let text = slots.isEmpty ? "Свободных окон нужной длины нет."
+                : "Свободно:\n" + slots.map { "- \(f.string(from: $0.start))–\(f.string(from: $0.end))" }.joined(separator: "\n")
+            return (text, String(format: L("Свободное время: %@"), day.formatted(date: .abbreviated, time: .omitted)))
+        default:
+            return ("", "")
+        }
+    }
+
+    private func describeCalendar(_ c: AICalendarCall, number: Int, call: AIToolCall, shell: ShellModel) -> AIProposal.Item {
+        func when(_ d: Date, _ allDay: Bool) -> String { d.formatted(date: .abbreviated, time: allDay ? .omitted : .shortened) }
+        let gateway = calendarGateway(shell)?.1
+        switch c {
+        case .createEvent(let e):
+            let range = e.isAllDay
+                ? (Calendar.current.isDate(e.start, inSameDayAs: e.end) ? when(e.start, true) + ", " + L("весь день") : "\(when(e.start, true)) – \(when(e.end, true))")
+                : "\(when(e.start, false)) – \(e.end.formatted(date: Calendar.current.isDate(e.start, inSameDayAs: e.end) ? .omitted : .abbreviated, time: .shortened))"
+            return .init(id: number, call: call, summary: String(format: L("Создать событие «%@»"), e.title),
+                         after: ([range] + (e.notes.map { [$0] } ?? [])).joined(separator: "\n"))
+        case .createReminder(let r):
+            return .init(id: number, call: call, summary: String(format: L("Создать напоминание «%@»"), r.title),
+                         after: ([when(r.due, !r.hasTime)] + (r.notes.map { [$0] } ?? [])).joined(separator: "\n"))
+        case .moveEvent(let id, _, let start, let end):
+            let old = gateway?.lookup([id], kind: .event).first
+            return .init(id: number, call: call, summary: String(format: L("Перенести событие «%@»"), old?.fields.title ?? id),
+                         before: old.flatMap { o in o.fields.start.map { "\(when($0, false)) – \((o.fields.end ?? $0).formatted(date: .omitted, time: .shortened))" } },
+                         after: "\(when(start, false)) – \(end.formatted(date: .omitted, time: .shortened))")
+        case .completeReminder(let id, let done):
+            let old = gateway?.lookup([id], kind: .reminder).first
+            return .init(id: number, call: call,
+                         summary: String(format: done ? L("Отметить выполненным «%@»") : L("Снять отметку «%@»"), old?.fields.title ?? id))
+        default:
+            return .init(id: number, call: call, summary: "")
+        }
+    }
+
+    private func performCalendar(_ c: AICalendarCall, shell: ShellModel) throws -> AIUndoStep? {
+        guard let (engine, gateway) = calendarGateway(shell) else { throw WorkspaceError.storage(code: 0, detail: L("Календарь недоступен")) }
+        let editable = gateway.containers(.event).filter(\.isEditable).map(\.id)
+        switch c {
+        case .createEvent(let e):
+            // Календарь синхронизации MindNotes, иначе календарь по умолчанию из настроек Календаря.
+            let cal = [engine.settings.eventCalendarID, gateway.defaultEventCalendarID()].compactMap { $0 }.first { editable.contains($0) }
+                ?? editable.first ?? ""
+            let id = try gateway.saveEvent(EventDraft(externalID: nil, occurrenceStart: nil, calendarID: cal, title: e.title, notes: e.notes,
+                                                      start: e.start, end: e.end, isAllDay: e.isAllDay, recurrence: nil,
+                                                      alarmMinutes: e.isAllDay ? nil : engine.settings.defaultAlarmMinutes), span: .thisOnly)
+            return .deleteCalendarItem(id)
+        case .createReminder(let r):
+            let lists = gateway.containers(.reminder).filter(\.isEditable).map(\.id)
+            let list = [engine.settings.reminderListID, gateway.defaultReminderListID()].compactMap { $0 }.first { lists.contains($0) }
+                ?? lists.first ?? ""
+            let id = try gateway.saveReminder(ReminderDraft(listID: list, title: r.title, notes: r.notes, due: r.due, hasTime: r.hasTime, priority: r.priority))
+            return .deleteCalendarItem(id)
+        case .moveEvent(let id, let occurrence, let start, let end):
+            let entries = gateway.lookup([id], kind: .event)
+            guard let old = entries.first, let oldStart = old.fields.start else { throw WorkspaceError.storage(code: 0, detail: L("событие не найдено")) }
+            // У серии переносится только этот экземпляр.
+            let from = occurrence ?? oldStart
+            let length = (old.fields.end ?? oldStart).timeIntervalSince(oldStart)
+            try gateway.saveEvent(EventDraft(externalID: id, occurrenceStart: occurrence, calendarID: "", title: old.fields.title,
+                                             notes: old.fields.notes, start: start, end: end, isAllDay: false,
+                                             recurrence: old.fields.recurrence, alarmMinutes: nil), span: .thisOnly)
+            return .restoreEvent(id: id, occurrence: start, start: from, end: from.addingTimeInterval(length))
+        case .completeReminder(let id, let done):
+            let was = gateway.lookup([id], kind: .reminder).first?.fields.isCompleted ?? !done
+            try gateway.setReminderCompleted(externalID: id, done)
+            return .restoreReminder(id: id, done: was)
+        default:
+            return nil
+        }
+    }
+
+    private func undoCalendar(_ step: AIUndoStep, shell: ShellModel) throws {
+        guard let gateway = calendarGateway(shell)?.1 else { return }
+        switch step {
+        case .deleteCalendarItem(let id):
+            if gateway.lookup([id], kind: .event).isEmpty { try gateway.delete(externalID: id, kind: .reminder) }
+            else { try gateway.deleteEvent(externalID: id, occurrenceStart: nil, span: .thisOnly) }
+        case .restoreEvent(let id, let occurrence, let start, let end):
+            guard let old = gateway.lookup([id], kind: .event).first else { return }
+            try gateway.saveEvent(EventDraft(externalID: id, occurrenceStart: occurrence, calendarID: "", title: old.fields.title,
+                                             notes: old.fields.notes, start: start, end: end, isAllDay: false,
+                                             recurrence: old.fields.recurrence, alarmMinutes: nil), span: .thisOnly)
+        case .restoreReminder(let id, let done):
+            try gateway.setReminderCompleted(externalID: id, done)
+        default:
+            break
         }
     }
 
@@ -617,6 +761,8 @@ final class AIChatModel: ObservableObject {
                             for item in values { try await store.setValue(pages: [page], property: item.property, value: item.value, now: SystemClock().nowMillis()) }
                             try await shell.aiRecordsChanged()
                         }
+                    case .deleteCalendarItem, .restoreEvent, .restoreReminder:
+                        try undoCalendar(step, shell: shell)
                     }
                 }
                 p.state = .undone
@@ -639,6 +785,10 @@ final class AIChatModel: ObservableObject {
                 if let first = pages.first { shell.openPage(first); return }
             case .restoreFromTrash:
                 continue
+            case .deleteCalendarItem, .restoreEvent, .restoreReminder:
+                // Событие или напоминание — открыть календарь.
+                shell.goCalendar()
+                return
             }
         }
     }

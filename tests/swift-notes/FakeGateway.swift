@@ -95,6 +95,7 @@ final class FakeGateway: CalendarGateway {
         userCreate(.reminder, container: draft.listID, title: draft.title, start: draft.due)
     }
     func defaultReminderListID() -> String? { containersByKind[.reminder]?.first?.id }
+    func defaultEventCalendarID() -> String? { containersByKind[.event]?.first?.id }
 
     /// Календарь «потерял» url элемента.
     func wipeURL(_ ext: String) { items[ext]?.appID = nil }

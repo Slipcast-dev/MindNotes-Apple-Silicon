@@ -397,6 +397,10 @@ final class EventKitGateway: CalendarGateway {
         return r.calendarItemIdentifier
     }
 
+    func defaultEventCalendarID() -> String? {
+        status(.event) == .granted ? store.defaultCalendarForNewEvents?.calendarIdentifier : nil
+    }
+
     func defaultReminderListID() -> String? {
         status(.reminder) == .granted ? store.defaultCalendarForNewReminders()?.calendarIdentifier : nil
     }

@@ -2368,6 +2368,8 @@ final class ShellModel: ObservableObject {
             try await session.refreshPages()
             self.pages = session.pages
             self.databaseModel?.reload()
+            // Правки записей от ИИ тоже уходят в Календарь.
+            self.calendarSync?.recordsChanged()
         }
     }
 

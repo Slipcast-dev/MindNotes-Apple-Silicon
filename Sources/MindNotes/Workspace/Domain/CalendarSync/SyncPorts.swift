@@ -110,6 +110,8 @@ protocol CalendarGateway: AnyObject {
     func saveReminder(_ draft: ReminderDraft) throws -> String
     /// Список напоминаний по умолчанию (из настроек Напоминаний).
     func defaultReminderListID() -> String?
+    /// Календарь для новых событий по умолчанию (из настроек Календаря).
+    func defaultEventCalendarID() -> String?
     /// Вызывается при любом изменении в базе Календаря (в том числе после собственных записей).
     var onChange: (() -> Void)? { get set }
 }

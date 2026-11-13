@@ -101,6 +101,13 @@ struct AISettingsSection: View {
                     row(L("Спрашивать перед созданием страниц"), L("Изменение и удаление существующего ИИ всегда сначала предлагает")) {
                         Toggle("", isOn: $settings.confirmCreation).labelsHidden().toggleStyle(.switch)
                     }
+                    divider
+                    row(L("Доступ к Календарю и Напоминаниям"),
+                        settings.provider.isLocal
+                            ? L("ИИ видит события и задачи и предлагает новые. Модель локальная: данные остаются на этом Mac")
+                            : L("ИИ видит названия и время событий и задач и предлагает новые. Эти данные уходят выбранному провайдеру ИИ")) {
+                        Toggle("", isOn: $settings.calendarAccess).labelsHidden().toggleStyle(.switch)
+                    }
                     if shell.isOpen {
                         divider
                         row(L("Инструкции для ИИ"), L("Страница со стилем и правилами: ИИ читает её перед каждым ответом")) {

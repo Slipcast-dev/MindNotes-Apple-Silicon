@@ -7,6 +7,7 @@ await runDomainTests()
 await runAllNotesTests()
 await runCalendarSyncTests()
 do { try await runAdapterTests() } catch { TestRun.failed.append("calendar adapter: \(error)") }
+await runAICalendarTests()
 
 print("passed=\(TestRun.passed) failed=\(TestRun.failed.count)")
 if !TestRun.failed.isEmpty {
