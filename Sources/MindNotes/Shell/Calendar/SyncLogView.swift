@@ -48,6 +48,9 @@ extension SyncMessage {
         case .readFailed(let e): return L("Не удалось прочитать Календарь: %@", e)
         case .failed(let e): return L("Ошибка синхронизации: %@", e)
         case .recreated: return L("Календарь приложения пропал и создан заново")
+        case .containerDeleted(let k): return k == .event
+            ? L("Календарь синхронизации удалён: синхронизация событий выключена")
+            : L("Список синхронизации удалён: синхронизация задач выключена")
         case .resolved(let app): return app ? L("Конфликт решён: оставлена версия приложения") : L("Конфликт решён: оставлена версия Календаря")
         case .text(let t): return t
         case .summary(let s):

@@ -228,7 +228,7 @@ func runEngineTests() async {
         checkEqual(e.conflicts.count, 0, "после решения конфликт не повторяется")
     }
 
-    await atest("engine: календарь удалён снаружи — создаётся заново и элементы перевыгружаются") {
+    await atest("engine: удалённый календарь синхронизации не создаётся заново, синхронизация выключается") {
         let (e, gw, store, clock) = make()
         _ = await e.enable(.event)
         let item = LocalItem(kind: .event, fields: SyncFields(title: "Встреча", start: clock.now + 3600, end: clock.now + 7200),
@@ -239,9 +239,17 @@ func runEngineTests() async {
         try gw.removeContainer(old)
         clock.tick()
         await e.syncNow()
-        check(e.settings.eventCalendarID != old, "новый календарь")
+        await e.syncNow()
+        checkEqual(gw.containers(.event).count, 0, "календарь не вернулся")
+        check(!e.settings.eventsEnabled, "синхронизация событий выключена")
+        checkEqual(e.log.first?.message, .containerDeleted(.event))
+        checkEqual(store.item(item.id)?.isDeleted, false, "событие в приложении не удалено")
+        checkEqual(store.item(item.id)?.externalID, nil, "связь сброшена")
+
+        // Повторное включение — новый календарь, событие выгружается в него.
+        _ = await e.enable(.event)
+        check(e.settings.eventCalendarID != nil && e.settings.eventCalendarID != old, "новый календарь")
         checkEqual(gw.items.count, 1, "событие выгружено заново")
-        checkEqual(store.item(item.id)?.isDeleted, false, "событие не удалено в приложении")
     }
 
     await atest("engine: сбой записи учитывается и повторяется в следующий раз") {

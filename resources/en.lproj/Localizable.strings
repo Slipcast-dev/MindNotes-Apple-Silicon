@@ -1753,3 +1753,8 @@
 "Скрыт" = "Hidden";
 "Удалить «%@»?" = "Delete “%@”?";
 "Это календарь синхронизации: все его элементы удалятся на всех устройствах, а при следующей синхронизации он будет создан заново." = "This is the sync calendar: all its items will be deleted on all devices, and it will be recreated on the next sync.";
+
+/* Синхронизация с Календарём и Напоминаниями */
+"Календарь синхронизации удалён: синхронизация событий выключена" = "The sync calendar was deleted: event sync is off";
+"Список синхронизации удалён: синхронизация задач выключена" = "The sync list was deleted: task sync is off";
+"Это календарь синхронизации: все его элементы удалятся на всех устройствах, а синхронизация этого вида выключится. Включить её снова можно в настройках." = "This is the sync calendar: all its items will be deleted on all devices and this sync will turn off. You can turn it back on in Settings.";

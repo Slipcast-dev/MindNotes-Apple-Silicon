@@ -48,6 +48,8 @@ enum SyncMessage: Equatable, Sendable {
     case readFailed(String)
     case failed(String)
     case recreated
+    /// Календарь синхронизации удалён — синхронизация вида выключена.
+    case containerDeleted(SyncKind)
     case summary(SyncSummary)
     case resolved(keptApp: Bool)
     /// Готовый текст от приложения.

@@ -145,19 +145,22 @@ final class CalendarSyncEngine {
             note(.warning, .noAccess(kind))
             return s
         }
+        // Календарь синхронизации удалили (здесь, в Календаре или на другом устройстве): это решение пользователя.
+        // Заново его не создаём — выключаем синхронизацию вида; включение в настройках создаст новый календарь.
+        if let id = settings.containerID(kind), !gateway.containers(kind).contains(where: { $0.id == id }) {
+            update { $0.setEnabled(kind, false); $0.setContainerID(kind, nil) }
+            for var item in store.all(kind) where item.externalID != nil || item.syncedAt != nil {
+                item.externalID = nil
+                item.syncedAt = nil
+                store.save(item)
+            }
+            note(.warning, .containerDeleted(kind))
+            return s
+        }
         let container: String
         do {
             container = try gateway.ensureContainer(kind, preferredID: settings.containerID(kind), title: containerTitle)
-            if container != settings.containerID(kind) {
-                // Календарь удалили снаружи: создан новый, всё выгружается в него заново.
-                note(.warning, .recreated)
-                update { $0.setContainerID(kind, container) }
-                for var item in store.all(kind) where item.externalID != nil {
-                    item.externalID = nil
-                    item.syncedAt = nil
-                    store.save(item)
-                }
-            }
+            if container != settings.containerID(kind) { update { $0.setContainerID(kind, container) } }
         } catch {
             note(.error, .openFailed("\(error)"))
             s.failures += 1

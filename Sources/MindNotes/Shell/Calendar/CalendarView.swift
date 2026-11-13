@@ -335,7 +335,7 @@ struct CalendarSidebar: View {
             Button(L("Отмена"), role: .cancel) { deleting = nil }
         } message: { c in
             Text(c.id == engine.settings.containerID(.event) || c.id == engine.settings.containerID(.reminder)
-                 ? L("Это календарь синхронизации: все его элементы удалятся на всех устройствах, а при следующей синхронизации он будет создан заново.")
+                 ? L("Это календарь синхронизации: все его элементы удалятся на всех устройствах, а синхронизация этого вида выключится. Включить её снова можно в настройках.")
                  : L("Все элементы удалятся на всех устройствах. Действие нельзя отменить."))
         }
         .alert(L("Не удалось изменить календарь"), isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
