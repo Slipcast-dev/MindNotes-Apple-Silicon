@@ -28,10 +28,10 @@ cat > "$STAGE/Как открыть первый раз.txt" <<'EOF'
 Откройте «Системные настройки» → «Конфиденциальность и безопасность» и нажмите «Всё равно открыть»
 рядом с сообщением о MindNotes. Это нужно сделать один раз.
 
-Нужен Mac на Apple Silicon с macOS 26 или новее.
+Нужен Mac на Apple Silicon с macOS 15 или новее.
 
 The app is not notarized by Apple. On first launch open System Settings → Privacy & Security
-and click "Open Anyway" next to the MindNotes message. Requires Apple silicon and macOS 26 or later.
+and click "Open Anyway" next to the MindNotes message. Requires Apple silicon and macOS 15 or later.
 EOF
 
 rm -f "$DMG"

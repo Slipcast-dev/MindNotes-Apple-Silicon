@@ -2,7 +2,7 @@
 
 **English** · [Русский](../personal-ru/BUILD_AND_USE.md)
 
-You need an Apple silicon Mac with macOS 26 or later and the Command Line Tools (`xcode-select --install`). Node.js is needed for the JS tests. Intel builds are not supported (ADR-0009).
+To run MindNotes you need an Apple silicon Mac with macOS 15 or later. To build it you need macOS 26 or later with the Command Line Tools (`xcode-select --install`): the build uses SDK 26+ and targets macOS 15 (ADR-0020). Node.js is needed for the JS tests. Intel builds are not supported (ADR-0009).
 
 ## Build
 

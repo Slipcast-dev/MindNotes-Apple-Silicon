@@ -4,7 +4,7 @@
 
 Status: the app's current design after M0–M14 (workspace schema v10). Progress is in `STATUS.md`, decisions are ADRs in `docs/personal-ru/adr/` (both in Russian).
 
-Constraints: one module, built with `swiftc`, no external dependencies, arm64 and macOS 26 only (ADR-0009, `scripts/target.sh`). Network is used only for link previews, updates and the optional AI, inside `Shell/Network/` (ADR-0011, ADR-0014). Target: 10k pages, 100k blocks, one user, one process per workspace.
+Constraints: one module, built with `swiftc`, no external dependencies, arm64 only, macOS 15 or newer, built with SDK 26+ and newer APIs behind `#available` (ADR-0009, ADR-0020, `scripts/target.sh`). Network is used only for link previews, updates and the optional AI, inside `Shell/Network/` (ADR-0011, ADR-0014). Target: 10k pages, 100k blocks, one user, one process per workspace.
 
 ## 1. Modules and boundaries
 

@@ -2,7 +2,7 @@
 
 [English](../en/BUILD_AND_USE.md) · **Русский**
 
-Нужны Mac на Apple Silicon, macOS 26 или новее и Command Line Tools (`xcode-select --install`). Для JS-тестов нужен Node.js. Сборка для Intel не поддерживается (ADR-0009).
+Для работы нужен Mac на Apple Silicon с macOS 15 или новее. Для сборки — macOS 26 или новее и Command Line Tools (`xcode-select --install`): сборка идёт на SDK 26+ с целью macOS 15 (ADR-0020). Для JS-тестов нужен Node.js. Сборка для Intel не поддерживается (ADR-0009).
 
 ## Сборка
 

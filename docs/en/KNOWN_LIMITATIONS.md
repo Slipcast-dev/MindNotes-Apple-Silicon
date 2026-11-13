@@ -2,7 +2,8 @@
 
 **English** · [Русский](../personal-ru/KNOWN_LIMITATIONS.md)
 
-- **Apple silicon and macOS 26 only** (ADR-0009). New builds do not run on Intel or older systems. Tested only on macOS 27.2.
+- **Apple silicon and macOS 15 or newer** (ADR-0009, ADR-0020). New builds do not run on Intel or on macOS 13–14. Checked by hand on macOS 27.2; on macOS 15 (15.8.2) and 26 (26.7.2) only by automated tests and a launch check in CI.
+- **macOS 15 looks different.** There is no Liquid Glass there: the toolbar and standard controls use the older style.
 - **Not checked on this build.** Manual input, VoiceOver, Writing Tools. The system Liquid Glass capsules in the window title bar are turned off; other standard controls may still get the new look.
 - **Performance.** The development machine is weaker than the reference one (M1 with 8 GB vs. Apple silicon with 16 GB). The AT-17 targets are not confirmed here; the benchmarks in `TEST_REPORT.md` run without rendering.
 - **Writing Tools.** Turned off only in the editor text. Titles, database properties, filters and search may not be covered; not tested with Apple Intelligence.
