@@ -1785,3 +1785,8 @@
 "Раздел…" = "Section…";
 "Обновления: github.com/%@" = "Updates: github.com/%@";
 "Новая версия требует macOS %@ или новее. Текущая версия MindNotes продолжит работать." = "The new version requires macOS %@ or later. Your current version of MindNotes will keep working.";
+"Запустить программу обновления плагина «%@»?" = "Run the update program for the “%@” plugin?";
+"Обновление скачано из репозитория %@, а не от издателя MindNotes. В нём программа-установщик: она будет запущена с вашими правами, и разрешения плагина её не ограничивают. Продолжайте, только если доверяете издателю." = "The update was downloaded from the %@ repository, not from the MindNotes publisher. It contains an installer program: it will run with your permissions, and the plugin’s permissions do not limit it. Continue only if you trust the publisher.";
+"Установить и запустить" = "Install and run";
+"Программа в образе не совпадает с установленной. Обновление отменено." = "The program in the image does not match the installed one. The update was cancelled.";
+"Обновление стороннего издателя: MindNotes спросит перед запуском его программы." = "Update from a third-party publisher: MindNotes will ask before running its program.";

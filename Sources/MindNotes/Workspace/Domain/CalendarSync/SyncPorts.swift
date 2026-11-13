@@ -126,9 +126,16 @@ protocol LocalItemStore: AnyObject {
     func prepare() async
     /// После сверки: дождаться записи изменений.
     func finish() async
+    /// Есть ли куда сохранять элементы этого вида. Нет — вид не сверяется: импорт без места назначения
+    /// превратился бы в удаление элементов в Календаре.
+    func accepts(_ kind: SyncKind) -> Bool
+    /// Ошибки записи с прошлого вызова: движок показывает их в журнале и считает сбоями.
+    func takeErrors() -> [String]
 }
 
 extension LocalItemStore {
     func prepare() async {}
     func finish() async {}
+    func accepts(_ kind: SyncKind) -> Bool { true }
+    func takeErrors() -> [String] { [] }
 }

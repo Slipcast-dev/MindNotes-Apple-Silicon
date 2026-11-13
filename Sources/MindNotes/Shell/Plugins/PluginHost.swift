@@ -576,6 +576,9 @@ struct PluginUpdateRow: View {
                     if !trusted {
                         Text("Новой версии нужны новые разрешения — MindNotes покажет их перед установкой.")
                             .font(.system(size: 11)).foregroundColor(Tokens.muted)
+                    } else if plugin.manifest.nativeUpdateNeedsConsent(trustedOwner: PluginUpdater.trustedOwner) {
+                        Text("Обновление стороннего издателя: MindNotes спросит перед запуском его программы.")
+                            .font(.system(size: 11)).foregroundColor(Tokens.muted)
                     }
                 }
                 Spacer()

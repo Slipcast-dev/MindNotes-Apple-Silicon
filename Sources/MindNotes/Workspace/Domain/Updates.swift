@@ -86,3 +86,29 @@ enum UpdateMode: String, CaseIterable {
     case automatic, manual
     static let checkInterval: TimeInterval = 24 * 60 * 60
 }
+
+/// Замена установленной программы новой версией после выхода приложения (ADR-0014). Прежняя версия сначала
+/// переносится в резервный путь и удаляется только после успешной установки новой; при сбое возвращается на место.
+enum UpdateReplacement {
+    /// Сценарий для `/bin/sh`: ждёт завершения `pid`, заменяет `current` на `staged` с откатом.
+    /// `relaunch` — открыть программу после замены (новую, а при откате — прежнюю).
+    static func script(current: URL, staged: URL, backup: URL, pid: Int32, relaunch: Bool = true) -> String {
+        func q(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        let cur = q(current.path), new = q(staged.path), old = q(backup.path)
+        let open = relaunch ? "open \(cur)" : ":"
+        return """
+        while kill -0 \(pid) 2>/dev/null; do sleep 0.3; done
+        if [ ! -d \(new) ]; then \(open); exit 1; fi
+        if ! mv \(cur) \(old); then \(open); exit 1; fi
+        if mv \(new) \(cur); then
+          rm -rf \(old)
+          xattr -dr com.apple.quarantine \(cur) 2>/dev/null
+          \(open)
+        else
+          mv \(old) \(cur)
+          \(open)
+          exit 1
+        fi
+        """
+    }
+}

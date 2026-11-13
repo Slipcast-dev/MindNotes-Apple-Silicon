@@ -6,6 +6,7 @@ if await handleChildMode() { exit(0) }
 await runDomainTests()
 await runAllNotesTests()
 await runCalendarSyncTests()
+await runCalendarSafetyTests()
 do { try await runAdapterTests() } catch { TestRun.failed.append("calendar adapter: \(error)") }
 await runAICalendarTests()
 

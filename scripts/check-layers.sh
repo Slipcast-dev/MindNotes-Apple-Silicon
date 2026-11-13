@@ -33,9 +33,13 @@ subset() {
     local name=$1; shift
     local files=("${(@f)$(swiftfiles "$@")}")
     [[ -z "${files[1]:-}" ]] && return 0
-    if ! swiftc -typecheck -parse-as-library -target "$TARGET" "${files[@]}" 2>&1 | grep -E 'error:'; then
+    # Успех определяет код возврата swiftc, а не поиск строки в выводе: при pipefail «! swiftc | grep»
+    # печатал ok и при ошибке компиляции.
+    local out
+    if out=$(swiftc -typecheck -parse-as-library -target "$TARGET" "${files[@]}" 2>&1); then
         echo "ok: $name"
     else
+        print -r -- "$out" | grep -E 'error:' || print -r -- "$out"
         echo "НАРУШЕНИЕ: подмножество $name не компилируется"; fail=1
     fi
 }

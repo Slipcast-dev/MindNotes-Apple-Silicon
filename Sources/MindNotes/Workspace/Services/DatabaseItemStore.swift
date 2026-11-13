@@ -6,6 +6,8 @@ import Foundation
 /// Движок работает синхронно, а база — асинхронно, поэтому:
 /// - перед сверкой вызывается `refresh()`: снимок записей и связей в память;
 /// - `save` и `purge` сразу меняют снимок и ставят запись в базу в очередь; `flush()` ждёт очередь.
+/// - отметка «синхронизировано» (связь) сохраняется только после успешной записи в базу: при ошибке связь
+///   остаётся прежней, и следующая сверка повторяет операцию, а не принимает старую запись за свежую правку.
 @MainActor
 final class DatabaseItemStore: LocalItemStore {
     private(set) var bindings: [CalendarBinding]
@@ -18,6 +20,10 @@ final class DatabaseItemStore: LocalItemStore {
     private var owner: [UUID: CalendarBinding] = [:]
     private var queue: Task<Void, Never>?
     private(set) var lastError: String?
+    /// Записи, запись которых в базу не удалась в этой сверке: их связи до следующего `refresh` не меняются.
+    private var failed: Set<UUID> = []
+    /// Ошибки записи для движка (`takeErrors`).
+    private var errors: [String] = []
 
     init(source: CalendarRecordSource, bindings: [CalendarBinding], linksFile: URL?, now: @escaping () -> Date = Date.init) {
         self.source = source
@@ -43,6 +49,7 @@ final class DatabaseItemStore: LocalItemStore {
     /// Перечитывает записи связанных баз. Записи, которых больше нет, но которые были связаны, становятся удалёнными.
     func refresh() async throws {
         await flush()
+        failed = []
         var fresh: [UUID: LocalItem] = [:]
         var freshOwner: [UUID: CalendarBinding] = [:]
         for b in bindings {
@@ -82,49 +89,61 @@ final class DatabaseItemStore: LocalItemStore {
     func all(_ kind: SyncKind) -> [LocalItem] { items.values.filter { $0.kind == kind }.sorted { $0.id.uuidString < $1.id.uuidString } }
     func item(_ id: UUID) -> LocalItem? { items[id] }
 
+    /// Без связанной включённой базы этого вида импортировать некуда: такой вид не сверяется вовсе.
+    func accepts(_ kind: SyncKind) -> Bool { bindings.contains { $0.kind == kind && $0.enabled } }
+
+    func takeErrors() -> [String] {
+        defer { errors = [] }
+        return errors
+    }
+
     func save(_ item: LocalItem) {
         let old = items[item.id]
-        items[item.id] = item
-        var link = links[item.id] ?? CalendarLink(kind: item.kind)
-        link.externalID = item.externalID
-        link.syncEnabled = item.syncEnabled
-        // Снимок «как синхронизировано» меняется только вместе с отметкой синхронизации:
-        // иначе перепривязка при открытом конфликте спрятала бы правку записи.
-        if item.syncedAt != link.syncedAt {
-            link.syncedAt = item.syncedAt
-            if item.syncedAt != nil { link.syncedFields = item.fields }
-        }
-        links[item.id] = link
-        persistLinks()
-
-        // Изменения, пришедшие из Календаря, записываются в базу.
+        // Изменения, пришедшие из Календаря, записываются в базу; связь — только после успешной записи.
         if item.isDeleted {
-            if old?.isDeleted == false { enqueue { try await self.source.calendarTrash(records: [item.id]) } }
+            items[item.id] = item
+            enqueue(item.id, commit: item) {
+                if old?.isDeleted == false { try await self.source.calendarTrash(records: [item.id]) }
+            }
             return
         }
         guard let binding = owner[item.id] ?? bindings.first(where: { $0.kind == item.kind && $0.enabled }) else {
+            // Без базы назначения элемент не сохраняется вовсе: связь без записи при следующей сверке стала бы
+            // «удалённой» записью и удалила бы элемент в Календаре.
             lastError = "no binding for \(item.kind)"
             return
         }
         owner[item.id] = binding
-        if old == nil {
-            enqueue {
+        items[item.id] = item
+        enqueue(item.id, commit: item) {
+            if old == nil {
                 try await self.source.calendarCreateRecord(database: binding.databaseID, title: item.fields.title, id: item.id)
                 try await self.writeValues(item.fields, binding: binding, id: item.id)
-            }
-        } else if let old, !old.fields.sameContent(as: item.fields) {
-            enqueue {
+            } else if let old, !old.fields.sameContent(as: item.fields) {
                 if old.fields.title != item.fields.title { try await self.source.calendarRename(record: item.id, title: item.fields.title) }
                 try await self.writeValues(item.fields, binding: binding, id: item.id)
             }
         }
     }
 
+    /// Связь после успешной записи. Снимок «как синхронизировано» меняется только вместе с отметкой синхронизации:
+    /// иначе перепривязка при открытом конфликте спрятала бы правку записи.
+    private func commitLink(_ item: LocalItem) {
+        var link = links[item.id] ?? CalendarLink(kind: item.kind)
+        link.externalID = item.externalID
+        link.syncEnabled = item.syncEnabled
+        if item.syncedAt != link.syncedAt {
+            link.syncedAt = item.syncedAt
+            if item.syncedAt != nil { link.syncedFields = item.fields }
+        }
+        links[item.id] = link
+        persistLinks()
+    }
+
     func purge(_ id: UUID) {
         items[id] = nil
-        links[id] = nil
         owner[id] = nil
-        persistLinks()
+        enqueue(id, commit: nil, ignoringFailure: true) {}
     }
 
     // MARK: Запись в базу
@@ -135,11 +154,20 @@ final class DatabaseItemStore: LocalItemStore {
         }
     }
 
-    private func enqueue(_ op: @escaping @MainActor () async throws -> Void) {
+    /// Операции идут по очереди. `commit` — связь, которую сохранить после успеха (nil — убрать связь).
+    /// После отказа записи по этой записи следующие её операции в той же сверке пропускаются, связь не двигается.
+    private func enqueue(_ id: UUID, commit: LocalItem?, ignoringFailure: Bool = false, _ op: @escaping @MainActor () async throws -> Void) {
         let previous = queue
         queue = Task { @MainActor in
             await previous?.value
-            do { try await op() } catch { self.lastError = "\(error)" }
+            if !ignoringFailure, self.failed.contains(id) { return }
+            do { try await op() } catch {
+                self.lastError = "\(error)"
+                self.errors.append("\(error)")
+                self.failed.insert(id)
+                return
+            }
+            if let commit { self.commitLink(commit) } else { self.links[id] = nil; self.persistLinks() }
         }
     }
 
@@ -153,7 +181,11 @@ final class DatabaseItemStore: LocalItemStore {
 
     /// Убрать связи отвязанной базы: элементы в Календаре остаются, но больше не синхронизируются.
     func forget(database: UUID) {
-        for (id, b) in owner where b.databaseID == database { links[id] = nil; items[id] = nil; owner[id] = nil }
+        for (id, b) in owner where b.databaseID == database {
+            links[id] = nil; items[id] = nil; owner[id] = nil
+            // Операции сверки, ещё стоящие в очереди, не должны вернуть связь обратно.
+            enqueue(id, commit: nil, ignoringFailure: true) {}
+        }
         persistLinks()
     }
 

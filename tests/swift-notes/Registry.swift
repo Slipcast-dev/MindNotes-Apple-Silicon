@@ -63,5 +63,8 @@ func runAllNotesTests() async {
     await runPageLockTests()
     await runPluginTests()
     await runPairingTests()
+    await runNativeUpdateTests()
+    await runClipAddressTests()
+    await runUpdateReplacementTests()
     await runAcceptanceTests()
 }

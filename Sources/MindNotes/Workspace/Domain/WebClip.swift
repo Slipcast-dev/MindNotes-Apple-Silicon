@@ -134,6 +134,44 @@ struct WebClip: Equatable {
         return true
     }
 
+    /// Публичный ли IP-адрес, в который разрешилось имя сайта (сеть ничего не делает: только разбор адреса).
+    /// Текстовая проверка имени не видит, что обычное имя может указывать в домашнюю сеть, поэтому
+    /// после DNS проверяется каждый адрес. Непонятная запись — не публичная.
+    static func isPublicAddress(_ text: String) -> Bool {
+        var v4 = in_addr()
+        if inet_pton(AF_INET, text, &v4) == 1 {
+            let b = withUnsafeBytes(of: v4.s_addr) { Array($0) }
+            return isPublicIPv4(b[0], b[1], b[2], b[3])
+        }
+        var v6 = in6_addr()
+        guard inet_pton(AF_INET6, text, &v6) == 1 else { return false }
+        let b = withUnsafeBytes(of: v6) { Array($0) }
+        // IPv4 внутри IPv6 (::ffff:a.b.c.d, ::a.b.c.d, NAT64 64:ff9b::/96) проверяется как IPv4.
+        if b[0..<10].allSatisfy({ $0 == 0 }) && ((b[10] == 0xff && b[11] == 0xff) || (b[10] == 0 && b[11] == 0)) {
+            return isPublicIPv4(b[12], b[13], b[14], b[15])
+        }
+        if b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b && b[4..<12].allSatisfy({ $0 == 0 }) {
+            return isPublicIPv4(b[12], b[13], b[14], b[15])
+        }
+        if b[0] & 0xfe == 0xfc { return false }                       // fc00::/7 — частные
+        if b[0] == 0xfe && b[1] & 0xc0 == 0x80 { return false }       // fe80::/10 — локальные для канала
+        if b[0] == 0xfe && b[1] & 0xc0 == 0xc0 { return false }       // fec0::/10 — устаревшие локальные
+        if b[0] == 0xff { return false }                              // многоадресные
+        if b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x0d && b[3] == 0xb8 { return false } // 2001:db8::/32 — документация
+        return true
+    }
+
+    private static func isPublicIPv4(_ a: UInt8, _ b: UInt8, _ c: UInt8, _ d: UInt8) -> Bool {
+        switch (a, b) {
+        case (0, _), (10, _), (127, _), (169, 254), (192, 168): return false
+        case (172, 16...31), (100, 64...127), (198, 18...19): return false
+        case (192, 0) where c == 0 || c == 2: return false
+        case (198, 51) where c == 100: return false
+        case (203, 0) where c == 113: return false
+        default: return a < 224
+        }
+    }
+
     /// Подставляет скачанные приложением картинки: ссылка в тексте получает имя вложения с настоящим расширением.
     /// Не скачалась — остаётся ссылкой на оригинал с подписью (или `label`, если подписи нет).
     func resolvingRemote(_ fetched: [String: Image], label: String) -> WebClip {

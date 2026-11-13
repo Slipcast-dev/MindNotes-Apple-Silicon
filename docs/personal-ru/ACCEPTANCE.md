@@ -43,8 +43,9 @@
 
 | Что | Где | SHA-256 |
 |---|---|---|
-| Приложение 1.7.0 (исполняемый файл arm64, macOS 15+) | `build/MindNotes.app` | `505dec7fccc0e1bcadcb79b40f61eaf67c6efb9118a473e2d1d396fb72a2d813` |
-| Образ для установки 1.7.0 (страница Releases) | `build/MindNotes-1.7.0.dmg` | `dd1be5dda31f6aa92d5a8a9f5cfc28e12c992b451e6b64ebf597feb84e536386` |
+| Приложение 1.7.1 (исполняемый файл arm64, macOS 15+) | `build/MindNotes.app` | `cd3ba4e436d7069b721844a9141fbf0ecde54d5a58be147c35f5a162bcf0ca98` |
+| Образ для установки 1.7.1 (страница Releases) | `build/MindNotes-1.7.1.dmg` | `1f68ce9feff16f60461d052f25d0de04cd4dd86b3a9ed620c10e9165f6457195` |
+| Образ выпуска 1.7.0 (страница Releases) | `MindNotes-1.7.0.dmg` | `dd1be5dda31f6aa92d5a8a9f5cfc28e12c992b451e6b64ebf597feb84e536386` |
 | Образ выпуска 1.6.2 (страница Releases) | `MindNotes-1.6.2.dmg` | `507bdab4cea7b5d7271d7f624323bda8ae95f708ef2b34a9735a196c3d8d868e` |
 | Образ выпуска 1.6.1 (страница Releases) | `MindNotes-1.6.1.dmg` | `bf0e03f220aa2c19b33c06a91ec24cf446b15e912d8ca46f8124edbbb2c514cb` |
 | Образ выпуска 1.6.0 (страница Releases) | `MindNotes-1.6.0.dmg` | `650d9e20e49f84ce783085d6f0c7667eba916d3667798e4cd1275f6d5f723b4e` |

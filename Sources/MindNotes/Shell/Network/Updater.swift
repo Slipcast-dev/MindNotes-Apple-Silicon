@@ -206,8 +206,8 @@ final class Updater: ObservableObject {
         guard FileManager.default.isWritableFile(atPath: target.path) else {
             throw UpdateError(L("Нет прав на запись в папку программы. Скачайте образ со страницы выпуска и установите вручную."))
         }
-        let staged = target.appendingPathComponent(".MindNotes-update.app")
-        try? FileManager.default.removeItem(at: staged)
+        // Уникальное имя на попытку: незавершённая прежняя попытка не мешает и не удаляется вслепую.
+        let staged = target.appendingPathComponent(".MindNotes-update-\(UUID().uuidString).app")
         try run("/usr/bin/ditto", [app.path, staged.path])
         return staged
     }
@@ -227,14 +227,10 @@ final class Updater: ObservableObject {
 
     /// Сценарий ждёт выхода приложения, заменяет пакет и запускает новую версию.
     private static func relaunch(replacing current: URL, with staged: URL) throws {
-        let pid = ProcessInfo.processInfo.processIdentifier
-        func q(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-        let script = """
-        while kill -0 \(pid) 2>/dev/null; do sleep 0.3; done
-        rm -rf \(q(current.path)) && mv \(q(staged.path)) \(q(current.path))
-        xattr -dr com.apple.quarantine \(q(current.path)) 2>/dev/null
-        open \(q(current.path))
-        """
+        // Прежняя версия удаляется только после успешной установки новой; при сбое она возвращается на место.
+        let backup = current.deletingLastPathComponent().appendingPathComponent(".MindNotes-previous-\(UUID().uuidString).app")
+        let script = UpdateReplacement.script(current: current, staged: staged, backup: backup,
+                                              pid: ProcessInfo.processInfo.processIdentifier)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
         p.arguments = ["-c", script]

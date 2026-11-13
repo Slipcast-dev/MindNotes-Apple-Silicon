@@ -127,7 +127,7 @@ func runBackupTests() async {
                 try craftArchive(url, entries: entries, manifest: manifest, typeflag: flag)
                 await checkThrows(name) { try RestoreService.restore(archive: url, to: target, inspector: inspector, newID: UUID(), now: 1) }
                 check(!FileManager.default.fileExists(atPath: target.path), "\(name): каталог не появился")
-                check(!FileManager.default.fileExists(atPath: target.path + ".restoring"), "\(name): нет следов")
+                check(!((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).contains { $0.contains(".restoring") }, "\(name): нет следов")
             }
             check(!FileManager.default.fileExists(atPath: dir.deletingLastPathComponent().appendingPathComponent("evil.txt").path), "файл вне каталога не создан")
         }
@@ -158,6 +158,33 @@ func runBackupTests() async {
             let error = await checkThrows("непустая цель") { try RestoreService.restore(archive: archive, to: busy, inspector: SQLiteSnapshotInspector(), newID: UUID(), now: 1) }
             expectError(error, .restoreTargetNotEmpty(busy.path))
             check(FileManager.default.fileExists(atPath: busy.appendingPathComponent("заметка.txt").path), "файлы не тронуты")
+        }
+    }
+
+    await test("Restore: соседняя папка *.restoring не удаляется ни при успехе, ни при отказе") {
+        try await withTempDir { dir in
+            let fm = FileManager.default
+            let w = dir.appendingPathComponent("w")
+            let ws = try SQLiteWorkspace.create(at: w, name: "A")
+            let archive = dir.appendingPathComponent("a.mindnotesbackup")
+            try BackupService.create(workspaceRoot: w, snapshotter: ws, inspector: SQLiteSnapshotInspector(), destination: archive, appVersion: "t", now: 1)
+            ws.close()
+            let broken = dir.appendingPathComponent("broken.mindnotesbackup")
+            try Data(try Data(contentsOf: archive).prefix(Tar.blockSize * 3)).write(to: broken)
+
+            let target = dir.appendingPathComponent("Notes")
+            try fm.createDirectory(at: target, withIntermediateDirectories: true)
+            let sibling = dir.appendingPathComponent("Notes.restoring")
+            try fm.createDirectory(at: sibling, withIntermediateDirectories: true)
+            let valuable = sibling.appendingPathComponent("важное.txt")
+            try Data("ценные данные".utf8).write(to: valuable)
+
+            await checkThrows("испорченная копия") { try RestoreService.restore(archive: broken, to: target, inspector: SQLiteSnapshotInspector(), newID: UUID(), now: 1) }
+            checkEqual(try Data(contentsOf: valuable), Data("ценные данные".utf8), "при отказе соседняя папка цела")
+            try RestoreService.restore(archive: archive, to: target, inspector: SQLiteSnapshotInspector(), newID: UUID(), now: 1)
+            checkEqual(try Data(contentsOf: valuable), Data("ценные данные".utf8), "при успехе соседняя папка цела")
+            check(fm.fileExists(atPath: target.appendingPathComponent(BackupService.databaseName).path), "восстановлено")
+            checkEqual(try fm.contentsOfDirectory(atPath: dir.path).filter { $0.contains("restoring") }, ["Notes.restoring"], "своих временных папок не осталось")
         }
     }
 

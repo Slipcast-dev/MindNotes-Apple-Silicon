@@ -6,7 +6,21 @@ All notable changes to MindNotes. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-14
+
+Fixes from the security and reliability audit of 14 November 2026.
+
+### Fixed
+- **Calendar and Reminders:** after the last database is unlinked, later syncs no longer delete events and reminders in Calendar and Reminders. A kind without a linked database is not synced and its items are not changed.
+- **Calendar and Reminders:** if writing to the database fails (disk full, database busy), an edit made in Calendar is no longer overwritten by the old version, and a new item is no longer deleted. The sync checkpoint is saved only after a successful write; the next sync retries, and the error shows in the sync log.
+- Restoring a backup no longer deletes an existing `<name>.restoring` folder next to the target: each attempt uses its own working folder.
+- A failed replacement during an update no longer leaves the Mac without the app: the previous version is deleted only after the new one is in place and is put back on failure.
+- Web Clipper images from other sites are read as a stream and cut off at 8 MB, and the clip's total limit is enforced while downloading: a large response no longer fills memory.
+- An image is not downloaded if the site name resolves to a non-public address (home network, localhost), including after a redirect.
+
 ### Changed
+- A plugin update installs by itself only from the MindNotes publisher (`Slipcast-dev` repositories). A release from another publisher installs with the “Update” button and after a separate question about running its installer program, before anything is replaced or run. The program from a release replaces only itself: one plugin's update cannot replace another plugin's installer or remove someone else's app. Web Clipper keeps updating by itself.
+- The layer-boundary check (`scripts/check-layers.sh`) looks at the compiler's exit code: it used to report “ok” even on an error.
 - Web Clipper releases are no longer copied to this repository; the copies here were removed. MindNotes 1.7.0 and later gets the plugin from its own repository; an older MindNotes gets it after updating to 1.7.0.
 
 ## [1.7.0] - 2026-11-13

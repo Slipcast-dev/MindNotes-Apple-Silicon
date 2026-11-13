@@ -106,6 +106,23 @@ struct PluginManifest: Equatable {
         return Set(permissions).isSubset(of: Set(installed.permissions))
     }
 
+    /// Выпуск плагина содержит нативную программу-установщик, а её разрешения API не ограничивают: это обычная
+    /// программа с правами пользователя. Без вопроса её можно ставить и запускать только от того же издателя,
+    /// что и само приложение: выпуски в репозиториях владельца `trustedOwner` (репозиторий приложения или, как
+    /// у Web Clipper, отдельный репозиторий того же владельца). Остальные — после отдельного явного согласия.
+    func nativeUpdateNeedsConsent(trustedOwner: String) -> Bool {
+        guard let repository else { return false }
+        let owner = repository.split(separator: "/").first.map(String.init) ?? ""
+        return owner.lowercased() != trustedOwner.lowercased()  // имена владельцев GitHub не различают регистр
+    }
+
+    /// Обновление, которое ставится само, без вопроса: доверенное по разрешениям и от издателя приложения —
+    /// и у установленной версии, и у новой.
+    func isAutomaticUpdate(of installed: PluginManifest, app: AppVersion?, trustedOwner: String) -> Bool {
+        !installed.nativeUpdateNeedsConsent(trustedOwner: trustedOwner) && !nativeUpdateNeedsConsent(trustedOwner: trustedOwner)
+            && isTrustedUpdate(of: installed, app: app)
+    }
+
     /// Репозиторий выпусков: `владелец/имя` по правилам GitHub — владелец до 39 символов (латиница, цифры, дефис,
     /// не с дефиса), имя до 100 (ещё `.` и `_`, не `.`/`..`). Ни схем, ни хостов, ни путей: адрес строит само
     /// приложение и только на api.github.com.
@@ -222,5 +239,21 @@ struct PluginRelease: Equatable {
     static func minApp(in body: String) -> AppVersion? {
         guard let start = body.range(of: "<!-- minApp:"), let end = body.range(of: "-->", range: start.upperBound..<body.endIndex) else { return nil }
         return AppVersion(body[start.upperBound..<end.lowerBound].trimmingCharacters(in: .whitespaces))
+    }
+}
+
+/// Куда можно положить программу-установщик из образа выпуска. Заменяется только та же программа
+/// (тот же bundle ID): обновление одного плагина не может подменить установщик другого или чужое приложение.
+enum PluginInstallerPolicy {
+    /// - Parameters:
+    ///   - existing: bundle ID того, что уже лежит на месте установки; nil — места никто не занимает,
+    ///     пустая строка — там что-то без bundle ID.
+    ///   - new: bundle ID программы из образа.
+    ///   - expected: какой bundle ID обязан быть у программы (установщик Web Clipper); nil — любой.
+    static func mayReplace(existing: String?, new: String?, expected: String?) -> Bool {
+        guard let new, !new.isEmpty else { return false }
+        if let expected, new != expected { return false }
+        if let existing { return existing == new }
+        return true
     }
 }

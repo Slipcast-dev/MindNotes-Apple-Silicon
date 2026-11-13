@@ -168,7 +168,8 @@ func runAssetPathTests() async {
                 ("абсолютный путь в missing", try archive(cleanDB, missing: [okRel, secret.path], name: "a3.tar")),
             ] {
                 await checkThrows(label) { try RestoreService.restore(archive: url, to: target, inspector: SQLiteSnapshotInspector(), newID: UUID(), now: 1) }
-                check(!fm.fileExists(atPath: target.path) && !fm.fileExists(atPath: target.path + ".restoring"), "\(label): каталог не появился")
+                check(!fm.fileExists(atPath: target.path) && !((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).contains { $0.contains(".restoring") },
+                      "\(label): каталог не появился")
             }
 
             // Корректное отсутствующее вложение по-прежнему допустимо.

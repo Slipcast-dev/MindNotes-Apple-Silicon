@@ -124,7 +124,14 @@ final class CalendarSyncEngine {
             let active = SyncKind.allCases.filter { settings.isEnabled($0) }
             if !active.isEmpty { await store.prepare() }
             for kind in active { total.add(await sync(kind)) }
-            if !active.isEmpty { await store.finish() }
+            if !active.isEmpty {
+                await store.finish()
+                let errors = store.takeErrors()
+                if let first = errors.first {
+                    total.failures += errors.count
+                    note(.error, .failed(first))
+                }
+            }
             lastSummary = total
             update { $0.lastSyncAt = now() }
             if !total.isEmpty { note(total.failures > 0 ? .warning : .info, .summary(total)) }
@@ -145,6 +152,8 @@ final class CalendarSyncEngine {
             note(.warning, .noAccess(kind))
             return s
         }
+        // Нет включённой связанной базы: элементы Календаря некуда принять, вид не сверяется и ничего не меняет.
+        guard store.accepts(kind) else { return s }
         // Календарь синхронизации удалили (здесь, в Календаре или на другом устройстве): это решение пользователя.
         // Заново его не создаём — выключаем синхронизацию вида; включение в настройках создаст новый календарь.
         if let id = settings.containerID(kind), !gateway.containers(kind).contains(where: { $0.id == id }) {
@@ -237,6 +246,8 @@ final class CalendarSyncEngine {
             var item = LocalItem(kind: r.kind, fields: r.fields, externalID: r.externalID,
                                  updatedAt: r.modifiedAt, syncedAt: nil)
             store.save(item)
+            // Хранилище не приняло элемент (некуда сохранить) — элемент в Календаре не трогаем.
+            guard store.item(item.id) != nil else { return }
             // Записать свой UUID в url, чтобы в следующий раз найти элемент даже при смене id EventKit.
             let saved = try gateway.upsert(item, container: container, alarmMinutes: nil)
             item.externalID = saved.externalID

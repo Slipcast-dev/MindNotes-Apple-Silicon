@@ -102,9 +102,11 @@ enum RestoreService {
             let items = isDir.boolValue ? ((try? fm.contentsOfDirectory(atPath: target.path)) ?? []) : ["файл"]
             guard items.filter({ $0 != ".DS_Store" }).isEmpty else { throw WorkspaceError.restoreTargetNotEmpty(target.path) }
         }
-        let work = target.deletingLastPathComponent().appendingPathComponent(target.lastPathComponent + ".restoring", isDirectory: true)
-        try? fm.removeItem(at: work)
-        try fm.createDirectory(at: work, withIntermediateDirectories: true)
+        // Рабочая папка — своя на каждую попытку: существующий рядом каталог (в том числе чужой `*.restoring`)
+        // не удаляется и не используется. Удаляется только то, что создала эта операция.
+        let work = target.deletingLastPathComponent()
+            .appendingPathComponent(".\(target.lastPathComponent).restoring-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: work, withIntermediateDirectories: false)
         var done = false
         defer { if !done { try? fm.removeItem(at: work) } }
 

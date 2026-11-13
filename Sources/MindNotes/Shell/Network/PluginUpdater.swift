@@ -11,6 +11,8 @@ final class PluginUpdater: ObservableObject {
     static let shared = PluginUpdater()
     /// Репозиторий приложения: здесь ищутся выпуски плагинов без своего поля `repository`.
     static let appRepository = "Slipcast-dev/MindNotes-Apple-Silicon"
+    /// Издатель приложения: его репозиториям нативные программы плагинов доверяются без отдельного вопроса.
+    static var trustedOwner: String { appRepository.split(separator: "/").first.map(String.init) ?? "" }
     static let interval: TimeInterval = 24 * 60 * 60
     private static let lastCheckKey = "pluginUpdateChecks", autoKey = "pluginAutoUpdate"
 
@@ -63,7 +65,9 @@ final class PluginUpdater: ObservableObject {
     func setAuto(_ id: String, _ on: Bool) {
         auto[id] = on
         UserDefaults.standard.set(auto, forKey: Self.autoKey)
-        if on, case .available(let release, true) = state(id) { install(release, plugin: id) }
+        if on, case .available(let release, true) = state(id), PluginHost.shared.plugin(id)?.manifest.nativeUpdateNeedsConsent(trustedOwner: Self.trustedOwner) == false {
+            install(release, plugin: id)
+        }
     }
 
     /// Расписание плагинов не зависит от режима обновлений приложения: проверка при запуске и раз в сутки.
@@ -117,7 +121,9 @@ final class PluginUpdater: ObservableObject {
             if let need = release.minApp, let app = appVersion, app < need { states[p.id] = .needsApp(release); continue }
             let trusted = await isTrusted(release, installed: p.manifest)
             states[p.id] = .available(release, trusted: trusted)
-            if trusted, isAuto(p.id) { install(release, plugin: p.id) }
+            // Само ставится только обновление от издателя приложения: выпуск стороннего издателя запускает
+            // чужую нативную программу и требует согласия (кнопка в карточке плагина).
+            if trusted, isAuto(p.id), !p.manifest.nativeUpdateNeedsConsent(trustedOwner: Self.trustedOwner) { install(release, plugin: p.id) }
         }
         UserDefaults.standard.set(lastCheck.mapValues(\.timeIntervalSince1970), forKey: Self.lastCheckKey)
     }
@@ -162,8 +168,19 @@ final class PluginUpdater: ObservableObject {
                 states[id] = .installing
                 let actual = try await Task.detached { try Self.sha256(of: image) }.value
                 guard actual == expected else { throw UpdateError(L("Образ повреждён: контрольная сумма не совпала. Установка отменена.")) }
-                let target = PluginHost.shared.installerURL
-                let installer = try await Task.detached { try Self.stage(image: image, replacing: target) }.value
+                // Сторонний издатель: программа из образа будет запущена с правами пользователя — только с согласия,
+                // до замены и запуска. Установщик Web Clipper такой выпуск не заменяет.
+                let thirdParty = PluginHost.shared.plugin(id)?.manifest.nativeUpdateNeedsConsent(trustedOwner: Self.trustedOwner) ?? true
+                if thirdParty {
+                    let repo = PluginHost.shared.plugin(id)?.manifest.repository ?? "?"
+                    guard Self.confirmNative(plugin: PluginHost.shared.plugin(id)?.manifest.name ?? id, repository: repo) else {
+                        states[id] = .available(release, trusted: false)
+                        return
+                    }
+                }
+                let target = thirdParty ? nil : PluginHost.shared.installerURL
+                let expectedID = thirdParty ? nil : PluginHost.installerBundleID
+                let installer = try await Task.detached { try Self.stage(image: image, replacing: target, expectedBundleID: expectedID) }.value
                 guard let package = try FileManager.default.contentsOfDirectory(at: installer.appendingPathComponent("Contents/Resources"), includingPropertiesForKeys: nil)
                     .first(where: { $0.pathExtension == PluginManifest.packageExtension }) else { throw UpdateError(L("В образе нет программы-установщика.")) }
                 // Доверенное — без вопроса; иначе MindNotes покажет новые разрешения и спросит.
@@ -207,7 +224,21 @@ final class PluginUpdater: ObservableObject {
 
     /// Образ монтируется только для чтения; программа из него заменяет прежний установщик
     /// (прежний — в корзину) или ложится в ~/Applications, если установщика ещё не было.
-    nonisolated private static func stage(image: URL, replacing current: URL?) throws -> URL {
+    /// Вопрос перед установкой и запуском программы из выпуска стороннего репозитория.
+    private static func confirmNative(plugin name: String, repository: String) -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let ask = NSAlert()
+        ask.messageText = String(format: L("Запустить программу обновления плагина «%@»?"), name)
+        ask.informativeText = String(format: L("Обновление скачано из репозитория %@, а не от издателя MindNotes. В нём программа-установщик: она будет запущена с вашими правами, и разрешения плагина её не ограничивают. Продолжайте, только если доверяете издателю."), repository)
+        ask.alertStyle = .warning
+        ask.addButton(withTitle: L("Установить и запустить"))
+        ask.addButton(withTitle: L("Отмена"))
+        return ask.runModal() == .alertFirstButtonReturn
+    }
+
+    /// `expectedBundleID` — какой bundle ID обязан быть у программы; на месте установки заменяется только
+    /// та же программа (`PluginInstallerPolicy`), иначе установка отменяется до любых изменений.
+    nonisolated private static func stage(image: URL, replacing current: URL?, expectedBundleID: String?) throws -> URL {
         let fm = FileManager.default
         let mount = fm.temporaryDirectory.appendingPathComponent("MindNotes-plugin-mount-\(UUID().uuidString)")
         try fm.createDirectory(at: mount, withIntermediateDirectories: true)
@@ -221,6 +252,10 @@ final class PluginUpdater: ObservableObject {
             throw UpdateError(L("Нет прав на запись в папку программы. Скачайте образ со страницы выпуска и установите вручную."))
         }
         let target = current ?? folder.appendingPathComponent(app.lastPathComponent)
+        let existing = fm.fileExists(atPath: target.path) ? (Bundle(url: target)?.bundleIdentifier ?? "") : nil
+        guard PluginInstallerPolicy.mayReplace(existing: existing, new: Bundle(url: app)?.bundleIdentifier, expected: expectedBundleID) else {
+            throw UpdateError(L("Программа в образе не совпадает с установленной. Обновление отменено."))
+        }
         let staged = folder.appendingPathComponent(".\(UUID().uuidString).app")
         try run("/usr/bin/ditto", [app.path, staged.path])
         if fm.fileExists(atPath: target.path) { try fm.trashItem(at: target, resultingItemURL: nil) }
