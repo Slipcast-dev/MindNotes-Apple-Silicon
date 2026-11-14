@@ -257,6 +257,7 @@ struct CrumbBar: View {
                 Menu {
                     let page = shell.pageTree.page(id)
                     Button(page?.favoriteKey != nil ? "Убрать из избранного" : "Добавить в избранное") { shell.toggleFavorite(id) }
+                    Button(shell.isQuickPinned(id) ? "Убрать из быстрого доступа" : "Закрепить в быстром доступе") { shell.toggleQuickPin(id) }
                     if !shell.isDatabase(id) {
                         Button(page?.fullWidth == true ? "Обычная ширина" : "Во всю ширину") { shell.toggleFullWidth(id) }
                         Divider()

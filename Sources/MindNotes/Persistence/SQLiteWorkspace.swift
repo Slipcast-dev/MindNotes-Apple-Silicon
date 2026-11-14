@@ -309,9 +309,15 @@ final class SQLiteWorkspace: WorkspaceStore, DatabaseSnapshotter {
         }
     }
 
+    /// Отметка «открыто»: время для «Недавних» и частота для «Быстрого доступа» — одной транзакцией.
     func markOpened(_ id: UUID, now: Int64) async throws {
         try await writer.run { db in
-            try db.run("UPDATE pages SET last_opened_at=? WHERE id=?", [.int(now), SQLValue(id)])
+            try db.transaction {
+                try db.run("UPDATE pages SET last_opened_at=? WHERE id=?", [.int(now), SQLValue(id)])
+                let stats = OpenStats.bump(OpenStats.decode(try db.scalarText("SELECT value FROM workspace_meta WHERE key='open_stats'")), page: id, now: now)
+                try db.run("INSERT INTO workspace_meta(key, value) VALUES('open_stats', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                           [.text(OpenStats.encode(stats))])
+            }
         }
     }
 

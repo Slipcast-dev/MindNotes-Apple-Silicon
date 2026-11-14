@@ -28,6 +28,14 @@ extension SQLiteWorkspace {
 
     func rename(to name: String) async throws { try await setMeta("name", name) }
 
+    // MARK: Быстрый доступ
+
+    func quickAccess() async throws -> QuickAccessSettings { QuickAccessSettings(json: try await meta("quick_access")) }
+
+    func setQuickAccess(_ settings: QuickAccessSettings) async throws { try await setMeta("quick_access", settings.jsonString()) }
+
+    func openStats() async throws -> [UUID: OpenStat] { OpenStats.decode(try await meta("open_stats")) }
+
     // MARK: Теги
 
     private static func decodeTag(_ r: SQLRow) -> Tag? {

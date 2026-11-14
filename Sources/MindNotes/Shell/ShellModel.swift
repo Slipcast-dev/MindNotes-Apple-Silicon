@@ -104,6 +104,20 @@ final class ShellModel: ObservableObject {
     private(set) var pageTree = PageTree()
     private(set) var favorites: [Page] = []
     private(set) var recent: [Page] = []
+    /// «Быстрый доступ» на главной: настройки пространства и выбранные страницы.
+    @Published private(set) var quickAccess = QuickAccessSettings()
+    @Published private(set) var quickCards: [QuickCardItem] = []
+    /// Место карточки, для которого открыто окно выбора страницы.
+    @Published var quickPickerSlot: QuickPickerTarget?
+
+    struct QuickCardItem: Identifiable, Equatable {
+        var slot: Int
+        var page: Page?
+        var pinned: Bool
+        var id: Int { slot }
+    }
+
+    struct QuickPickerTarget: Identifiable { var slot: Int; var id: Int { slot } }
     /// Страница, для которой открыт выбор нового места.
     @Published var pageToMove: Page?
     /// Страница, для которой открыта история версий.
@@ -511,6 +525,7 @@ final class ShellModel: ObservableObject {
             people = (try? await store.people()) ?? []
             pages = session.pages
             saveStatus = .saved
+            refreshQuickAccess()
             await cacheImages(for: loadedLook)
             rememberWorkspace(path: store.layout.root.path, name: name)
             if section != .files { section = .home }
@@ -769,6 +784,8 @@ final class ShellModel: ObservableObject {
                                       try await self.reloadTrash()
                                   }, report: { [weak self] in self?.errorMessage = $0 })
         model.onChange = { [weak self] in self?.calendarSync?.recordsChanged() }
+        // База тоже считается открытой: попадает в «Недавние» и в частые страницы «Быстрого доступа».
+        try? await store.markOpened(page, now: SystemClock().nowMillis())
         databaseModel = model
         pages = session.pages
         section = .database(page)
@@ -1332,6 +1349,53 @@ final class ShellModel: ObservableObject {
     }
 
     // MARK: Действия со страницей
+
+    // MARK: Быстрый доступ
+
+    /// Что можно поставить в «Быстрый доступ»: папки, страницы и базы, но не записи баз.
+    var quickChoices: [Page] { pages.filter { !isRecordInLiveDatabase($0) } }
+
+    /// Перечитать настройки и частоту открытий и разложить карточки по местам.
+    func refreshQuickAccess() {
+        Task { @MainActor in
+            guard let store = self.store else { return }
+            let settings = (try? await store.quickAccess()) ?? QuickAccessSettings()
+            let stats = (try? await store.openStats()) ?? [:]
+            let slots = QuickAccess.pick(settings: settings, stats: stats, available: self.quickChoices.map(\.id),
+                                         fallback: self.children(of: nil).map(\.id), now: SystemClock().nowMillis())
+            let byID = Dictionary(self.pages.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            self.quickAccess = settings
+            self.quickCards = slots.enumerated().map { QuickCardItem(slot: $0.offset, page: $0.element.page.flatMap { byID[$0] }, pinned: $0.element.pinned) }
+        }
+    }
+
+    private func changeQuickAccess(_ change: @escaping (inout QuickAccessSettings) -> Void) {
+        Task { @MainActor in
+            guard let store = self.store else { return }
+            var settings = (try? await store.quickAccess()) ?? QuickAccessSettings()
+            change(&settings)
+            do { try await store.setQuickAccess(settings) } catch { self.errorMessage = error.localizedDescription; return }
+            self.refreshQuickAccess()
+        }
+    }
+
+    func isQuickPinned(_ id: UUID) -> Bool { quickAccess.isPinned(id) }
+
+    /// Из меню страницы: закрепить на первом свободном месте или убрать.
+    func toggleQuickPin(_ id: UUID) {
+        let on = !quickAccess.isPinned(id)
+        changeQuickAccess { on ? $0.pin(id) : $0.unpin(id) }
+    }
+
+    /// Поставить выбранную страницу на место карточки; nil — место снова заполняется само.
+    func setQuickSlot(_ slot: Int, _ id: UUID?) { changeQuickAccess { $0.setSlot(slot, id) } }
+
+    func swapQuickSlot(_ slot: Int, by delta: Int) { changeQuickAccess { $0.swapSlot(slot, by: delta) } }
+
+    func setQuickCount(_ count: Int) {
+        guard QuickAccessSettings.allowedCounts.contains(count) else { return }
+        changeQuickAccess { $0.count = count }
+    }
 
     func toggleFavorite(_ id: UUID) {
         enqueue {

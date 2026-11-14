@@ -15,6 +15,7 @@ A personal, local knowledge base for Mac: pages, a block editor, search, links a
 ## Features
 
 - Pages and subpages, a block editor, trash and version history with restore
+- Home screen with Quick access: pinned and frequently opened pages, folders and databases; right-click a card to choose what it shows
 - ⌘K search, `[[` links, backlinks, favourites, tags, templates and a catalog of 10 ready-made templates (habit tracker, roadmap, CRM and more)
 - `@`-mentions of pages, people and dates with local reminders
 - Bookmarks with link previews, embeds (YouTube, Vimeo, Figma, Google Maps), synced blocks, columns, block colours

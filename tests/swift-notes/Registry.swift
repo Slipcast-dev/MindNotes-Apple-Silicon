@@ -39,6 +39,7 @@ func runAllNotesTests() async {
     await runRelationTests()
     await runRollupTests()
     await runNotionGapsTests()
+    await runQuickAccessTests()
     await runFormulaTests()
     await runFormulaStoreTests()
     await runBackupTests()

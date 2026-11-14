@@ -6,6 +6,20 @@ All notable changes to MindNotes. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-14 — Black Panther
+
+The second major version of MindNotes: Quick access on the home screen shows what you are working on, and together with 1.9.0 databases, totals and the template catalog move closer to Notion.
+
+### Added
+- **Quick access picks for you:** free cards are filled with the pages, folders and databases you have opened most often lately (older opens weigh less — half as much after a week). Without any history the first top-level pages are shown, as before.
+- **Choose a card yourself:** right-click a card → “Choose a folder, page or database…” opens a list with search and an All / Folders / Pages / Databases filter; the choice goes exactly into that place and gets a pin. “Pin here”, “Choose automatically”, “Move left” and “Move right” are in the same menu; “Pin to Quick access” is in a page’s “…” menu.
+- **Number of cards:** 3, 6 or 9 from the “…” menu next to the Quick access title. When there are not enough pages, a place shows “+ Choose…”.
+- Folder and database cards show their type.
+
+### Changed
+- Opening a database counts as opening a page: it appears in Recent and counts for Quick access.
+- Quick access settings and open counts are stored in the workspace itself and travel with backups; the data schema is unchanged (v10).
+
 ## [1.9.0] - 2026-11-14
 
 Databases move closer to Notion: column totals, hidden groups, a table beside the timeline and a catalog of ready-made templates.

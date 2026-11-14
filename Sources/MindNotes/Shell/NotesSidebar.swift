@@ -518,6 +518,7 @@ struct PageTreeRow: View {
                     Button("Новая база данных") { shell.createDatabase(parent: page.id) }
                 }
                 Button(page.favoriteKey != nil ? "Убрать из избранного" : "Добавить в избранное") { shell.toggleFavorite(page.id) }
+                Button(shell.isQuickPinned(page.id) ? "Убрать из быстрого доступа" : "Закрепить в быстром доступе") { shell.toggleQuickPin(page.id) }
                 Button("Дублировать страницу") { shell.duplicatePage(page.id) }
                 if !isDatabase { Button("Сохранить как шаблон…") { shell.saveAsTemplate(page.id) } }
                 Button("Переместить в…") { shell.pageToMove = page }

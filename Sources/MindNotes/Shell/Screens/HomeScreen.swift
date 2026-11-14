@@ -38,15 +38,25 @@ struct HomeScreen: View {
                 Button { shell.createPage() } label: { Label("Новая страница", systemImage: "plus") }
                     .buttonStyle(NotesButtonStyle(kind: .primary))
 
-                let top = shell.children(of: nil).prefix(3)
-                if !top.isEmpty {
-                    sectionTitle(L("Быстрый доступ"))
-                    HStack(alignment: .top, spacing: 13) {
-                        ForEach(Array(top)) { page in
-                            QuickCard(page: page, kids: shell.children(of: page.id).count, cover: shell.image(for: page.coverAssetID)) { shell.openPage(page.id) }
-                                .onAppear { if let asset = page.coverAssetID { shell.loadImage(asset: asset) } }
+                if !shell.quickCards.isEmpty {
+                    HStack(alignment: .firstTextBaseline) {
+                        sectionTitle(L("Быстрый доступ"))
+                        quickMenu
+                        Spacer()
+                    }
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 13, alignment: .top), count: 3), alignment: .leading, spacing: 13) {
+                        ForEach(shell.quickCards) { card in
+                            Group {
+                                if let page = card.page {
+                                    QuickCard(page: page, kids: shell.children(of: page.id).count, cover: shell.image(for: page.coverAssetID),
+                                              kind: kindLabel(page), pinned: card.pinned) { shell.openPage(page.id) }
+                                        .onAppear { if let asset = page.coverAssetID { shell.loadImage(asset: asset) } }
+                                } else {
+                                    EmptyQuickCard { shell.quickPickerSlot = .init(slot: card.slot) }
+                                }
+                            }
+                            .contextMenu { cardMenu(card) }
                         }
-                        ForEach(0..<(3 - top.count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
                     }
                 }
                 if !shell.recent.isEmpty {
@@ -62,10 +72,54 @@ struct HomeScreen: View {
             .padding(.top, 32)
             .padding(.bottom, 42)
         }
+        // Частота открытий меняется при каждом переходе: карточки пересчитываются, когда главная снова видна.
+        .onAppear { shell.refreshQuickAccess() }
+        .sheet(item: $shell.quickPickerSlot) { target in QuickPickerSheet(slot: target.slot) }
+        .onChange(of: shell.pages) { _, _ in shell.refreshQuickAccess() }
     }
 
     private func sectionTitle(_ text: String) -> some View {
         Text(text).font(.system(size: 17, weight: .semibold)).padding(.top, 24).padding(.bottom, 10)
+    }
+
+    /// Правый щелчок по карточке: выбрать, что на ней будет, закрепить, переставить или вернуть автоматический выбор.
+    @ViewBuilder private func cardMenu(_ card: ShellModel.QuickCardItem) -> some View {
+        Button("Выбрать папку, страницу или базу…") { shell.quickPickerSlot = .init(slot: card.slot) }
+        if let page = card.page {
+            if card.pinned {
+                Button("Выбирать автоматически") { shell.setQuickSlot(card.slot, nil) }
+            } else {
+                Button("Закрепить здесь") { shell.setQuickSlot(card.slot, page.id) }
+            }
+            Divider()
+            Button("Левее") { shell.swapQuickSlot(card.slot, by: -1) }.disabled(card.slot == 0)
+            Button("Правее") { shell.swapQuickSlot(card.slot, by: 1) }.disabled(card.slot >= shell.quickCards.count - 1)
+        }
+    }
+
+    private func kindLabel(_ page: Page) -> String? {
+        if shell.isDatabase(page.id) { return L("База данных") }
+        if page.isFolder { return L("Папка") }
+        return nil
+    }
+
+    /// Настройки «Быстрого доступа»: сколько карточек и как он выбирает страницы.
+    private var quickMenu: some View {
+        Menu {
+            Picker("Карточек", selection: Binding(get: { shell.quickAccess.count }, set: { shell.setQuickCount($0) })) {
+                ForEach(QuickAccessSettings.allowedCounts, id: \.self) { Text("\($0)").tag($0) }
+            }
+            .pickerStyle(.inline)
+            Divider()
+            Text("Закреплённые карточки стоят на своих местах, остальные — страницы, которые вы чаще открываете")
+            Text("Правый щелчок по карточке — выбрать, что на ней")
+        } label: {
+            Image(systemName: "ellipsis").foregroundColor(Tokens.muted)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(L("Настроить быстрый доступ"))
     }
 }
 
@@ -74,6 +128,10 @@ struct QuickCard: View {
     let kids: Int
     /// Обложка страницы сверху карточки; без обложки — мягкий фон темы той же высоты, чтобы карточки стояли ровно.
     var cover: NSImage? = nil
+    /// «Папка» или «База данных» вместо числа подстраниц; nil — обычная страница.
+    var kind: String? = nil
+    /// Закреплена пользователем: значок булавки в углу.
+    var pinned = false
     let action: () -> Void
     @State private var hover = false
 
@@ -89,7 +147,7 @@ struct QuickCard: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(Tokens.ink)
                         .lineLimit(1)
-                    Text(kids == 0 ? L("Страница") : String(format: L("Подстраниц: %d"), kids))
+                    Text(kind.map { kids == 0 ? $0 : "\($0) · \(String(format: L("Подстраниц: %d"), kids))" } ?? (kids == 0 ? L("Страница") : String(format: L("Подстраниц: %d"), kids)))
                         .font(.system(size: 12))
                         .foregroundColor(Tokens.muted)
                 }
@@ -99,6 +157,17 @@ struct QuickCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .topLeading) { icon.padding(.leading, 16).padding(.top, Self.coverHeight - Self.iconSize / 2) }
+            .overlay(alignment: .topTrailing) {
+                if pinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(Tokens.muted)
+                        .padding(7)
+                        .background(Circle().fill(Tokens.card.opacity(0.9)))
+                        .padding(10)
+                        .help(L("Закреплено"))
+                }
+            }
             .background(Tokens.card)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Tokens.line.opacity(hover ? 0.4 : 1)))
@@ -175,5 +244,129 @@ struct RecentRow: View {
             Button("Открыть", action: action).buttonStyle(NotesButtonStyle(kind: .plain))
         }
         .padding(.vertical, 11)
+    }
+}
+
+/// Пустое место «Быстрого доступа»: страниц для него не нашлось — его можно занять самому.
+struct EmptyQuickCard: View {
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: "plus").font(.system(size: 18))
+                Text("Выбрать…").font(.system(size: 13))
+            }
+            .foregroundColor(Tokens.muted)
+            .frame(maxWidth: .infinity, minHeight: 176)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(hover ? Tokens.soft : .clear))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Tokens.line, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .accessibilityLabel(Text("Выбрать страницу для быстрого доступа"))
+    }
+}
+
+/// Выбор папки, страницы или базы для места карточки: поиск и список с типом и путём.
+struct QuickPickerSheet: View {
+    @EnvironmentObject private var shell: ShellModel
+    @Environment(\.dismiss) private var dismiss
+    let slot: Int
+    @State private var query = ""
+    @State private var filter = 0
+
+    private func kind(_ page: Page) -> Int { shell.isDatabase(page.id) ? 3 : page.isFolder ? 1 : 2 }
+
+    private var visible: [Page] {
+        let key = SearchText.normalize(query.trimmingCharacters(in: .whitespaces))
+        return shell.quickChoices
+            .filter { filter == 0 || kind($0) == filter }
+            .filter { key.isEmpty || SearchText.normalize($0.title).contains(key) }
+            .sorted { a, b in
+                // Без поиска — сначала то, что открывали недавно.
+                if key.isEmpty, (a.lastOpenedAt ?? 0) != (b.lastOpenedAt ?? 0) { return (a.lastOpenedAt ?? 0) > (b.lastOpenedAt ?? 0) }
+                return a.title.localizedStandardCompare(b.title) == .orderedAscending
+            }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Что показать в карточке?").font(.system(size: 15, weight: .semibold)).padding([.horizontal, .top], 16)
+            TextField(L("Найти папку, страницу или базу"), text: $query)
+                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            Picker("", selection: $filter) {
+                Text("Все").tag(0)
+                Text("Папки").tag(1)
+                Text("Страницы").tag(2)
+                Text("Базы").tag(3)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(16)
+            Rectangle().fill(Tokens.line).frame(height: 1)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(visible) { page in row(page) }
+                    if visible.isEmpty {
+                        Text("Ничего не найдено. Попробуйте другой запрос.")
+                            .foregroundColor(Tokens.muted)
+                            .font(.system(size: 13))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 30)
+                    }
+                }
+                .padding(8)
+            }
+            .frame(height: 340)
+            Rectangle().fill(Tokens.line).frame(height: 1)
+            HStack {
+                if shell.quickAccess.slots.indices.contains(slot), shell.quickAccess.slots[slot] != nil {
+                    Button("Выбирать автоматически") { shell.setQuickSlot(slot, nil); dismiss() }
+                        .buttonStyle(NotesButtonStyle(kind: .plain))
+                }
+                Spacer()
+                Button("Отмена") { dismiss() }
+                    .buttonStyle(NotesButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(12)
+        }
+        .frame(width: 500)
+        .background(Tokens.paper)
+    }
+
+    private func row(_ page: Page) -> some View {
+        let k = kind(page)
+        let path = shell.path(of: page.id).dropLast().map(\.title).joined(separator: " / ")
+        return Button { shell.setQuickSlot(slot, page.id); dismiss() } label: {
+            HStack(spacing: 10) {
+                Group {
+                    if let emoji = page.emoji { Text(emoji) } else {
+                        Image(systemName: k == 3 ? "tablecells" : k == 1 ? "folder" : "doc.text").foregroundColor(Tokens.muted)
+                    }
+                }
+                .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(page.title.isEmpty ? L("Без названия") : page.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                    if !path.isEmpty { Text(path).font(.system(size: 11)).foregroundColor(Tokens.muted).lineLimit(1) }
+                }
+                Spacer()
+                Text(k == 3 ? L("База данных") : k == 1 ? L("Папка") : L("Страница"))
+                    .font(.system(size: 11))
+                    .foregroundColor(Tokens.muted)
+                if shell.quickAccess.isPinned(page.id) {
+                    Image(systemName: "pin.fill").font(.system(size: 10)).foregroundColor(Tokens.muted).help(L("Уже закреплено на другом месте — переедет сюда"))
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
