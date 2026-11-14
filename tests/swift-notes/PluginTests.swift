@@ -223,6 +223,15 @@ func runPluginTests() async {
             if case .success = PluginManifest.parse(Data(json.utf8)) { check(false, "отклонено: \(bad)") }
         }
         if case .success(let m) = PluginManifest.parse(Data(readJSON.utf8)) { check(m.installer == nil, "поле необязательно") }
+
+        // Описание на языке интерфейса (ADR-0019, п. 15).
+        let multi = #"{"id":"x.y","name":"X","kind":"plugin","description":"Русское","descriptions":{"en":"English","x y":"bad"}}"#
+        if case .success(let m) = PluginManifest.parse(Data(multi.utf8)) {
+            checkEqual(m.summary(language: "en"), "English")
+            checkEqual(m.summary(language: "ru"), "Русское", "нет перевода — основное описание")
+            checkEqual(m.summary(language: "de"), "Русское")
+            check(m.summaries["x y"] == nil, "ключ языка — только буквы")
+        } else { check(false, "описание с descriptions не разобрано") }
     }
 
     await test("Локальный API: только расширения браузера, CORS только для них") {

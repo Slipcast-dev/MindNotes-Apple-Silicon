@@ -57,6 +57,12 @@ Install: double-click the package or Settings → Extensions → “Install Plug
 | `pages.open` | show a page in MindNotes |
 | `assets.create` | add images as attachments |
 | `tags.write` | tag the pages it creates |
+| `pages.read` | list pages and folders, read their text as Markdown and their attachments (`GET /v1/pages`, `…/markdown`, `…/assets/<id>`) |
+| `pages.write` | apply edits from Markdown to a page's **text blocks** (`PUT /v1/pages/<id>/markdown`); the previous text stays in history |
+
+No permission opens databases, their records, or password-locked pages (with everything inside).
+
+Optional manifest fields: `"installer": "<bundle id>"` — the plugin's program, which MindNotes finds, updates and runs with `--update` (like the Web Clipper installer); `"descriptions": {"en": "…"}` — the description in other languages (MindNotes shows the one in its interface language); `"minApp"` — the oldest suitable MindNotes.
 
 Plugin updates are looked up in releases tagged `<updates><version>` (for example, `webclipper-v1.0.4`). If a plugin lives in its own repository, set `"repository": "owner/name"` — a GitHub name only, not a URL; without it, releases are looked up in the MindNotes repository (plugins that have already moved, such as Web Clipper, are known to MindNotes and looked up in their own repository). A plugin release contains an installer program, and API permissions do not limit it. So only updates from the MindNotes publisher (repositories of the `Slipcast-dev` owner) install by themselves; a release from another owner installs only with the “Update” button and after a separate question about running its program. The program from a release replaces only itself (the same bundle ID).
 
@@ -64,4 +70,7 @@ A client connects with `POST /v1/pair {"plugin": "<id>"}`: MindNotes asks “Con
 
 Everything a plugin may rely on — address and port, paths, permissions, `features`, app identifiers — is listed in [`contracts/plugin-api.json`](../../contracts/plugin-api.json). Plugins live in their own repositories, keep a copy of this file and test against it; `tests/plugin-api.test.cjs` checks that MindNotes matches it. Change the contract together with the code, and only compatibly within one `api` version: add, don't remove or rename.
 
-The first plugin is **Web Clipper** ([its own repository](https://github.com/Slipcast-dev/MindNotes-WebClipper)): articles, selections, bookmarks, screenshots and images from Chrome and Safari. It is installed by the `MindNotes Web Clipper.app` installer, which adds the plugin to MindNotes and the extension to every browser it finds; the connection to MindNotes is almost automatic: for 10 minutes after installing, the extension asks for a key by itself and MindNotes asks “Connect?” once, showing where the request comes from. No key is issued without consent. “Connect Browsers” in the plugin settings reopens that window; running the installer of the same version again does not — then click “Connect” in the extension.
+Plugins from the MindNotes publisher:
+
+- **Web Clipper** ([its own repository](https://github.com/Slipcast-dev/MindNotes-WebClipper)): articles, selections, bookmarks, screenshots and images from Chrome and Safari. It is installed by the `MindNotes Web Clipper.app` installer, which adds the plugin to MindNotes and the extension to every browser it finds; the connection to MindNotes is almost automatic: for 10 minutes after installing, the extension asks for a key by itself and MindNotes asks “Connect?” once, showing where the request comes from. No key is issued without consent. “Connect Browsers” in the plugin settings reopens that window; running the installer of the same version again does not — then click “Connect” in the extension.
+- **GitHub for MindNotes** ([its own repository](https://github.com/Slipcast-dev/MindNotes-GitHub)): syncs a MindNotes section with a GitHub repository — pages as Markdown in a single commit, text edits from GitHub back into text blocks. The menu bar app runs separately from MindNotes, installs and updates like Web Clipper, and has a step-by-step FAQ. Requires MindNotes 1.8.0 or later.

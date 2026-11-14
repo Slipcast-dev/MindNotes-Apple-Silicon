@@ -39,6 +39,11 @@ struct PluginManifest: Equatable {
     /// Bundle ID программы-установщика плагина (ADR-0019, п. 14): её MindNotes находит, заменяет при обновлении
     /// и запускает с `--update`. Нет поля — у Web Clipper известный установщик, у остальных — нет.
     var installer: String?
+    /// Описание на других языках: `"descriptions": {"en": "…"}` (ADR-0019, п. 15). Нет нужного — `summary`.
+    var summaries: [String: String] = [:]
+
+    /// Описание на языке интерфейса MindNotes (`ru`, `en`).
+    func summary(language: String) -> String? { summaries[language] ?? summary }
 
     static func == (a: PluginManifest, b: PluginManifest) -> Bool {
         a.id == b.id && a.version == b.version && a.permissions == b.permissions && a.components == b.components
@@ -91,6 +96,10 @@ struct PluginManifest: Equatable {
                                       permissions: known, unknownPermissions: unknown, components: components, minApp: base.minApp,
                                       updates: updates, repository: repository)
         manifest.installer = installer
+        for (lang, text) in (o["descriptions"] as? [String: Any]) ?? [:] {
+            guard lang.count <= 8, lang.allSatisfy({ $0.isASCII && $0.isLetter }), let text = text as? String else { continue }
+            manifest.summaries[lang.lowercased()] = String(text.prefix(300))
+        }
         return .success(manifest)
     }
 

@@ -142,7 +142,7 @@ final class PluginHost: ObservableObject {
         confirm.messageText = existing == nil ? String(format: L("Установить плагин «%@»?"), manifest.name)
                                               : String(format: L("Обновить плагин «%@» с версии %@ до %@?"), manifest.name, existing!.manifest.version, manifest.version)
         var text = ""
-        if let summary = manifest.summary { text += summary + "\n\n" }
+        if let summary = manifest.summary(language: AppLanguage.saved.rawValue) { text += summary + "\n\n" }
         text += L("Плагин сможет:") + "\n" + manifest.permissions.map { "• " + Self.title($0) }.joined(separator: "\n")
         text += "\n\n" + L("Код плагина не запускается внутри MindNotes: он работает в браузере и обращается к приложению только после того, как вы подключите его.")
         confirm.informativeText = text
@@ -530,7 +530,7 @@ struct PluginsSettings: View {
                         .toggleStyle(.switch).labelsHidden()
                 }
             }
-            if let summary = plugin.manifest.summary { Text(summary).font(.system(size: 12)).foregroundColor(Tokens.muted) }
+            if let summary = plugin.manifest.summary(language: AppLanguage.saved.rawValue) { Text(summary).font(.system(size: 12)).foregroundColor(Tokens.muted) }
             PluginUpdateRow(plugin: plugin) // кнопка проверки видна всегда
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(plugin.manifest.permissions, id: \.self) { p in

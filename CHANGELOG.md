@@ -6,6 +6,19 @@ All notable changes to MindNotes. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-14
+
+Plugins can read and edit pages: the first such plugin is GitHub for MindNotes.
+
+### Added
+- **Plugin API:** `pages.read` — the list of pages and folders, their text as Markdown and their attachments; `pages.write` — edits from Markdown are applied to a page's **text blocks only** (paragraphs, headings, lists, to-dos, quotes, code). Unchanged blocks are left alone with their colors and comments; images, files, tables, columns, toggles, synced blocks and databases are never changed or deleted. The previous text is saved in the page history first; an open page is changed through the editor and can be undone. Password-locked pages, databases and records are never available.
+- **Plugin programs:** the optional `installer` manifest field names a plugin's program; MindNotes finds it, updates it and restarts it with `--update`, as it does for the Web Clipper installer. The plugin card has “Open the plugin program”.
+- **Plugin descriptions** in the interface language (`descriptions` manifest field).
+- A connection request from a program (not a browser) asks “Connect the plugin program?”; the card of a program plugin no longer mentions browsers.
+
+### Fixed
+- An image or video poster could stay “Image unavailable” until the app was restarted if the editor drew the page before it could look up attachment files (at launch and after an external change). It now loads on the next redraw.
+
 ## [1.7.1] - 2026-11-14
 
 Fixes from the security and reliability audit of 14 November 2026.
