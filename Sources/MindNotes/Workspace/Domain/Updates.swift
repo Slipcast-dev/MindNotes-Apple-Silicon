@@ -112,3 +112,24 @@ enum UpdateReplacement {
         """
     }
 }
+
+/// Временные файлы обновлений приложения и плагинов (ADR-0014, ADR-0019): скачанные образы и суммы,
+/// папки, куда монтируется образ. Приложение убирает их само, а при запуске подметает остатки прежних версий,
+/// в которых уборки не было. Здесь только правило отбора; файлами занимается `UpdateTempCleanup`.
+enum UpdateTempFiles {
+    /// Скачанные файлы: `MindNotes-update-<uuid>-<имя>` (приложение), `MindNotes-plugin-<uuid>-<имя>` (плагины).
+    static let downloadPrefixes = ["MindNotes-update-", "MindNotes-plugin-"]
+    /// Папки монтирования образа.
+    static let mountPrefixes = ["MindNotes-mount-", "MindNotes-plugin-mount-"]
+    /// Скачанное младше суток не трогаем: вдруг идёт загрузка во втором окне или проверка.
+    static let downloadMaxAge: TimeInterval = 24 * 60 * 60
+    /// Пустая папка монтирования младше 10 минут может ждать `hdiutil attach`.
+    static let mountMaxAge: TimeInterval = 10 * 60
+
+    /// Остаток ли это. Папка монтирования убирается только пустой — это проверяет вызывающий.
+    static func isLeftover(name: String, isDirectory: Bool, age: TimeInterval) -> Bool {
+        let isMount = mountPrefixes.contains { name.hasPrefix($0) }
+        if isDirectory { return isMount && age >= mountMaxAge }
+        return !isMount && downloadPrefixes.contains { name.hasPrefix($0) } && age >= downloadMaxAge
+    }
+}

@@ -246,7 +246,10 @@ final class PluginUpdater: ObservableObject {
         let mount = fm.temporaryDirectory.appendingPathComponent("MindNotes-plugin-mount-\(UUID().uuidString)")
         try fm.createDirectory(at: mount, withIntermediateDirectories: true)
         try run("/usr/bin/hdiutil", ["attach", image.path, "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", mount.path])
-        defer { _ = try? run("/usr/bin/hdiutil", ["detach", mount.path, "-force"]) }
+        defer {
+            _ = try? run("/usr/bin/hdiutil", ["detach", mount.path, "-force"])
+            UpdateTempCleanup.removeMountPoint(mount)
+        }
         let apps = (try fm.contentsOfDirectory(at: mount, includingPropertiesForKeys: nil)).filter { $0.pathExtension == "app" }
         guard apps.count == 1, let app = apps.first else { throw UpdateError(L("В образе нет программы-установщика.")) }
         let folder = current?.deletingLastPathComponent() ?? fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true)

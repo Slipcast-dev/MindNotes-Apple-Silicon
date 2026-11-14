@@ -64,6 +64,8 @@ final class Updater: ObservableObject {
 
     /// Запуск: в автоматическом режиме проверка сейчас (если не было сегодня) и раз в сутки.
     func start() {
+        // Остатки прежних обновлений (образы, суммы, пустые папки монтирования) — один раз при запуске.
+        Task.detached(priority: .background) { UpdateTempCleanup.sweep() }
         guard canUpdate, mode == .automatic else { return }
         scheduleBackground()
         let last = UserDefaults.standard.double(forKey: Self.lastCheckKey)
@@ -115,6 +117,9 @@ final class Updater: ObservableObject {
             do {
                 state = .downloading(0)
                 let image = try await download(release.image)
+                // При ошибке файлы убирает defer; при успехе приложение выходит раньше, чем defer сработает,
+                // поэтому перед перезапуском они удаляются явно (иначе каждый выпуск оставлял образ во временной папке).
+                defer { try? FileManager.default.removeItem(at: image) }
                 let sumsFile = try await fetch(release.checksums, limit: 1 << 20, progress: false)
                 defer { try? FileManager.default.removeItem(at: sumsFile) }
                 let sums = try Data(contentsOf: sumsFile)
@@ -125,6 +130,9 @@ final class Updater: ObservableObject {
                 let actual = try await Task.detached { try Self.sha256(of: image) }.value
                 guard actual == expected else { throw UpdateError(L("Образ повреждён: контрольная сумма не совпала. Установка отменена.")) }
                 let staged = try await Task.detached { try Self.stage(image: image) }.value
+                // Программа уже скопирована рядом с установленной: образ и суммы больше не нужны.
+                try? FileManager.default.removeItem(at: image)
+                try? FileManager.default.removeItem(at: sumsFile)
                 // Сначала записать и закрыть пространство: окно обновления не даёт обычному выходу завершиться,
                 // и сценарий замены ждал бы его бесконечно (1.3.0–1.5.0).
                 showsSheet = false
@@ -194,7 +202,10 @@ final class Updater: ObservableObject {
         let mount = FileManager.default.temporaryDirectory.appendingPathComponent("MindNotes-mount-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: mount, withIntermediateDirectories: true)
         try run("/usr/bin/hdiutil", ["attach", image.path, "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", mount.path])
-        defer { _ = try? run("/usr/bin/hdiutil", ["detach", mount.path, "-force"]) }
+        defer {
+            _ = try? run("/usr/bin/hdiutil", ["detach", mount.path, "-force"])
+            UpdateTempCleanup.removeMountPoint(mount)
+        }
         let app = mount.appendingPathComponent("MindNotes.app")
         guard FileManager.default.fileExists(atPath: app.path) else { throw UpdateError(L("В образе нет MindNotes.app.")) }
         // Не ставить сборку, которая не запустится на этой системе: старая программа остаётся рабочей.

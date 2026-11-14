@@ -3,6 +3,28 @@ import Foundation
 /// Нативная программа из выпуска плагина не запускается сама по одному лишь совпадению разрешений API
 /// (аудит: автообновление плагина вне разрешений API).
 func runNativeUpdateTests() async {
+    await test("Обновления: временные файлы — что считается остатком") {
+        let day = UpdateTempFiles.downloadMaxAge, mount = UpdateTempFiles.mountMaxAge
+        let id = UUID().uuidString
+        // Скачанные образы и суммы приложения и плагинов — только старше суток.
+        check(UpdateTempFiles.isLeftover(name: "MindNotes-update-\(id)-MindNotes-1.7.1.dmg", isDirectory: false, age: day))
+        check(UpdateTempFiles.isLeftover(name: "MindNotes-update-\(id)-SHA256SUMS.txt", isDirectory: false, age: day + 1))
+        check(UpdateTempFiles.isLeftover(name: "MindNotes-plugin-\(id)-plugin-manifest.json", isDirectory: false, age: day))
+        check(!UpdateTempFiles.isLeftover(name: "MindNotes-update-\(id)-MindNotes-1.8.0.dmg", isDirectory: false, age: day - 60),
+              "свежая загрузка не трогается")
+        // Папки монтирования — старше 10 минут (а пустоту проверяет уборка).
+        check(UpdateTempFiles.isLeftover(name: "MindNotes-mount-\(id)", isDirectory: true, age: mount))
+        check(UpdateTempFiles.isLeftover(name: "MindNotes-plugin-mount-\(id)", isDirectory: true, age: mount))
+        check(!UpdateTempFiles.isLeftover(name: "MindNotes-mount-\(id)", isDirectory: true, age: mount - 1), "может ждать attach")
+        // Чужое и похожее — нет.
+        check(!UpdateTempFiles.isLeftover(name: "MindNotes-plugin-mount-\(id)", isDirectory: false, age: day * 2), "файл с именем папки")
+        check(!UpdateTempFiles.isLeftover(name: "MindNotes-update-\(id)", isDirectory: true, age: day * 2), "папка с именем загрузки")
+        for other in ["mindnotes-transfer-abc", "MindNotes Test.app", "mnimg.log", "MindNotes-1.8.0.dmg", "Other-update-x.dmg"] {
+            check(!UpdateTempFiles.isLeftover(name: other, isDirectory: false, age: day * 30), other)
+            check(!UpdateTempFiles.isLeftover(name: other, isDirectory: true, age: day * 30), other)
+        }
+    }
+
     await test("Плагины: автообновление с нативной программой — только от издателя приложения") {
         func manifest(_ version: String, repository: String? = nil, permissions: [String] = ["pages.create"]) -> PluginManifest {
             let repo = repository.map { #","repository":"\#($0)""# } ?? ""
