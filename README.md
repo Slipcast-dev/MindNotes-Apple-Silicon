@@ -15,11 +15,11 @@ A personal, local knowledge base for Mac: pages, a block editor, search, links a
 ## Features
 
 - Pages and subpages, a block editor, trash and version history with restore
-- ⌘K search, `[[` links, backlinks, favourites, tags, templates
+- ⌘K search, `[[` links, backlinks, favourites, tags, templates and a catalog of 10 ready-made templates (habit tracker, roadmap, CRM and more)
 - `@`-mentions of pages, people and dates with local reminders
 - Bookmarks with link previews, embeds (YouTube, Vimeo, Figma, Google Maps), synced blocks, columns, block colours
 - Comments on text and pages, with threads and “Resolved”
-- Databases: table, board, list, calendar, gallery and timeline views; relations, rollups, formulas, people and file properties; filters, sorts, grouping and manual order; live databases inside a page
+- Databases: table, board, list, calendar, gallery and timeline views; relations, rollups, formulas, people and file properties; filters, sorts, grouping, hidden groups and manual order; column totals in tables; a table beside the timeline; live databases inside a page
 - Images, files and video attachments
 - Import of Markdown, CSV, folders and Notion exports; export to Markdown and CSV
 - Manual and automatic backups

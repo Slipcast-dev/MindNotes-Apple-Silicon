@@ -6,6 +6,20 @@ All notable changes to MindNotes. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-14
+
+Databases move closer to Notion: column totals, hidden groups, a table beside the timeline and a catalog of ready-made templates.
+
+### Added
+- **Column totals:** each table column has a calculation row — count, filled, unique, empty, sum, average, median, min and max, percent checked, earliest and latest date. Totals cover every record of the view with its filter, not just the loaded ones; each view keeps its own totals.
+- **Hidden groups:** the “…” menu on a group in board, list, gallery, table and timeline views offers “Hide group” and “Hide empty groups”. Hidden groups and their record counts appear in a “Hidden groups” column on the right of a board or as a row below the visible groups, where they can be shown again.
+- **Timeline table:** a button in the timeline toolbar shows a table of records with the visible properties on the left. Rows line up with the bars, scrolling is shared, cells are editable in place and the table width can be dragged.
+- **Template catalog:** 10 ready-made templates in Personal, Work, Projects and Study — habit tracker, reading list, goals, travel planner, roadmap, project schedule, task list, CRM (clients, products and orders with relations and an order total), job applications and course planner. A template creates databases with properties, coloured options, relations, rollups, formulas, configured views and sample records; dates count from the day it is installed and labels follow the interface language. If installing fails, everything it created goes to the Trash.
+
+### Changed
+- Board columns that do not fit the width wrap to the next row. The previous single row with sideways scrolling is under View → “Columns in one row”.
+- The last Table view now shows a disabled “The last table view can’t be deleted” item in its tab menu instead of an error after trying to delete it.
+
 ## [1.8.1] - 2026-11-14
 
 ### Fixed
