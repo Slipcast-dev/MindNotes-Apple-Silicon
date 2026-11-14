@@ -6,6 +6,8 @@ All notable changes to MindNotes. The format follows [Keep a Changelog](https://
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-11-14
+
 ### Fixed
 - App and plugin updates no longer leave files in the temporary folder: the downloaded image and checksums are removed before the restart, and the empty mount folder after the image is detached. At launch MindNotes also removes leftovers of earlier updates — only its own downloads older than a day and empty mount folders.
 
