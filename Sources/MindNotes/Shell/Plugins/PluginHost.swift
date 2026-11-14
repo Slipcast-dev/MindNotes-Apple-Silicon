@@ -510,7 +510,10 @@ struct PluginsSettings: View {
                 } else if let chrome = host.component("chrome", of: plugin) {
                     Button("Для Chrome…") { host.openAutoPair(plugin.id); ChromeInstallGuide.show(folder: chrome) }.buttonStyle(NotesButtonStyle(kind: .plain))
                 }
-                if host.isActive(plugin.id) {
+                if host.isActive(plugin.id) && plugin.manifest.components.isEmpty {
+                    // Плагин-программа (без расширения браузера) подключается сама, кнопкой в своём окне.
+                    Text("Подключение — кнопкой «Подключить» в программе плагина").font(.system(size: 11)).foregroundColor(Tokens.muted)
+                } else if host.isActive(plugin.id) {
                     if host.isAutoPairOpen(plugin.id) {
                         Text("Браузер спросит разрешение на подключение").font(.system(size: 11)).foregroundColor(Tokens.muted)
                     } else {

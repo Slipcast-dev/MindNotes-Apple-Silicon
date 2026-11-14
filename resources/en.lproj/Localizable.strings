@@ -1797,3 +1797,4 @@
 "Программа сможет:" = "The program will be able to:";
 "Если вы не нажимали «Подключить» в программе плагина, откажитесь." = "If you did not click Connect in the plugin program, deny.";
 "читать текст страниц и их вложения (кроме закрытых паролем)" = "read the text of pages and their attachments (except password-locked ones)";
+"Подключение — кнопкой «Подключить» в программе плагина" = "Connect it with the Connect button in the plugin program";
