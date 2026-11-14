@@ -25,6 +25,19 @@ func handleExtraChild() async -> Bool {
             _exit(result.isComplete ? 0 : 8)
         } catch { FileHandle.standardError.write(Data("demo error \(error)\n".utf8)); _exit(7) }
     }
+    // Демо-пространство и все шаблоны каталога: для ручной проверки досок, итогов и хронологии.
+    if let i = args.firstIndex(of: "--seed-catalog"), args.count > i + 1 {
+        do {
+            let dir = URL(fileURLWithPath: args[i + 1])
+            try await seedDemo(dir: dir)
+            let ws = try SQLiteWorkspace.open(at: dir)
+            for template in TemplateCatalog.all {
+                _ = try await ws.install(template, today: LocalDate(date: Date(), in: .current), now: SystemClock().nowMillis())
+            }
+            ws.close()
+            _exit(0)
+        } catch { print("seed error \(error)"); _exit(7) }
+    }
     if let i = args.firstIndex(of: "--seed-demo"), args.count > i + 1 {
         do { try await seedDemo(dir: URL(fileURLWithPath: args[i + 1])); _exit(0) }
         catch { print("seed error \(error)"); _exit(7) }

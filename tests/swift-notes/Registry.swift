@@ -38,6 +38,7 @@ func runAllNotesTests() async {
     await runDatabaseTests()
     await runRelationTests()
     await runRollupTests()
+    await runNotionGapsTests()
     await runFormulaTests()
     await runFormulaStoreTests()
     await runBackupTests()

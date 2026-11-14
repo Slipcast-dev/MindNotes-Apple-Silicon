@@ -140,7 +140,12 @@ struct DatabaseScreen: View {
                 .buttonStyle(.plain)
                 .contextMenu {
                     Button("Переименовать…") { renameView(view) }
-                    Button("Удалить представление") { deleteView(view) }.disabled(model.views.count < 2)
+                    if isLastTable(view) {
+                        // Хранилище не даёт удалить последнюю таблицу: пункт объясняет это заранее, а не ошибкой.
+                        Button("Последнюю таблицу удалить нельзя") {}.disabled(true)
+                    } else {
+                        Button("Удалить представление") { deleteView(view) }.disabled(model.views.count < 2)
+                    }
                 }
             }
             Menu {
@@ -172,6 +177,11 @@ struct DatabaseScreen: View {
     private func renameView(_ view: DatabaseView) {
         guard let name = PromptAlert.ask(L("Название представления"), value: view.name) else { return }
         model.perform { [store = model.store] in try await store.renameView(view.id, to: name) }
+    }
+
+    /// У базы должна остаться хотя бы одна таблица.
+    private func isLastTable(_ view: DatabaseView) -> Bool {
+        view.kind == DatabaseView.tableKind && (model.database?.views.filter { $0.kind == DatabaseView.tableKind }.count ?? 0) < 2
     }
 
     private func deleteView(_ view: DatabaseView) {
@@ -249,9 +259,13 @@ struct DatabaseScreen: View {
                 Section(header: header) {
                     ForEach(model.sections) { section in
                         if let group = section.group {
-                            GroupHeader(group: group, count: section.total, property: model.database?.property(group.property))
-                                .padding(.top, 10)
-                                .padding(.bottom, 4)
+                            HStack {
+                                GroupHeader(group: group, count: section.total, property: model.database?.property(group.property))
+                                GroupMenu(model: model, group: group)
+                                Spacer()
+                            }
+                            .padding(.top, 10)
+                            .padding(.bottom, 4)
                         }
                         ForEach(section.rows) { row($0) }
                         if section.rows.count < section.total {
@@ -260,7 +274,9 @@ struct DatabaseScreen: View {
                                 .padding(.top, 6)
                         }
                     }
+                    if !model.hiddenSections.isEmpty { HiddenGroupsRow(model: model).padding(.top, 8) }
                     footer
+                    calculationRow
                 }
             }
             .padding(.horizontal, inset)
@@ -339,6 +355,55 @@ struct DatabaseScreen: View {
                 .foregroundColor(Tokens.muted)
                 .help(L("Открыть как страницу"))
                 .accessibilityLabel(Text("Открыть как страницу"))
+        }
+    }
+
+    /// Строка итогов под таблицей, как COUNT в Notion: у каждого столбца свой подсчёт, выбор — по щелчку.
+    private var calculationRow: some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: 30)
+            ForEach(model.visibleColumns) { property in
+                calculationCell(property)
+                    .padding(.horizontal, 8)
+                    .frame(width: width(property), height: 30, alignment: .trailing)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Итоги"))
+    }
+
+    private func calculationCell(_ property: PropertyDefinition) -> some View {
+        let current = model.state.calculation(property.id)
+        return Menu {
+            Button(L("Без итога")) { model.setCalculation(property.id, nil) }
+            Divider()
+            ForEach(RollupAggregate.calculations(for: property.valueType), id: \.self) { aggregate in
+                Button(aggregate.title) { model.setCalculation(property.id, aggregate) }
+            }
+        } label: {
+            if let current {
+                HStack(spacing: 4) {
+                    Text(current.shortTitle.uppercased()).font(.system(size: 10, weight: .medium)).foregroundColor(Tokens.muted)
+                    Text(calculationText(property, current)).font(.system(size: 12, weight: .semibold))
+                }
+            } else {
+                Text(L("Итог")).font(.system(size: 11)).foregroundColor(Tokens.muted.opacity(0.6))
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(L("Итог по столбцу"))
+    }
+
+    private func calculationText(_ property: PropertyDefinition, _ aggregate: RollupAggregate) -> String {
+        guard let value = model.calculations[property.id] else { return "—" }
+        switch value {
+        case .number(let n):
+            let percent = aggregate == .percentEmpty || aggregate == .percentChecked
+            return percent ? "\(PropertyDisplay.number(n)) %" : PropertyDisplay.number(n)
+        case .date(let d): return PropertyDisplay.date(d)
+        default: return PropertyDisplay.text(value, property: property) ?? "—"
         }
     }
 

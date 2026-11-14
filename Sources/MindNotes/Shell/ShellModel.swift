@@ -897,6 +897,18 @@ final class ShellModel: ObservableObject {
         }
     }
 
+    /// Шаблон каталога: страницы и базы создаются в пространстве и сразу открываются.
+    func useCatalog(_ template: CatalogTemplate) {
+        enqueue {
+            guard let store = self.store, let session = self.session else { return }
+            let page = try await store.install(template, today: LocalDate(date: Date(), in: .current), now: SystemClock().nowMillis())
+            self.databaseIndex = try await store.databaseIndex()
+            try await session.refreshPages()
+            self.pages = session.pages
+            try await self.show(page)
+        }
+    }
+
     func renameTemplate(_ template: PageTemplate) {
         guard let name = PromptAlert.ask(L("Название шаблона"), value: template.name) else { return }
         enqueue {

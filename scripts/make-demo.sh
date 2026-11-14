@@ -7,6 +7,7 @@ S=Sources/MindNotes
 OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
 FILES=("${(@f)$(for d in $S/Workspace $S/Persistence $S/BlockEditor/Commands $S/BlockEditor/UI/Native $S/Backup $S/ImportExport tests/swift-notes; do find $d -name '*.swift'; done)}")
+FILES+=($S/Core/Localization.swift $S/Shell/Screens/TemplateCatalog.swift)
 swiftc -Onone -target "$TARGET" -o "$OUT/seed" "${FILES[@]}" 2>&1 | grep -E 'error' || true
 [[ -x "$OUT/seed" ]] || { echo "Генератор не скомпилировался"; exit 1; }
 mkdir -p build/demo

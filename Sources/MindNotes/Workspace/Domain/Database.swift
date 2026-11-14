@@ -574,6 +574,8 @@ struct ColumnState: Equatable, Codable {
     var visible = true
     /// Ширина столбца таблицы в точках (M10.4); nil — ширина по типу свойства.
     var width: Double? = nil
+    /// Итог под столбцом таблицы: подсчёт по всем записям вида; nil — без итога.
+    var calculation: RollupAggregate? = nil
 
     static let minWidth = 60.0, maxWidth = 800.0
     /// Ширина в допустимых пределах; нечисло и бесконечность дают nil.
@@ -597,6 +599,14 @@ struct DatabaseViewState: Equatable {
     var timelineDay: LocalDate?
     /// Хронология: связь базы с самой собой, по которой рисуются стрелки «зависит от».
     var dependencyProperty: UUID?
+    /// Скрытые группы доски и других видов с группировкой: id групп (`RecordGroup.id`).
+    var hiddenGroups: [String] = []
+    /// Не показывать группы без записей.
+    var hideEmptyGroups = false
+    /// Хронология: таблица записей слева от шкалы.
+    var showTimelineTable = false
+    /// Доска: колонки в один ряд с прокруткой вбок; по умолчанию не поместившиеся колонки переносятся вниз.
+    var boardSingleRow = false
     var extra: [String: JSONValue] = [:]
 
     private struct Known: Codable {
@@ -610,6 +620,10 @@ struct DatabaseViewState: Equatable {
         var timelineScale: String?
         var timelineDay: String?
         var dependencyProperty: UUID?
+        var hiddenGroups: [String]?
+        var hideEmptyGroups: Bool?
+        var showTimelineTable: Bool?
+        var boardSingleRow: Bool?
     }
 
     init() {}
@@ -626,7 +640,12 @@ struct DatabaseViewState: Equatable {
             showCover = known.showCover ?? true
             timelineDay = known.timelineDay.flatMap(LocalDate.init(iso:))
             dependencyProperty = known.dependencyProperty
-            for key in ["filter", "sorts", "columns", "groupBy", "dateProperty", "showCover", "timelineDay", "dependencyProperty"] { object[key] = nil }
+            hiddenGroups = known.hiddenGroups ?? []
+            hideEmptyGroups = known.hideEmptyGroups ?? false
+            showTimelineTable = known.showTimelineTable ?? false
+            boardSingleRow = known.boardSingleRow ?? false
+            for key in ["filter", "sorts", "columns", "groupBy", "dateProperty", "showCover", "timelineDay", "dependencyProperty",
+                        "hiddenGroups", "hideEmptyGroups", "showTimelineTable", "boardSingleRow"] { object[key] = nil }
             // Незнакомый масштаб остаётся в `extra` и записывается обратно как был.
             if let raw = known.timelineScale, let scale = TimelineScale(rawValue: raw) {
                 timelineScale = scale
@@ -641,7 +660,11 @@ struct DatabaseViewState: Equatable {
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let known = try encoder.encode(Known(filter: filter, sorts: sorts, columns: columns, groupBy: groupBy, dateProperty: dateProperty, showCover: showCover,
                                                  timelineScale: timelineScale == .week ? nil : timelineScale.rawValue,
-                                                 timelineDay: timelineDay?.iso, dependencyProperty: dependencyProperty))
+                                                 timelineDay: timelineDay?.iso, dependencyProperty: dependencyProperty,
+                                                 hiddenGroups: hiddenGroups.isEmpty ? nil : hiddenGroups,
+                                                 hideEmptyGroups: hideEmptyGroups ? true : nil,
+                                                 showTimelineTable: showTimelineTable ? true : nil,
+                                                 boardSingleRow: boardSingleRow ? true : nil))
         guard case .object(let fields) = try JSONDecoder().decode(JSONValue.self, from: known) else { return "{}" }
         let merged = extra.merging(fields) { _, new in new }
         return String(decoding: try encoder.encode(JSONValue.object(merged)), as: UTF8.self)
@@ -668,6 +691,24 @@ struct DatabaseViewState: Equatable {
         var out = self
         out.filter = FilterGroup(mode: .and, items: [.group(filter)] + rules.map { .rule($0) })
         return out
+    }
+
+    /// Группа скрыта пользователем.
+    func isHidden(group id: String) -> Bool { hiddenGroups.contains(id) }
+
+    mutating func setGroup(_ id: String, hidden: Bool) {
+        hiddenGroups.removeAll { $0 == id }
+        if hidden { hiddenGroups.append(id) }
+    }
+
+    /// Итог под столбцом свойства или nil.
+    func calculation(_ property: UUID) -> RollupAggregate? { columns.first { $0.property == property }?.calculation }
+
+    /// Итог задаётся и для столбца, которого ещё нет в списке, как ширина.
+    mutating func setCalculation(_ property: UUID, _ aggregate: RollupAggregate?, properties: [PropertyDefinition]) {
+        columns = orderedColumns(properties)
+        guard let i = columns.firstIndex(where: { $0.property == property }) else { return }
+        columns[i].calculation = aggregate
     }
 
     /// Столбцы в порядке представления: новые свойства в конце и видимы, удалённые исчезают, заголовок всегда виден.

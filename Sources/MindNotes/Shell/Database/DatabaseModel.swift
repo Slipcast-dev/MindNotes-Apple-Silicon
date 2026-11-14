@@ -26,6 +26,33 @@ extension PropertyType {
 }
 
 extension RollupAggregate {
+    /// Итоги под столбцом: те же подсчёты, что у свёрток, кроме «показать значения».
+    static func calculations(for type: PropertyType) -> [RollupAggregate] {
+        available(for: type).filter { $0 != .showOriginal }
+    }
+
+    /// Короткая подпись итога в строке под таблицей.
+    var shortTitle: String {
+        switch self {
+        case .count: return L("Всего")
+        case .countValues: return L("Заполнено")
+        case .countUnique: return L("Разных")
+        case .countEmpty: return L("Пустых")
+        case .percentEmpty: return L("Пустых, %")
+        case .percentChecked: return L("Отмечено, %")
+        case .sum: return L("Сумма")
+        case .average: return L("Среднее")
+        case .median: return L("Медиана")
+        case .min: return L("Мин.")
+        case .max: return L("Макс.")
+        case .range: return L("Размах")
+        case .earliest: return L("Раньше всех")
+        case .latest: return L("Позже всех")
+        case .dateRange: return L("Дней")
+        default: return title
+        }
+    }
+
     var title: String {
         switch self {
         case .count: return L("Количество записей")
@@ -86,6 +113,10 @@ final class DatabaseModel: ObservableObject {
     @Published private(set) var total = 0
     /// Группы текущего вида: без группировки одна, с `group == nil`.
     @Published private(set) var sections: [RecordSection] = []
+    /// Группы, скрытые пользователем: только число записей, сами записи не читаются.
+    @Published private(set) var hiddenSections: [RecordSection] = []
+    /// Итоги под столбцами таблицы по всем записям вида.
+    @Published private(set) var calculations: [UUID: PropertyValue] = [:]
     /// Календарь: записи месяца и записи без даты.
     @Published private(set) var calendarRows: [RecordRow] = []
     /// Записей в видимых днях: больше предела означает, что показаны не все.
@@ -184,14 +215,21 @@ final class DatabaseModel: ObservableObject {
             try await loadCalendar(fresh, current)
             rows = calendarRows + undated.rows
             sections = []
+            hiddenSections = []
         } else if kind == DatabaseView.timelineKind {
             try await loadTimeline(fresh, current)
             rows = sections.flatMap(\.rows) + undated.rows
         } else {
-            var loaded: [RecordSection] = []
+            var loaded: [RecordSection] = [], hidden: [RecordSection] = []
             if let property = current.groupProperty(fresh.properties, kind: kind) {
                 for group in RecordGroup.groups(for: property, people: people) {
+                    if current.isHidden(group: group.id) {
+                        let total = try await store.queryRecords(database: fresh, state: current.narrowed(by: [group.rule]), limit: 0, offset: 0).total
+                        hidden.append(RecordSection(id: group.id, group: group, rows: [], total: total))
+                        continue
+                    }
                     let page = try await store.queryRecords(database: fresh, state: current.narrowed(by: [group.rule]), limit: limits[group.id] ?? Self.pageSize, offset: 0, manualView: manualOrderView)
+                    if current.hideEmptyGroups, page.total == 0 { continue }
                     loaded.append(RecordSection(id: group.id, group: group, rows: page.rows, total: page.total))
                 }
             } else {
@@ -199,8 +237,12 @@ final class DatabaseModel: ObservableObject {
                 loaded = [RecordSection(id: "all", group: nil, rows: page.rows, total: page.total)]
             }
             sections = loaded
+            hiddenSections = hidden
             rows = loaded.flatMap(\.rows)
         }
+        let requests = Dictionary(current.columns.compactMap { c in c.calculation.map { (c.property, $0) } }, uniquingKeysWith: { a, _ in a })
+        calculations = kind == DatabaseView.tableKind && !requests.isEmpty
+            ? try await store.columnCalculations(database: fresh, state: current, requests) : [:]
         selection.formIntersection(Set(rows.map(\.id)))
     }
 
@@ -244,7 +286,13 @@ final class DatabaseModel: ObservableObject {
                                              FilterRule(property: date.id, op: .lessOrEqual, value: window.end.iso)])
         let groups: [RecordGroup?] = current.groupProperty(fresh.properties, kind: DatabaseView.timelineKind).map { RecordGroup.groups(for: $0, people: people) } ?? [nil]
         var loaded: [RecordSection] = [], budget = Self.calendarLimit, total = 0
+        hiddenSections = []
         for group in groups {
+            if let group, current.isHidden(group: group.id) {
+                let count = try await store.queryRecords(database: fresh, state: inWindow.narrowed(by: [group.rule]), limit: 0, offset: 0).total
+                hiddenSections.append(RecordSection(id: group.id, group: group, rows: [], total: count))
+                continue
+            }
             let state = group.map { inWindow.narrowed(by: [$0.rule]) } ?? inWindow
             let page = try await store.queryRecords(database: fresh, state: state, limit: budget, offset: 0, manualView: manualOrderView)
             budget -= page.rows.count
@@ -570,6 +618,21 @@ final class DatabaseModel: ObservableObject {
             guard let i = columns.firstIndex(where: { $0.property == property }), columns.indices.contains(i + delta) else { return }
             columns.swapAt(i, i + delta)
         }
+    }
+
+    /// Итог под столбцом; nil убирает итог.
+    func setCalculation(_ property: UUID, _ aggregate: RollupAggregate?) {
+        guard let properties = database?.properties else { return }
+        updateState { $0.setCalculation(property, aggregate, properties: properties) }
+    }
+
+    /// Скрыть группу или вернуть её на экран.
+    var groupProperty: PropertyDefinition? {
+        database.flatMap { state.groupProperty($0.properties, kind: activeView?.kind ?? DatabaseView.tableKind) }
+    }
+
+    func setGroup(_ id: String, hidden: Bool) {
+        updateState { $0.setGroup(id, hidden: hidden) }
     }
 
     func setColumnVisible(_ property: UUID, _ visible: Bool) {

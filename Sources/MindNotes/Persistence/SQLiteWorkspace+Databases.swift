@@ -301,6 +301,47 @@ extension SQLiteWorkspace {
         }
     }
 
+    /// Итоги под столбцами: подсчёт по всем записям вида (с его фильтром), а не только по загруженным строкам.
+    /// Записей больше `calculationLimit` — итог не считается: таблица такого размера не открывается целиком.
+    static let calculationLimit = 50_000
+
+    func columnCalculations(database: Database, state: DatabaseViewState, _ requests: [UUID: RollupAggregate]) async throws -> [UUID: PropertyValue] {
+        let wanted = database.properties.filter { requests[$0.id] != nil }
+        guard !wanted.isEmpty else { return [:] }
+        return try await reader.run { db in
+            let filter = DatabaseQuerySQL.compile(state.filter, properties: database.properties)
+            let whereSQL = "p.database_id = ? AND p.deleted_at IS NULL" + (filter.map { " AND \($0.sql)" } ?? "")
+            let whereArgs = [SQLValue(database.id)] + (filter?.args ?? [])
+            var ids: [UUID] = [], titles: [UUID: String] = [:]
+            _ = try db.query("SELECT p.id, p.title FROM pages p WHERE \(whereSQL) LIMIT ?", whereArgs + [.int(Int64(Self.calculationLimit + 1))]) { r in
+                guard let id = r.uuid(0) else { return }
+                ids.append(id)
+                titles[id] = r.text(1)
+            }
+            guard ids.count <= Self.calculationLimit else { return [:] }
+            var values: [UUID: [UUID: PropertyValue]] = [:]
+            let others = wanted.filter { $0.type != .title }
+            if !others.isEmpty {
+                var start = 0
+                while start < ids.count {
+                    let chunk = Array(ids[start..<min(ids.count, start + 500)])
+                    values.merge(try Self.loadValues(db, pages: chunk, properties: others)) { a, _ in a }
+                    start += 500
+                }
+            }
+            var out: [UUID: PropertyValue] = [:]
+            for def in wanted {
+                guard let aggregate = requests[def.id] else { continue }
+                let column: [PropertyValue?] = ids.map { id in
+                    if def.type == .title { let t = titles[id] ?? ""; return t.isEmpty ? nil : .text(t) }
+                    return values[id]?[def.id]
+                }
+                if let result = RollupMath.compute(aggregate, values: column, options: def.options) { out[def.id] = result }
+            }
+            return out
+        }
+    }
+
     func recordValues(page: UUID, database: Database) async throws -> [UUID: PropertyValue] {
         try await reader.run { try Self.loadValues($0, pages: [page], properties: database.properties)[page] ?? [:] }
     }
@@ -988,7 +1029,7 @@ extension SQLiteWorkspace {
                 let table = SQLValue(DatabaseView.tableKind)
                 let others = try db.scalarInt("SELECT count(*) FROM database_views WHERE database_id=? AND kind=? AND id<>?", [SQLValue(database), table, SQLValue(id)]) ?? 0
                 let isTable = try db.scalarInt("SELECT 1 FROM database_views WHERE id=? AND kind=?", [SQLValue(id), table]) != nil
-                guard others > 0 || !isTable else { throw Self.storageError("Последнее представление нельзя удалить.") }
+                guard others > 0 || !isTable else { throw Self.storageError("Нельзя удалить последнюю таблицу: у базы должно остаться хотя бы одно представление «Таблица».") }
                 try db.run("DELETE FROM database_views WHERE id=? AND database_id=?", [SQLValue(id), SQLValue(database)])
             }
         }

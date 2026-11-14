@@ -15,6 +15,8 @@ S=Sources/MindNotes
 OUT=${NOTES_BUILD_ONLY:-$(mktemp -d)}
 [[ -n "${NOTES_BUILD_ONLY:-}" ]] && mkdir -p "$OUT" || trap 'rm -rf "$OUT"' EXIT
 FILES=("${(@f)$(for d in $S/Workspace $S/Persistence $S/BlockEditor/Commands $S/BlockEditor/UI/Native $S/Backup $S/ImportExport tests/swift-notes; do [[ -d $d ]] && find $d -name '*.swift'; done)}")
+# Каталог шаблонов описан в оболочке (подписи через L), но устанавливается хранилищем: тесты проверяют каждый шаблон.
+FILES+=($S/Core/Localization.swift $S/Shell/Screens/TemplateCatalog.swift)
 swiftc "${NOTES_OPT:--Onone}" -target "$TARGET" -o "$OUT/notes-tests" "${FILES[@]}" 2>&1 | grep -E 'error|warning: unre' || true
 [[ -x "$OUT/notes-tests" ]] || { echo "Тесты не скомпилировались"; exit 1; }
 [[ -n "${NOTES_BUILD_ONLY:-}" ]] && { echo "Собрано: $OUT/notes-tests"; exit 0; }

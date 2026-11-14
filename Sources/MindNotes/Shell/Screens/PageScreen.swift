@@ -214,6 +214,8 @@ struct PageScreen: View {
 struct WrappingRow: Layout {
     var spacing: CGFloat = 8
     var lineSpacing: CGFloat = 6
+    /// Прижимать элементы строки к верху (колонки доски разной высоты), а не центрировать.
+    var alignTop = false
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? .infinity
@@ -250,7 +252,7 @@ struct WrappingRow: Layout {
             let height = row.map(\.1.height).max() ?? 0
             var px = bounds.minX
             for (view, size) in row {
-                view.place(at: CGPoint(x: px, y: y + (height - size.height) / 2), proposal: ProposedViewSize(size))
+                view.place(at: CGPoint(x: px, y: alignTop ? y : y + (height - size.height) / 2), proposal: ProposedViewSize(size))
                 px += size.width + spacing
             }
             y += height + lineSpacing

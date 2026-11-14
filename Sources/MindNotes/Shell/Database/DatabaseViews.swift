@@ -155,15 +155,27 @@ struct BoardView: View {
     @ObservedObject var model: DatabaseModel
 
     var body: some View {
-        if model.sections.first?.group == nil {
+        if model.groupProperty == nil {
             EmptyKindNote(text: L("Для доски нужно свойство статуса, выбора или флажок. Добавьте его в «Свойствах»."))
-        } else {
+        } else if model.state.boardSingleRow {
             TopLeadingScroll(resetKey: model.sections.count) {
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(model.sections) { column($0) }
+                    if !model.hiddenSections.isEmpty { HiddenGroupsColumn(model: model) }
                 }
                 .padding(.horizontal, inset)
                 .padding(.vertical, 14)
+            }
+        } else {
+            // Колонки, которые не помещаются по ширине, переносятся на следующий ряд.
+            ScrollView(.vertical) {
+                WrappingRow(spacing: 12, lineSpacing: 12, alignTop: true) {
+                    ForEach(model.sections) { column($0) }
+                    if !model.hiddenSections.isEmpty { HiddenGroupsColumn(model: model) }
+                }
+                .padding(.horizontal, inset)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
     }
@@ -171,7 +183,11 @@ struct BoardView: View {
     private func column(_ section: RecordSection) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if let group = section.group {
-                GroupHeader(group: group, count: section.total, property: model.database?.property(group.property))
+                HStack {
+                    GroupHeader(group: group, count: section.total, property: model.database?.property(group.property))
+                    Spacer(minLength: 4)
+                    GroupMenu(model: model, group: group)
+                }
             }
             ForEach(section.rows) { row in
                 // Карточка, брошенная на другую, встаёт перед ней — в этой же или в соседней колонке.
@@ -193,6 +209,83 @@ struct BoardView: View {
         .acceptsRecord { id, from in
             let source = model.sections.first { $0.id == from }
             if model.canReorder { model.reorder(record: id, before: nil, from: source, to: section) } else { model.move(record: id, from: source, to: section) }
+        }
+    }
+}
+
+/// Меню группы: скрыть её с экрана.
+struct GroupMenu: View {
+    @ObservedObject var model: DatabaseModel
+    let group: RecordGroup
+
+    var body: some View {
+        Menu {
+            Button(L("Скрыть группу")) { model.setGroup(group.id, hidden: true) }
+            Button(model.state.hideEmptyGroups ? L("Показывать пустые группы") : L("Скрывать пустые группы")) {
+                let value = !model.state.hideEmptyGroups
+                model.updateState { $0.hideEmptyGroups = value }
+            }
+        } label: {
+            Image(systemName: "ellipsis").foregroundColor(Tokens.muted)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(L("Действия с группой"))
+    }
+}
+
+/// Строка скрытой группы: цвет, имя, число записей и кнопка «Показать».
+private struct HiddenGroupLine: View {
+    @ObservedObject var model: DatabaseModel
+    let section: RecordSection
+
+    var body: some View {
+        if let group = section.group {
+            HStack(spacing: 6) {
+                GroupHeader(group: group, count: section.total, property: model.database?.property(group.property))
+                Spacer(minLength: 4)
+                Button { model.setGroup(group.id, hidden: false) } label: { Image(systemName: "eye") }
+                    .buttonStyle(.plain)
+                    .foregroundColor(Tokens.muted)
+                    .help(L("Показать группу"))
+            }
+        }
+    }
+}
+
+/// Доска: колонка «Скрытые группы» справа, как в Notion.
+struct HiddenGroupsColumn: View {
+    @ObservedObject var model: DatabaseModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L("Скрытые группы")).font(.system(size: 12, weight: .semibold)).foregroundColor(Tokens.muted)
+            ForEach(model.hiddenSections) { HiddenGroupLine(model: model, section: $0) }
+        }
+        .padding(11)
+        .frame(width: 220, alignment: .topLeading)
+    }
+}
+
+/// Список, галерея и таблица: скрытые группы одной строкой под видимыми.
+struct HiddenGroupsRow: View {
+    @ObservedObject var model: DatabaseModel
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { open.toggle() } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 10))
+                    Text(L("Скрытые группы: %d", model.hiddenSections.count)).font(.system(size: 12))
+                }
+                .foregroundColor(Tokens.muted)
+            }
+            .buttonStyle(.plain)
+            if open {
+                ForEach(model.hiddenSections) { HiddenGroupLine(model: model, section: $0).frame(maxWidth: 320) }
+            }
         }
     }
 }
@@ -223,7 +316,12 @@ private struct SectionsScroll<Cards: View>: View {
             LazyVStack(alignment: .leading, spacing: 10) {
                 ForEach(model.sections) { section in
                     if let group = section.group {
-                        GroupHeader(group: group, count: section.total, property: model.database?.property(group.property)).padding(.top, 8)
+                        HStack {
+                            GroupHeader(group: group, count: section.total, property: model.database?.property(group.property))
+                            GroupMenu(model: model, group: group)
+                            Spacer()
+                        }
+                        .padding(.top, 8)
                     }
                     cards(section)
                     if section.rows.count < section.total {
@@ -231,6 +329,7 @@ private struct SectionsScroll<Cards: View>: View {
                             .buttonStyle(NotesButtonStyle(kind: .plain))
                     }
                 }
+                if !model.hiddenSections.isEmpty { HiddenGroupsRow(model: model).padding(.top, 8) }
                 if model.rows.isEmpty {
                     Text(model.state.filter.ruleCount > 0 ? "Под фильтр не подходит ни одна запись." : "Записей пока нет. Нажмите «Запись».")
                         .font(.system(size: 13))
@@ -441,6 +540,12 @@ struct ViewSettingsPopover: View {
                     Text("Страницей").tag(ShellModel.PeekMode.page)
                 }
                 .onAppear { shell.loadPeekMode(for: model.databaseID) }
+            }
+            if kind == DatabaseView.boardKind {
+                Toggle("Колонки в один ряд", isOn: Binding(get: { model.state.boardSingleRow }, set: { value in
+                    model.updateState { $0.boardSingleRow = value }
+                }))
+                .help(L("Выключено — колонки, которые не помещаются, переносятся вниз"))
             }
             if kind == DatabaseView.galleryKind {
                 Toggle("Показывать обложку страницы", isOn: Binding(get: { model.state.showCover }, set: { value in

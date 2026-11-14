@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -22,11 +23,17 @@ struct TimelineLinkDrag: Equatable {
 /// Хронология (M11): полосы по свойству даты на шкале, которая растёт при прокрутке в обе стороны.
 struct TimelineKindView: View {
     @Environment(\.databaseInset) private var inset
+    @EnvironmentObject private var shell: ShellModel
     @ObservedObject var model: DatabaseModel
 
     static let headerHeight: CGFloat = 40
 
     @State private var position = ScrollPosition(edge: .leading)
+    /// Вертикальная прокрутка шкалы и таблицы слева: двигаются вместе.
+    @State private var verticalPosition = ScrollPosition(edge: .top)
+    @State private var tablePosition = ScrollPosition(edge: .top)
+    @State private var tableWidth: CGFloat = 340
+    @State private var tableDragStart: CGFloat?
     @State private var offsetX: Double = 0
     @State private var viewport: Double = 0
     /// Видимая часть по высоте: холсты стрелок и сетки рисуют только её, а не всю шкалу.
@@ -55,6 +62,10 @@ struct TimelineKindView: View {
                 }
                 Rectangle().fill(Tokens.line).frame(height: 1)
                 HStack(alignment: .top, spacing: 0) {
+                    if model.state.showTimelineTable {
+                        tablePane(property)
+                        tableDivider
+                    }
                     canvas(property)
                     Rectangle().fill(Tokens.line).frame(width: 1)
                     undatedPanel
@@ -78,6 +89,15 @@ struct TimelineKindView: View {
 
     private var toolbar: some View {
         HStack(spacing: 8) {
+            Button {
+                let show = !model.state.showTimelineTable
+                model.updateState { $0.showTimelineTable = show }
+            } label: {
+                Image(systemName: model.state.showTimelineTable ? "chevron.left.2" : "chevron.right.2")
+            }
+            .buttonStyle(NotesButtonStyle(kind: .plain))
+            .help(model.state.showTimelineTable ? L("Скрыть таблицу") : L("Показать таблицу"))
+            .accessibilityLabel(Text(model.state.showTimelineTable ? "Скрыть таблицу" : "Показать таблицу"))
             Text(rangeTitle).font(.system(size: 14, weight: .semibold))
             Spacer()
             Picker("Масштаб", selection: Binding(get: { model.state.timelineScale }, set: { model.setTimelineScale($0) })) {
@@ -129,7 +149,10 @@ struct TimelineKindView: View {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(model.sections) { section in
                                 if let group = section.group {
-                                    GroupHeader(group: group, count: section.total, property: model.database?.property(group.property))
+                                    HStack(spacing: 6) {
+                                        GroupHeader(group: group, count: section.total, property: model.database?.property(group.property))
+                                        GroupMenu(model: model, group: group)
+                                    }
                                         .padding(.leading, offsetX + 12)
                                         .frame(width: window.width, height: TimelineLayout.headerHeight, alignment: .leading)
                                 }
@@ -154,9 +177,11 @@ struct TimelineKindView: View {
                     }
                     .frame(width: window.width, height: layout.height + 40, alignment: .topLeading)
                 }
+                .scrollPosition($verticalPosition)
                 .onScrollGeometryChange(for: [Double].self) { [$0.contentOffset.y, $0.containerSize.height] } action: { _, geo in
                     offsetY = geo[0]
                     viewportHeight = geo[1]
+                    if model.state.showTimelineTable, abs((tablePosition.point?.y ?? -1) - geo[0]) > 0.5 { tablePosition.scrollTo(y: geo[0]) }
                 }
                 .background(alignment: .topLeading) {
                     TimelineGrid(window: window, fromX: offsetX, width: viewport)
@@ -220,10 +245,110 @@ struct TimelineKindView: View {
         model.addDependency(record: target, on: source)
     }
 
+    // MARK: Таблица слева
+
+    /// Таблица записей шкалы: те же строки и та же высота, что у полос, прокрутка общая со шкалой.
+    private func tablePane(_ property: PropertyDefinition) -> some View {
+        let layout = layout(property)
+        let columns = model.visibleColumns
+        let contentWidth = columns.reduce(30) { $0 + Self.tableColumnWidth($1) }
+        return ScrollView(.horizontal) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 0) {
+                    ForEach(columns) { column in
+                        Text(column.name).font(.system(size: 12, weight: .semibold)).foregroundColor(Tokens.muted).lineLimit(1)
+                            .padding(.horizontal, 8)
+                            .frame(width: Self.tableColumnWidth(column), height: Self.headerHeight, alignment: .leading)
+                    }
+                }
+                Rectangle().fill(Tokens.line).frame(width: max(contentWidth, tableWidth), height: 1)
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(model.sections) { section in
+                            if let group = section.group {
+                                GroupHeader(group: group, count: section.total, property: model.database?.property(group.property))
+                                    .padding(.leading, 8)
+                                    .frame(height: TimelineLayout.headerHeight, alignment: .leading)
+                            }
+                            ForEach(section.rows) { row in
+                                if case .date? = row.values[property.id] { tableRow(row, columns: columns) }
+                            }
+                        }
+                    }
+                    .frame(width: max(contentWidth, tableWidth), height: layout.height + 40, alignment: .topLeading)
+                }
+                .scrollPosition($tablePosition)
+                .onScrollGeometryChange(for: Double.self) { $0.contentOffset.y } action: { _, y in
+                    if abs(offsetY - y) > 0.5 { verticalPosition.scrollTo(y: y) }
+                }
+            }
+        }
+        .frame(width: tableWidth)
+        .onAppear { tablePosition.scrollTo(y: offsetY) }
+    }
+
+    private func tableRow(_ row: RecordRow, columns: [PropertyDefinition]) -> some View {
+        HStack(spacing: 0) {
+            ForEach(columns) { column in
+                Group {
+                    if column.type == .title {
+                        HStack(spacing: 5) {
+                            if let icon = row.icon { Text(icon).font(.system(size: 12)) }
+                            CommitField(value: row.title, placeholder: L("Без названия"), bold: true) { new in
+                                model.setTitle(row.id, new)
+                                shell.rename(row.id, to: new)
+                            }
+                            Button { shell.openRecord(row.id, database: model.databaseID) } label: {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 9))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(Tokens.muted)
+                            .help(L("Открыть как страницу"))
+                        }
+                    } else {
+                        PropertyCell(property: column, value: row.values[column.id], record: row.id) { new in
+                            model.setValue(pages: [row.id], property: column.id, value: new)
+                        }
+                    }
+                }
+                .padding(.horizontal, 8)
+                .frame(width: Self.tableColumnWidth(column), height: TimelineLayout.rowHeight, alignment: .leading)
+                .clipped()
+            }
+        }
+        .overlay(Rectangle().fill(Tokens.line.opacity(0.6)).frame(height: 1), alignment: .bottom)
+    }
+
+    private static func tableColumnWidth(_ property: PropertyDefinition) -> CGFloat {
+        switch property.type {
+        case .title: return 220
+        case .checkbox: return 70
+        case .date: return 170
+        default: return 140
+        }
+    }
+
+    /// Граница таблицы: перетаскивание меняет её ширину.
+    private var tableDivider: some View {
+        Rectangle().fill(Tokens.line).frame(width: 1)
+            .overlay {
+                Color.clear.frame(width: 8).contentShape(Rectangle())
+                    .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { drag in
+                            let start = tableDragStart ?? tableWidth
+                            tableDragStart = start
+                            tableWidth = min(900, max(180, start + drag.translation.width))
+                        }
+                        .onEnded { _ in tableDragStart = nil })
+            }
+    }
+
     /// Записи без даты отдельным списком; карточку можно бросить на шкалу — запись получит этот день.
     private var undatedPanel: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
+                if !model.hiddenSections.isEmpty { HiddenGroupsRow(model: model).padding(.bottom, 8) }
                 Text(L("Без даты: %d", model.undated.total)).font(.system(size: 13, weight: .semibold)).padding(.bottom, 4)
                 ForEach(model.undated.rows) { RecordCard(model: model, row: $0, compact: true) }
                 if model.undated.rows.count < model.undated.total {
