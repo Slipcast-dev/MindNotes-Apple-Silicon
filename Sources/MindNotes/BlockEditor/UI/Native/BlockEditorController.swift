@@ -965,12 +965,18 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         }
     }
 
+    /// Вложение помечено «недоступно» (для тестов): метка держится до закрытия редактора.
+    func isAssetUnavailable(_ id: UUID) -> Bool { failedImages.contains(id) }
+
     /// Миниатюра из кэша; при промахе загружается вне главного потока, затем плашка заменяется.
     private func picture(for block: Block) -> NSImage? {
         guard let id = block.assetID else { return nil }
         if let cached = imageCache.object(forKey: id as NSUUID) { return cached }
         guard !loadingImages.contains(id), !failedImages.contains(id) else { return nil }
-        guard let url = assetURL?(id) else {
+        // Редактор рисует страницу и до того, как оболочка даст ему поиск файлов (создание, обновление после правок извне).
+        // Это не ошибка вложения: «недоступно» не запоминается, картинка загрузится при следующей отрисовке.
+        guard let resolve = assetURL else { return nil }
+        guard let url = resolve(id) else {
             failedImages.insert(id)
             return nil
         }
@@ -1000,7 +1006,8 @@ final class BlockEditorController: NSObject, NSTextViewDelegate {
         guard let id = block.assetID else { return nil }
         if let cached = imageCache.object(forKey: id as NSUUID) { return cached }
         guard !loadingImages.contains(id), !failedImages.contains(id) else { return nil }
-        guard let url = assetURL?(id) else {
+        guard let resolve = assetURL else { return nil } // поиска файлов ещё нет — не ошибка, см. picture(for:)
+        guard let url = resolve(id) else {
             failedImages.insert(id)
             return nil
         }

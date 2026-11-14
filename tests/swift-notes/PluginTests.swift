@@ -193,7 +193,9 @@ func runPluginTests() async {
         checkEqual(request("GET /v1/pages/\(page)/markdown").flatMap(LocalAPI.route), .pageMarkdown(id))
         checkEqual(request("GET /v1/pages/\(page)/assets/\(asset.uuidString)").flatMap(LocalAPI.route), .pageAsset(page: id, asset: asset))
         check(request("POST /v1/pages").flatMap(LocalAPI.route) == nil, "список — только GET")
-        check(request("PUT /v1/pages/\(page)/markdown").flatMap(LocalAPI.route) == nil, "запись — не в этой версии")
+        checkEqual(request("PUT /v1/pages/\(page)/markdown").flatMap(LocalAPI.route), .writeMarkdown(id))
+        checkEqual(LocalAPI.permission(for: .writeMarkdown(id)), .pagesWrite, "запись — своё разрешение")
+        check(request("DELETE /v1/pages/\(page)/markdown").flatMap(LocalAPI.route) == nil)
         check(request("GET /v1/pages/\(page)/assets/../../x").flatMap(LocalAPI.route) == nil, "id вложения — только UUID")
         for route in [LocalAPI.Route.pages, .pageMarkdown(id), .pageAsset(page: id, asset: asset)] {
             checkEqual(LocalAPI.permission(for: route), .pagesRead)

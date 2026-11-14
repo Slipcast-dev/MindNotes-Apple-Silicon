@@ -31,6 +31,7 @@ test('маршруты и их разрешения', () => {
   const permissionCase = Object.fromEntries([...plugins.matchAll(/case (\w+) = "([a-z.]+)"/g)].map((m) => [m[2], m[1]]));
   const routeCase = { '/v1/status': 'status', '/v1/pair': 'pair', '/v1/targets': 'targets', '/v1/clips': 'clips', '/v1/pages/{id}/open': 'openPage',
     '/v1/pages': 'pages', '/v1/pages/{id}/markdown': 'pageMarkdown', '/v1/pages/{id}/assets/{asset}': 'pageAsset' };
+  const routeCaseFor = (r) => (r.method === 'PUT' && r.path === '/v1/pages/{id}/markdown' ? 'writeMarkdown' : routeCase[r.path]);
   // Маршрут с параметрами: метод, число частей пути и неизменяемые части — в одном условии `route(_:)`.
   const paramRule = (method, path) => {
     const parts = path.split('/').filter(Boolean);
@@ -38,7 +39,7 @@ test('маршруты и их разрешения', () => {
     return new RegExp(`request\\.method == "${method}", parts\\.count == ${parts.length}, ${fixed}`);
   };
   for (const r of contract.routes) {
-    const name = routeCase[r.path];
+    const name = routeCaseFor(r);
     assert.ok(name, `маршрут ${r.path} описан в тесте`);
     if (!r.path.includes('{')) assert.ok(localAPI.includes(`case ("${r.method}", "${r.path}"): return .${name}`), r.path);
     else assert.ok(paramRule(r.method, r.path).test(localAPI), r.path);

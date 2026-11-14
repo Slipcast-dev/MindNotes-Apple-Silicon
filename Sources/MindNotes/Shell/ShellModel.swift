@@ -2133,6 +2133,27 @@ final class ShellModel: ObservableObject {
         try await session?.coordinator.flush()
     }
 
+    /// Запись плагином в страницу (ADR-0019, п. 13): прежний текст — версией в истории, затем новые блоки.
+    /// Открытая страница меняется через редактор, как «Восстановить версию»: правку можно отменить и там.
+    func applyPluginBlocks(pageID: UUID, current: [Block], target: [Block], label: String) async throws {
+        if let editorSession = session?.editor, editorSession.pageID == pageID {
+            try await editorSession.restore(revisionBlocks: target, label: label)
+            editor?.controller.reloadFromSession()
+            return
+        }
+        guard let store else { return }
+        let now = SystemClock().nowMillis()
+        _ = try await store.saveRevision(pageID: pageID, reason: "Перед правками извне", blocks: current, id: UUID(), now: now)
+        let before = Dictionary(current.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let keep = Set(target.map(\.id))
+        var batch = SaveBatch()
+        for block in current where !keep.contains(block.id) { batch.deletes.insert(block.id) }
+        for block in target where before[block.id] != block { batch.upserts[block.id] = block }
+        batch.touchedPages.insert(pageID)
+        try await store.commit(batch)
+        _ = try await store.saveRevision(pageID: pageID, reason: label, blocks: target, id: UUID(), now: now)
+    }
+
     /// Запись извне (плагин, ADR-0019): пространство уже изменено через хранилище, оболочка перечитывает страницы и теги.
     func refreshAfterExternalWrite() async throws {
         guard let session, let store else { return }

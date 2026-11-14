@@ -10,6 +10,8 @@ enum PluginPermission: String, CaseIterable, Equatable, Codable {
     case tagsWrite = "tags.write"
     /// Чтение текста страниц в Markdown и их вложений (кроме закрытых паролем): синхронизация, резервные копии.
     case pagesRead = "pages.read"
+    /// Перенос правок в текстовые блоки страниц (кроме закрытых паролем); перед записью — версия в истории.
+    case pagesWrite = "pages.write"
 }
 
 struct PluginManifest: Equatable {

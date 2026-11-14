@@ -1798,3 +1798,8 @@
 "Если вы не нажимали «Подключить» в программе плагина, откажитесь." = "If you did not click Connect in the plugin program, deny.";
 "читать текст страниц и их вложения (кроме закрытых паролем)" = "read the text of pages and their attachments (except password-locked ones)";
 "Подключение — кнопкой «Подключить» в программе плагина" = "Connect it with the Connect button in the plugin program";
+"Нужны поля markdown и baseRev." = "The markdown and baseRev fields are required.";
+"Страницу изменили в MindNotes: правки не перенесены." = "The page was changed in MindNotes: the edits were not applied.";
+"Страница слишком большая для переноса правок." = "The page is too large to apply edits.";
+"«%@»: перенесены правки из %@." = "“%@”: applied edits from %@.";
+"переносить правки в текст страниц (кроме закрытых паролем); прежний текст остаётся в истории" = "apply edits to the text of pages (except password-locked ones); the previous text stays in history";

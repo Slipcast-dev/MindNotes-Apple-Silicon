@@ -346,6 +346,23 @@ final class PluginHost: ObservableObject {
                                    "report": page.report.map { ["reason": $0.reason, "count": $0.count] as [String: Any] }])
             case .failure(let failure): return Self.response(failure)
             }
+        case .writeMarkdown(let id):
+            guard let body = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
+                  let markdown = body["markdown"] as? String, let base = (body["baseRev"] as? NSNumber)?.int64Value else {
+                return .error(400, "bad_request", L("Нужны поля markdown и baseRev."))
+            }
+            let source = String(((body["source"] as? String) ?? plugin.manifest.name).prefix(40))
+            switch await shell.pluginWrite(id, markdown: markdown, baseRev: base, source: source) {
+            case .success(let write):
+                return .json(200, ["page": Self.json(write.page), "changed": write.result.changed, "added": write.result.added,
+                                   "removed": write.result.removed, "kept": write.result.kept])
+            case .failure(.changed(let rev)):
+                return .json(409, ["error": ["code": "changed", "message": L("Страницу изменили в MindNotes: правки не перенесены.")], "rev": rev])
+            case .failure(.tooLarge):
+                return .error(413, "too_large", L("Страница слишком большая для переноса правок."))
+            case .failure(.read(let failure)):
+                return Self.response(failure)
+            }
         case .pageAsset(let id, let asset):
             switch await shell.pluginAsset(page: id, asset: asset) {
             case .success(let data): return LocalAPI.Response(status: 200, body: data, contentType: "application/octet-stream")
@@ -428,6 +445,7 @@ final class PluginHost: ObservableObject {
         case .assetsCreate: return L("добавлять картинки во вложения")
         case .tagsWrite: return L("ставить теги на созданные страницы")
         case .pagesRead: return L("читать текст страниц и их вложения (кроме закрытых паролем)")
+        case .pagesWrite: return L("переносить правки в текст страниц (кроме закрытых паролем); прежний текст остаётся в истории")
         }
     }
 

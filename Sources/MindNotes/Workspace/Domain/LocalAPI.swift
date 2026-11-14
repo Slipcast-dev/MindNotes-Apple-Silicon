@@ -9,7 +9,7 @@ enum LocalAPI {
     static let maxBody = 40 * 1024 * 1024
     /// Что умеет это приложение (ADR-0019, п. 9). Клиент подстраивается под список, а не под номер версии MindNotes:
     /// так плагин обновляется независимо. Новая возможность — новое слово; `api` растёт только при несовместимости.
-    static let features = ["clips", "targets", "openPage", "remoteImages", "pagesRead"]
+    static let features = ["clips", "targets", "openPage", "remoteImages", "pagesRead", "pagesWrite"]
     /// Вложение отдаётся целиком; больше — не отдаётся (у GitHub предел файла — 100 МБ).
     static let maxAssetBytes = 50 * 1024 * 1024
 
@@ -115,6 +115,7 @@ enum LocalAPI {
         case openPage(UUID)
         case pages
         case pageMarkdown(UUID)
+        case writeMarkdown(UUID)
         case pageAsset(page: UUID, asset: UUID)
     }
 
@@ -134,6 +135,9 @@ enum LocalAPI {
         }
         if request.method == "GET", parts.count == 4, parts[0] == "v1", parts[1] == "pages", parts[3] == "markdown", let id = UUID(uuidString: String(parts[2])) {
             return .pageMarkdown(id)
+        }
+        if request.method == "PUT", parts.count == 4, parts[0] == "v1", parts[1] == "pages", parts[3] == "markdown", let id = UUID(uuidString: String(parts[2])) {
+            return .writeMarkdown(id)
         }
         if request.method == "GET", parts.count == 5, parts[0] == "v1", parts[1] == "pages", parts[3] == "assets",
            let id = UUID(uuidString: String(parts[2])), let asset = UUID(uuidString: String(parts[4])) {
@@ -159,6 +163,7 @@ enum LocalAPI {
         case .clips: return .pagesCreate
         case .openPage: return .pagesOpen
         case .pages, .pageMarkdown, .pageAsset: return .pagesRead
+        case .writeMarkdown: return .pagesWrite
         }
     }
 
@@ -188,7 +193,7 @@ enum LocalAPI {
             head += "Content-Type: \(contentType)\r\nContent-Length: \(body.count)\r\nConnection: close\r\nCache-Control: no-store\r\n"
             if let origin, origin != "null", LocalAPI.isAllowedOrigin(origin) {
                 head += "Access-Control-Allow-Origin: \(origin)\r\nVary: Origin\r\n"
-                head += "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type\r\n"
+                head += "Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type\r\n"
                 head += "Access-Control-Allow-Private-Network: true\r\nAccess-Control-Max-Age: 600\r\n"
             }
             var out = Data((head + "\r\n").utf8)

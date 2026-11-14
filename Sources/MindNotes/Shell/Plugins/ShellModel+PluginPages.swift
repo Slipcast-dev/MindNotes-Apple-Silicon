@@ -77,6 +77,56 @@ extension ShellModel {
         }
     }
 
+    struct PageWrite {
+        var page: ReadablePage
+        var result: PageTextMerge.Result
+    }
+
+    enum PageWriteFailure: Error {
+        case read(PageReadFailure)
+        /// Страницу изменили в MindNotes после того, как плагин её прочитал: решает пользователь.
+        case changed(rev: Int64)
+        case tooLarge
+    }
+
+    /// Правки из Markdown в текстовые блоки страницы (`PageTextMerge`). `baseRev` — номер правки, который плагин видел:
+    /// если страница с тех пор менялась, ничего не записывается. Закрытые паролем, базы и записи — недоступны.
+    func pluginWrite(_ id: UUID, markdown: String, baseRev: Int64, source: String) async -> Result<PageWrite, PageWriteFailure> {
+        await withCheckedContinuation { (done: CheckedContinuation<Result<PageWrite, PageWriteFailure>, Never>) in
+            enqueue {
+                guard let store = self.store, self.isOpen else { done.resume(returning: .failure(.read(.noWorkspace))); return }
+                guard let page = self.pages.first(where: { $0.id == id }), self.isPluginReadable(page) else {
+                    done.resume(returning: .failure(.read(.notFound))); return
+                }
+                do {
+                    try await self.flushForPlugin()
+                    guard let fresh = try await store.page(id) else { done.resume(returning: .failure(.read(.notFound))); return }
+                    guard fresh.contentRev == baseRev else { done.resume(returning: .failure(.changed(rev: fresh.contentRev))); return }
+                    let current = BlockDocument(pageID: id, blocks: try await store.blocks(ofPage: id)).blocks
+                    let merged: PageTextMerge.Result
+                    do {
+                        merged = try PageTextMerge.merge(blocks: current, pageID: id, markdown: markdown,
+                                                         now: SystemClock().nowMillis(), newID: { UUID() })
+                    } catch {
+                        done.resume(returning: .failure(.tooLarge)); return
+                    }
+                    if !merged.isEmpty {
+                        try await self.applyPluginBlocks(pageID: id, current: current, target: merged.blocks,
+                                                         label: String(format: "Правки из %@", source))
+                        try await self.refreshAfterExternalWrite()
+                        self.notice = String(format: L("«%@»: перенесены правки из %@."), page.title, source)
+                    }
+                    var readable = self.readablePages().first { $0.id == id } ?? ReadablePage(
+                        id: id, parentID: nil, title: page.title, path: page.title, isFolder: page.isFolder, updatedAt: 0, contentRev: 0)
+                    if let updated = try await store.page(id) { readable.updatedAt = updated.updatedAt; readable.contentRev = updated.contentRev }
+                    done.resume(returning: .success(PageWrite(page: readable, result: merged)))
+                } catch {
+                    done.resume(returning: .failure(.read(.failed(Self.describe(error)))))
+                }
+            }
+        }
+    }
+
     /// Вложение отдаётся, только если оно есть в тексте этой страницы: так плагин не прочитает чужой файл по id.
     func pluginAsset(page id: UUID, asset: UUID) async -> Result<Data, PageReadFailure> {
         switch await pluginMarkdown(id, assetFolder: "files") {

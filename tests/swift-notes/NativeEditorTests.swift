@@ -921,6 +921,28 @@ func runPageLinkTests() async {
 @MainActor
 func runAttachmentTests() async {
     _ = NSApplication.shared
+    await test("Изображение: отрисовка до поиска файлов не делает картинку «недоступной»") {
+        try await withTempDir { dir in
+            let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "до")])
+            r.controller.addAttachment = { url in try await r.ws.addAsset(copying: url, now: 1) }
+            let png = dir.appendingPathComponent("картинка.png")
+            let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 8, pixelsHigh: 4, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+            try rep.representation(using: .png, properties: [:])!.write(to: png)
+            // Как при создании редактора: страница рисуется, а поиска файлов ещё нет.
+            r.controller.assetURL = nil
+            r.caret(0, 2)
+            r.controller.insertFiles([png])
+            for _ in 0..<40 where !r.doc.blocks.contains(where: { $0.type == .image }) { try await Task.sleep(nanoseconds: 50_000_000) }
+            guard let image = r.doc.blocks.first(where: { $0.type == .image })?.assetID else { check(false, "картинка вставлена"); return }
+            r.controller.renderAll()
+            check(!r.controller.isAssetUnavailable(image), "без поиска файлов картинка не помечается недоступной")
+            r.controller.assetURL = { try? r.ws.assetFileURLSync($0) }
+            r.controller.renderAll()
+            try await Task.sleep(nanoseconds: 500_000_000) // миниатюра грузится вне главного потока
+            check(!r.controller.isAssetUnavailable(image), "с поиском файлов картинка загружается")
+            try await r.close()
+        }
+    }
     await test("Изображение и файл: копия в пространстве, блок, связь, архив, отмена") {
         try await withTempDir { dir in
             let r = try await EditorRig(dir: dir, blocks: [(.paragraph, "до"), (.paragraph, "после")])
