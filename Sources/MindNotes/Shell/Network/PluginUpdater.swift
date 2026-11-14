@@ -178,8 +178,11 @@ final class PluginUpdater: ObservableObject {
                         return
                     }
                 }
-                let target = thirdParty ? nil : PluginHost.shared.installerURL
-                let expectedID = thirdParty ? nil : PluginHost.installerBundleID
+                // Программа плагина ищется по её bundle ID из описания (ADR-0019, п. 14), не только у Web Clipper.
+                let manifest = PluginHost.shared.plugin(id)?.manifest
+                let installerID = manifest.flatMap { PluginHost.shared.installerID(for: $0) }
+                let target = thirdParty ? nil : manifest.flatMap { PluginHost.shared.installerURL(for: $0) }
+                let expectedID = thirdParty ? nil : installerID
                 let installer = try await Task.detached { try Self.stage(image: image, replacing: target, expectedBundleID: expectedID) }.value
                 guard let package = try FileManager.default.contentsOfDirectory(at: installer.appendingPathComponent("Contents/Resources"), includingPropertiesForKeys: nil)
                     .first(where: { $0.pathExtension == PluginManifest.packageExtension }) else { throw UpdateError(L("В образе нет программы-установщика.")) }

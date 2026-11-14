@@ -232,6 +232,21 @@ final class PluginHost: ObservableObject {
     /// Установщик расширений, если он есть на этом Mac.
     var installerURL: URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.installerBundleID) }
 
+    /// Программа-установщик плагина (ADR-0019, п. 14): из поля `installer`, у Web Clipper — известная.
+    func installerID(for manifest: PluginManifest) -> String? {
+        manifest.installer ?? (manifest.id == "minerva.webclipper" ? Self.installerBundleID : nil)
+    }
+
+    func installerURL(for manifest: PluginManifest) -> URL? {
+        installerID(for: manifest).flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+    }
+
+    /// Запустить программу плагина (например, «GitHub для MindNotes»): она работает отдельно от MindNotes.
+    func openProgram(of plugin: Plugin) {
+        guard let url = installerURL(for: plugin.manifest) else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+    }
+
     func openInstaller() {
         guard let url = installerURL else { return }
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
@@ -530,6 +545,9 @@ struct PluginsSettings: View {
                 }
                 if host.isActive(plugin.id) && plugin.manifest.components.isEmpty {
                     // Плагин-программа (без расширения браузера) подключается сама, кнопкой в своём окне.
+                    if host.installerURL(for: plugin.manifest) != nil {
+                        Button("Открыть программу плагина") { host.openProgram(of: plugin) }.buttonStyle(NotesButtonStyle(kind: .plain))
+                    }
                     Text("Подключение — кнопкой «Подключить» в программе плагина").font(.system(size: 11)).foregroundColor(Tokens.muted)
                 } else if host.isActive(plugin.id) {
                     if host.isAutoPairOpen(plugin.id) {

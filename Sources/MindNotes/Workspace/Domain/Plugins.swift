@@ -36,6 +36,9 @@ struct PluginManifest: Equatable {
     /// Репозиторий выпусков плагина на GitHub (`владелец/имя`), если он живёт отдельно от приложения (ADR-0019, п. 10).
     /// Нет поля — выпуски ищутся в репозитории приложения.
     var repository: String?
+    /// Bundle ID программы-установщика плагина (ADR-0019, п. 14): её MindNotes находит, заменяет при обновлении
+    /// и запускает с `--update`. Нет поля — у Web Clipper известный установщик, у остальных — нет.
+    var installer: String?
 
     static func == (a: PluginManifest, b: PluginManifest) -> Bool {
         a.id == b.id && a.version == b.version && a.permissions == b.permissions && a.components == b.components
@@ -77,11 +80,17 @@ struct PluginManifest: Equatable {
             guard isValidRepository(repo) else { return .failure(.badComponent("repository")) }
             repository = repo
         }
-        let manifest = PluginManifest(id: base.id, name: base.name, version: base.version, api: api,
+        var installer: String?
+        if let raw = o["installer"] as? String {
+            guard isValidBundleID(raw) else { return .failure(.badComponent("installer")) }
+            installer = raw
+        }
+        var manifest = PluginManifest(id: base.id, name: base.name, version: base.version, api: api,
                                       summary: (o["description"] as? String).map { String($0.prefix(300)) },
                                       author: (o["author"] as? String).map { String($0.prefix(80)) },
                                       permissions: known, unknownPermissions: unknown, components: components, minApp: base.minApp,
                                       updates: updates, repository: repository)
+        manifest.installer = installer
         return .success(manifest)
     }
 
@@ -161,6 +170,13 @@ struct PluginManifest: Equatable {
     static func isSafeTagPrefix(_ prefix: String) -> Bool {
         (3...40).contains(prefix.count) && prefix.hasSuffix("-v")
             && prefix.allSatisfy { ($0.isASCII && ($0.isLowercase || $0.isNumber)) || $0 == "-" }
+    }
+
+    /// Bundle ID: латиница, цифры, точка и дефис, не меньше двух частей, до 155 символов.
+    static func isValidBundleID(_ value: String) -> Bool {
+        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
+        return (3...155).contains(value.count) && parts.count >= 2 && parts.allSatisfy { !$0.isEmpty }
+            && value.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || ".-".contains($0)) }
     }
 
     /// Путь внутри пакета: без абсолютного начала, `..` и пустых частей.

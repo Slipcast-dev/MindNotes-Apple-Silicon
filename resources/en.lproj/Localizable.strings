@@ -1803,3 +1803,4 @@
 "Страница слишком большая для переноса правок." = "The page is too large to apply edits.";
 "«%@»: перенесены правки из %@." = "“%@”: applied edits from %@.";
 "переносить правки в текст страниц (кроме закрытых паролем); прежний текст остаётся в истории" = "apply edits to the text of pages (except password-locked ones); the previous text stays in history";
+"Открыть программу плагина" = "Open the plugin program";

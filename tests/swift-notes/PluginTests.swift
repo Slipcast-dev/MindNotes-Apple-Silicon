@@ -213,6 +213,16 @@ func runPluginTests() async {
             checkEqual(m.permissions, [.pagesList, .pagesRead])
             check(m.problem(app: AppVersion("1.7.1")) == nil, "новое разрешение понятно этой версии")
         } else { check(false, "описание с pages.read не разобрано") }
+
+        // Программа-установщик плагина (ADR-0019, п. 14): bundle ID, по которому MindNotes находит и обновляет её.
+        let withInstaller = #"{"id":"minerva.github","name":"GitHub","kind":"plugin","api":1,"permissions":["pages.read"],"installer":"local.personal.MindNotes.GitHub"}"#
+        if case .success(let m) = PluginManifest.parse(Data(withInstaller.utf8)) { checkEqual(m.installer, "local.personal.MindNotes.GitHub") }
+        else { check(false, "описание с installer не разобрано") }
+        for bad in ["", "one", "a..b", "../x", "a.b/c", "a b.c", String(repeating: "a.", count: 90)] {
+            let json = #"{"id":"x.y","name":"X","kind":"plugin","installer":"\#(bad)"}"#
+            if case .success = PluginManifest.parse(Data(json.utf8)) { check(false, "отклонено: \(bad)") }
+        }
+        if case .success(let m) = PluginManifest.parse(Data(readJSON.utf8)) { check(m.installer == nil, "поле необязательно") }
     }
 
     await test("Локальный API: только расширения браузера, CORS только для них") {
